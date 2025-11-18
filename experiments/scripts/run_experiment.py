@@ -402,9 +402,23 @@ def main():
         )
         
         output_config = config.get("output", {})
+        eval_config = config.get("evaluation", {})
+        batch_size = eval_config.get("batch_size")
+        
+        # Debug output
+        print(f"\n{'='*70}")
+        print("EVALUATION CONFIG DEBUG")
+        print(f"{'='*70}")
+        print(f"eval_config: {eval_config}")
+        print(f"batch_size: {batch_size}")
+        print(f"batch_size type: {type(batch_size)}")
+        print(f"batch_size > 1: {batch_size and batch_size > 1}")
+        print(f"{'='*70}\n")
+        
         results = evaluator.evaluate(
             save_predictions=output_config.get("save_predictions", False),
-            output_path=output_config.get("output_path")
+            output_path=output_config.get("output_path"),
+            batch_size=batch_size
         )
         
         # Print results

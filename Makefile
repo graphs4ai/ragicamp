@@ -30,7 +30,9 @@ help:
 	@echo ""
 	@echo "🚀 EVALUATION (Config-Based)"
 	@echo "  make eval-baseline-quick  - Quick test (10 examples, GPU)"
+	@echo "  make eval-baseline-quick-batch - Quick test with batching (faster!)"
 	@echo "  make eval-baseline-full   - Full eval (100 examples, GPU, all metrics)"
+	@echo "  make eval-baseline-full-batch  - Full eval with batching (2x faster!)"
 	@echo "  make eval-baseline-cpu    - CPU evaluation (10 examples, slower)"
 	@echo "  make eval-rag             - RAG evaluation (requires indexed corpus)"
 	@echo "  make eval-rag-faithfulness - RAG with faithfulness & hallucination metrics"
@@ -283,6 +285,15 @@ eval-baseline-quick:
 		--config experiments/configs/nq_baseline_gemma2b_quick.yaml \
 		--mode eval
 
+eval-baseline-quick-batch:
+	@echo "🚀 Running baseline evaluation with batch processing (quick test)"
+	@echo "📋 Config: experiments/configs/nq_baseline_gemma2b_quick_batch.yaml"
+	@echo "⏱️  ~1-2 minutes on GPU (faster with batching!)"
+	@echo ""
+	uv run python experiments/scripts/run_experiment.py \
+		--config experiments/configs/nq_baseline_gemma2b_quick_batch.yaml \
+		--mode eval
+
 eval-baseline-cpu:
 	@echo "🚀 Running baseline evaluation on CPU"
 	@echo "📋 Config: experiments/configs/nq_baseline_gemma2b_cpu.yaml"
@@ -300,6 +311,15 @@ eval-baseline-full:
 	@echo ""
 	uv run python experiments/scripts/run_experiment.py \
 		--config experiments/configs/nq_baseline_gemma2b_full.yaml \
+		--mode eval
+
+eval-baseline-full-batch:
+	@echo "🚀 Running baseline evaluation with batch processing (full)"
+	@echo "📋 Config: experiments/configs/nq_baseline_gemma2b_full_batch.yaml"
+	@echo "⏱️  ~10-15 minutes on GPU (2x faster with batching!)"
+	@echo ""
+	uv run python experiments/scripts/run_experiment.py \
+		--config experiments/configs/nq_baseline_gemma2b_full_batch.yaml \
 		--mode eval
 
 eval-baseline-all-metrics:

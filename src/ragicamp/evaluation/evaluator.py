@@ -8,6 +8,7 @@ from tqdm import tqdm
 from ragicamp.agents.base import RAGAgent
 from ragicamp.datasets.base import QADataset
 from ragicamp.metrics.base import Metric
+from ragicamp.utils.paths import ensure_dir
 
 
 class Evaluator:
@@ -41,6 +42,7 @@ class Evaluator:
         num_examples: Optional[int] = None,
         save_predictions: bool = False,
         output_path: Optional[str] = None,
+        batch_size: Optional[int] = None,
         **kwargs: Any
     ) -> Dict[str, Any]:
         """Evaluate the agent on the dataset.
@@ -49,6 +51,7 @@ class Evaluator:
             num_examples: Evaluate on first N examples (None = all)
             save_predictions: Whether to save predictions
             output_path: Path to save results
+            batch_size: Number of examples to process in parallel (None = sequential)
             **kwargs: Additional evaluation parameters
             
         Returns:
@@ -66,15 +69,54 @@ class Evaluator:
         responses = []
         
         print(f"Evaluating on {len(examples)} examples...")
-        for example in tqdm(examples, desc="Generating answers"):
-            # Generate answer
-            response = self.agent.answer(example.question)
+        print(f"DEBUG: batch_size = {batch_size}, type = {type(batch_size)}")
+        
+        # Use batch processing if batch_size is specified
+        if batch_size and batch_size > 1:
+            print(f"Using batch processing with batch_size={batch_size}")
+            print(f"Total batches: {(len(examples) + batch_size - 1) // batch_size}")
             
-            # Store
-            predictions.append(response.answer)
-            references.append(example.answers)
-            questions.append(example.question)
-            responses.append(response)
+            import time
+            batch_times = []
+            
+            # Process in batches
+            for i in tqdm(range(0, len(examples), batch_size), desc="Processing batches"):
+                batch_start = time.time()
+                
+                batch_examples = examples[i:i+batch_size]
+                batch_queries = [ex.question for ex in batch_examples]
+                
+                # Batch generate answers
+                batch_responses = self.agent.batch_answer(batch_queries, **kwargs)
+                
+                batch_time = time.time() - batch_start
+                batch_times.append(batch_time)
+                
+                # Store results
+                for example, response in zip(batch_examples, batch_responses):
+                    predictions.append(response.answer)
+                    references.append(example.answers)
+                    questions.append(example.question)
+                    responses.append(response)
+            
+            # Print timing stats
+            if batch_times:
+                avg_time = sum(batch_times) / len(batch_times)
+                print(f"\nBatch processing stats:")
+                print(f"  Average time per batch: {avg_time:.2f}s")
+                print(f"  Average time per question: {avg_time / batch_size:.2f}s")
+                print(f"  Throughput: {batch_size / avg_time:.2f} questions/second")
+        else:
+            # Sequential processing (original behavior)
+            for example in tqdm(examples, desc="Generating answers"):
+                # Generate answer
+                response = self.agent.answer(example.question)
+                
+                # Store
+                predictions.append(response.answer)
+                references.append(example.answers)
+                questions.append(example.question)
+                responses.append(response)
         
         # Compute metrics
         print("\nComputing metrics...")
@@ -234,6 +276,9 @@ class Evaluator:
         # Determine output directory and base name
         output_dir = Path(output_path).parent
         base_name = Path(output_path).stem
+        
+        # Ensure output directory exists
+        ensure_dir(output_dir)
         
         agent_name = results.get("agent_name", "unknown")
         dataset_name = results.get("dataset_name", "unknown")

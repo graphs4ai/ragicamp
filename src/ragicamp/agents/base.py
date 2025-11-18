@@ -71,6 +71,21 @@ class RAGAgent(ABC):
         """
         pass
     
+    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+        """Generate answers for multiple queries (batch processing).
+        
+        Default implementation: loops through queries one by one.
+        Subclasses can override for true parallel/batch processing.
+        
+        Args:
+            queries: List of input questions
+            **kwargs: Additional arguments specific to the agent
+            
+        Returns:
+            List of RAGResponse objects, one per query
+        """
+        return [self.answer(query, **kwargs) for query in queries]
+    
     def reset(self) -> None:
         """Reset agent state (useful for stateful agents)."""
         pass

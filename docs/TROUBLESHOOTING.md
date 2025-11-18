@@ -2,6 +2,17 @@
 
 Common issues and solutions for RAGiCamp.
 
+## Quick Fixes
+
+| Issue | Solution |
+|-------|----------|
+| `FileNotFoundError` on save | **Fixed automatically** - Uses `ensure_dir()` |
+| Matplotlib backend error | **Fixed automatically** - Sets backend to `'Agg'` |
+| CUDA/GPU not found | Use CPU configs or set `device: cpu` |
+| Out of memory | Use `load_in_8bit: true` or reduce batch size |
+
+See detailed guides: [Matplotlib Issues](guides/TROUBLESHOOTING_MATPLOTLIB.md)
+
 ---
 
 ## NumPy Version Compatibility

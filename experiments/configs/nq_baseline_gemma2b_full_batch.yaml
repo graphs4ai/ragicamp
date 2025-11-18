@@ -1,0 +1,37 @@
+# Natural Questions Baseline Evaluation with Batch Processing
+# Full evaluation with 100 examples using optimized batch generation
+# ~10-15 minutes on GPU (2x faster than non-batch version!)
+
+agent:
+  type: direct_llm
+  name: "gemma_2b_baseline_full_batch"
+
+model:
+  model_name: "google/gemma-2-2b-it"
+  device: "cuda"  # Use "cpu" if no GPU available
+  load_in_8bit: true  # Reduces memory usage
+
+dataset:
+  name: "natural_questions"
+  split: "validation"
+  num_examples: 100
+  filter_no_answer: true  # Only questions with explicit answers
+
+# Batch processing configuration (NEW!)
+evaluation:
+  batch_size: 8  # Process 8 questions at once
+  # Adjust batch_size based on GPU memory:
+  # - 4: Safe for 8GB GPU
+  # - 8: Good for 16GB GPU
+  # - 16: For 24GB+ GPU
+
+metrics:
+  - exact_match
+  - f1
+  - bertscore
+  - bleurt
+
+output:
+  save_predictions: true
+  output_path: "outputs/gemma_2b_baseline_full_batch_results.json"
+

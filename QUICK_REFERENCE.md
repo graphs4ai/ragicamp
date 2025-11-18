@@ -8,8 +8,14 @@ cd /home/gabriel_frontera_cloudwalk_io/ragicamp
 # Quick test (2-3 min)
 make eval-baseline-quick
 
+# Quick test with batching (1-2 min - FASTER!)
+make eval-baseline-quick-batch
+
 # Full evaluation (20-25 min)
 make eval-baseline-full
+
+# Full with batching (10-15 min - 2X FASTER!)
+make eval-baseline-full-batch
 
 # Compare with RAG
 make index-wiki-small    # Once
@@ -139,6 +145,13 @@ model:
   model_name: "meta-llama/Llama-2-7b-chat-hf"
 ```
 
+### Enable Batch Processing (2x faster!)
+```yaml
+evaluation:
+  batch_size: 8  # Process 8 questions at once
+  # Adjust based on GPU memory: 4 (8GB), 8 (16GB), 16 (24GB+)
+```
+
 ### Select Metrics
 ```yaml
 metrics:
@@ -153,6 +166,28 @@ model:
   device: "cpu"
   load_in_8bit: false
 ```
+
+---
+
+## 🛠️ Utilities
+
+### Path Utilities (Avoid FileNotFoundError)
+
+```python
+from ragicamp.utils import ensure_dir, safe_write_json
+
+# Ensure directory exists before writing
+ensure_dir("outputs/results.json")
+
+# Or use safe_write_json (recommended)
+safe_write_json(data, "outputs/results.json", indent=2)
+
+# Setup all standard directories
+from ragicamp.utils import ensure_output_dirs
+ensure_output_dirs()  # Creates outputs/, artifacts/, data/, etc.
+```
+
+See: `examples/path_utilities_example.py`
 
 ---
 

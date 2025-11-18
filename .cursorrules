@@ -206,9 +206,15 @@ class MyMetric(Metric):
 ```python
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder
+from ragicamp.utils.paths import ensure_dir, safe_write_json
 
 context_text = ContextFormatter.format_numbered(docs)
 prompt = PromptBuilder.create_default().build_prompt(query, context_text)
+
+# Ensure directories exist before writing
+ensure_dir("outputs/results.json")
+# Or use safe_write_json to do both
+safe_write_json(data, "outputs/results.json", indent=2)
 ```
 
 **Use proper types:**

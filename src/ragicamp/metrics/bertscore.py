@@ -1,6 +1,13 @@
 """BERTScore metric implementation."""
 
+import os
 from typing import Any, Dict, List, Union
+
+# Fix matplotlib backend BEFORE any imports that might use it
+# This prevents errors when running in non-interactive environments (scripts vs notebooks)
+if 'MPLBACKEND' in os.environ:
+    # Change to non-interactive backend for scripts
+    os.environ['MPLBACKEND'] = 'Agg'
 
 from ragicamp.metrics.base import Metric
 

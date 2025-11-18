@@ -18,6 +18,10 @@ dataset:
   num_examples: 5000
   filter_no_answer: true  # Remove questions without explicit answers
 
+# Batch processing for faster evaluation
+evaluation:
+  batch_size: 8  # Process 8 questions at once (adjust based on GPU memory)
+
 metrics:
   - exact_match
   - f1

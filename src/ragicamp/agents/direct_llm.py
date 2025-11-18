@@ -1,6 +1,6 @@
 """Direct LLM agent - Baseline 1: No retrieval, just ask the LLM."""
 
-from typing import Any
+from typing import Any, List
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
 from ragicamp.models.base import LanguageModel
@@ -58,4 +58,36 @@ class DirectLLMAgent(RAGAgent):
             context=context,
             metadata={"agent_type": "direct_llm"}
         )
+    
+    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+        """Generate answers for multiple queries using batch processing.
+        
+        This is much faster than calling answer() in a loop because it
+        processes all queries in a single forward pass through the model.
+        
+        Args:
+            queries: List of input questions
+            **kwargs: Additional generation parameters
+            
+        Returns:
+            List of RAGResponse objects, one per query
+        """
+        # Build prompts for all queries
+        prompts = [self.prompt_builder.build_direct_prompt(q) for q in queries]
+        
+        # Batch generate (single forward pass!)
+        answers = self.model.generate(prompts, **kwargs)
+        
+        # Create responses
+        responses = []
+        for query, answer in zip(queries, answers):
+            context = RAGContext(query=query)
+            response = RAGResponse(
+                answer=answer,
+                context=context,
+                metadata={"agent_type": "direct_llm", "batch_processing": True}
+            )
+            responses.append(response)
+        
+        return responses
 
