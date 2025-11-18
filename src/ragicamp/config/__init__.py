@@ -1,20 +1,29 @@
 """Configuration management for experiments."""
 
-from ragicamp.config.experiment import (
+from ragicamp.config.loader import ConfigLoader, create_config_template
+from ragicamp.config.schemas import (
     ExperimentConfig,
     ModelConfig,
+    DatasetConfig,
+    AgentConfig,
+    MetricConfig,
     RetrieverConfig,
     EvaluationConfig,
-    create_baseline_config,
-    create_fixed_rag_config,
+    OutputConfig,
+    TrainingConfig,
 )
 
 __all__ = [
+    "ConfigLoader",
     "ExperimentConfig",
-    "ModelConfig", 
+    "ModelConfig",
+    "DatasetConfig",
+    "AgentConfig",
+    "MetricConfig",
     "RetrieverConfig",
     "EvaluationConfig",
-    "create_baseline_config",
-    "create_fixed_rag_config",
+    "OutputConfig",
+    "TrainingConfig",
+    "create_config_template",
 ]
 

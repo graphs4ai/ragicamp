@@ -48,6 +48,11 @@ help:
 	@echo "  make format               - Format code (black + isort)"
 	@echo "  make clean                - Clean generated files"
 	@echo ""
+	@echo "🔍 CONFIGURATION"
+	@echo "  make validate-config CONFIG=path/to/config.yaml"
+	@echo "  make validate-all-configs  - Validate all experiment configs"
+	@echo "  make create-config OUTPUT=my_exp.yaml [TYPE=baseline|rag|llm_judge]"
+	@echo ""
 	@echo "📝 TIPS"
 	@echo "  - First time? Run: make setup"
 	@echo "  - Quick start GPU: make eval-baseline-quick"
@@ -569,4 +574,24 @@ analyze-results:
 	else \
 		echo "⚠️  No results found. Run an evaluation first!"; \
 	fi
+
+
+
+# ============================================================================
+# Configuration Management
+# ============================================================================
+
+validate-config:
+	@echo "🔍 Validating configuration..."
+	uv run python scripts/validate_config.py $(CONFIG)
+
+validate-all-configs:
+	@echo "🔍 Validating all experiment configs..."
+	@uv run python scripts/validate_config.py experiments/configs/*.yaml
+
+create-config:
+	@echo "📝 Creating config template..."
+	@TYPE=$(if $(TYPE),$(TYPE),baseline); \
+	OUTPUT=$(if $(OUTPUT),$(OUTPUT),my_experiment.yaml); \
+	uv run python scripts/create_config.py $$OUTPUT --type $$TYPE
 

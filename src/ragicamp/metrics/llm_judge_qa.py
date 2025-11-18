@@ -41,6 +41,10 @@ class LLMJudgeQAMetric(Metric):
             self.categories = ["correct", "incorrect"]
         else:  # ternary
             self.categories = ["correct", "partially_correct", "incorrect"]
+        
+        # Cache for judgments to avoid redundant API calls
+        # Key: f"{prediction}:::{reference}:::{question}", Value: (category, score)
+        self._judgment_cache: Dict[str, tuple] = {}
     
     def compute(
         self,
@@ -69,12 +73,21 @@ class LLMJudgeQAMetric(Metric):
         scores = []
         categories_count = {cat: 0 for cat in self.categories}
         
-        # Prepare all prompts first
+        # Clear cache for new evaluation
+        self._judgment_cache.clear()
+        
+        # Prepare all prompts and cache keys
         all_prompts = []
+        cache_keys = []
         for i, (pred, ref) in enumerate(zip(predictions, references)):
             # Handle multiple references
             refs = [ref] if isinstance(ref, str) else ref
             question = questions[i] if questions and i < len(questions) else None
+            
+            # Create cache key (unique identifier for this prediction-reference-question tuple)
+            ref_str = str(refs)
+            cache_key = f"{pred}:::{ref_str}:::{question}"
+            cache_keys.append(cache_key)
             
             # Create judgment prompt
             prompt = self._create_judgment_prompt(
@@ -90,6 +103,7 @@ class LLMJudgeQAMetric(Metric):
         for batch_start in tqdm(range(0, len(all_prompts), self.batch_size), desc="LLM Judge batches"):
             batch_end = min(batch_start + self.batch_size, len(all_prompts))
             batch_prompts = all_prompts[batch_start:batch_end]
+            batch_keys = cache_keys[batch_start:batch_end]
             
             # Get judgments with temperature=0 for consistency
             batch_judgments = self.judge_model.generate(
@@ -99,9 +113,13 @@ class LLMJudgeQAMetric(Metric):
             )
             
             # Process each judgment in the batch
-            for judgment in batch_judgments:
+            for cache_key, judgment in zip(batch_keys, batch_judgments):
                 # Extract categorical judgment
                 category, score = self._extract_judgment(judgment)
+                
+                # Store in cache for later compute_single() calls
+                self._judgment_cache[cache_key] = (category, score)
+                
                 scores.append(score)
                 
                 # Safely increment category count (handle unexpected categories from LLM)
@@ -220,8 +238,10 @@ Your evaluation:"""
         reference: Union[str, List[str]],
         question: str = None,
         **kwargs: Any
-    ) -> Dict[str, float]:
+    ) -> float:
         """Compute metric for a single prediction-reference pair.
+        
+        Uses cache from previous batch compute() call if available to avoid redundant API calls.
         
         Args:
             prediction: Predicted answer
@@ -230,13 +250,26 @@ Your evaluation:"""
             **kwargs: Additional parameters
             
         Returns:
-            Dict with score
+            Score (0.0-1.0)
         """
+        # Create cache key (must match the one in compute())
+        refs = [reference] if isinstance(reference, str) else reference
+        ref_str = str(refs)
+        cache_key = f"{prediction}:::{ref_str}:::{question}"
+        
+        # Check cache first
+        if cache_key in self._judgment_cache:
+            category, score = self._judgment_cache[cache_key]
+            return score
+        
+        # If not in cache, compute it (fallback for standalone calls)
+        # This should rarely happen if compute() was called first
         predictions = [prediction]
         references = [reference] if isinstance(reference, str) else [reference]
         questions = [question] if question else None
         
-        return self.compute(predictions, references, questions, **kwargs)
+        result = self.compute(predictions, references, questions, **kwargs)
+        return result["llm_judge_qa"]
 
 
 # Convenience functions for creating pre-configured judges
