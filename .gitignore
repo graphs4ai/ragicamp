@@ -45,7 +45,6 @@ data/
 *.hdf5
 
 # Models and checkpoints
-models/
 checkpoints/
 *.pt
 *.pth
