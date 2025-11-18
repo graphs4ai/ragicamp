@@ -82,7 +82,15 @@ class LLMJudgeQAMetric(Metric):
             # Extract categorical judgment
             category, score = self._extract_judgment(judgment)
             scores.append(score)
-            categories_count[category] += 1
+            
+            # Safely increment category count (handle unexpected categories from LLM)
+            if category in categories_count:
+                categories_count[category] += 1
+            else:
+                # LLM returned unexpected category - treat as incorrect
+                print(f"Warning: LLM returned unexpected category '{category}' (expected {self.categories}). Treating as 'incorrect'.")
+                categories_count["incorrect"] += 1
+                scores[-1] = 0.0  # Override score to 0.0 for safety
         
         # Compute metrics
         total = len(scores)
@@ -113,12 +121,14 @@ class LLMJudgeQAMetric(Metric):
 - CORRECT: The prediction accurately answers the question with the same information as the reference
 - INCORRECT: The prediction is wrong, incomplete, or doesn't match the reference
 """
+            output_format = "First line: JUDGMENT: [CORRECT/INCORRECT]"
         else:  # ternary
             categories_desc = """
 - CORRECT: The prediction accurately answers the question with the same core information as the reference
 - PARTIALLY_CORRECT: The prediction contains the right information but with extra/missing details, or is close but not exact
 - INCORRECT: The prediction is fundamentally wrong or completely misses the reference answer
 """
+            output_format = "First line: JUDGMENT: [CORRECT/PARTIALLY_CORRECT/INCORRECT]"
         
         # Build reference answers section
         ref_section = "\n".join([f"  - {ref}" for ref in references])
@@ -144,7 +154,7 @@ Instructions:
 4. For descriptive answers: core meaning should match
 
 Output Format:
-First line: JUDGMENT: [CORRECT/PARTIALLY_CORRECT/INCORRECT]
+{output_format}
 Second line: Brief 1-sentence explanation
 
 Your evaluation:"""
@@ -163,7 +173,11 @@ Your evaluation:"""
         if "judgment:" in judgment_lower or "correct" in judgment_lower or "incorrect" in judgment_lower:
             # Check for categories in order of specificity
             if "partially_correct" in judgment_lower or "partially correct" in judgment_lower or "partial" in judgment_lower:
-                return ("partially_correct", 0.5)
+                # For binary mode, map partially_correct to incorrect (conservative)
+                if self.judgment_type == "binary":
+                    return ("incorrect", 0.0)
+                else:
+                    return ("partially_correct", 0.5)
             elif re.search(r'\bcorrect\b', judgment_lower) and not re.search(r'\bincorrect\b', judgment_lower):
                 return ("correct", 1.0)
             elif "incorrect" in judgment_lower:
