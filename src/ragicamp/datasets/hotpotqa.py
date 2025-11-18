@@ -1,6 +1,7 @@
 """HotpotQA dataset loader."""
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from datasets import load_dataset
 
@@ -14,16 +15,31 @@ class HotpotQADataset(QADataset):
     to answer questions (multi-hop reasoning).
     """
     
-    def __init__(self, split: str = "train", distractor: bool = True, **kwargs: Any):
+    def __init__(
+        self, 
+        split: str = "train",
+        distractor: bool = True,
+        cache_dir: Optional[Path] = None,
+        use_cache: bool = True,
+        **kwargs: Any
+    ):
         """Initialize HotpotQA dataset.
         
         Args:
             split: Dataset split (train/validation)
             distractor: Whether to use distractor setting (with irrelevant contexts)
+            cache_dir: Optional directory to cache processed datasets
+            use_cache: Whether to try loading from cache first
             **kwargs: Additional configuration
         """
-        super().__init__(name="hotpotqa", split=split, **kwargs)
+        super().__init__(name="hotpotqa", split=split, cache_dir=cache_dir, **kwargs)
         self.distractor = distractor
+        
+        # Try loading from cache first
+        if use_cache and self.load_from_cache():
+            return
+        
+        # Otherwise load from HuggingFace
         self.load()
     
     def load(self) -> None:

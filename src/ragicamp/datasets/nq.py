@@ -1,6 +1,7 @@
 """Natural Questions dataset loader."""
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from datasets import load_dataset
 
@@ -14,14 +15,28 @@ class NaturalQuestionsDataset(QADataset):
     answers from Wikipedia articles.
     """
     
-    def __init__(self, split: str = "train", **kwargs: Any):
+    def __init__(
+        self, 
+        split: str = "train",
+        cache_dir: Optional[Path] = None,
+        use_cache: bool = True,
+        **kwargs: Any
+    ):
         """Initialize NQ dataset.
         
         Args:
             split: Dataset split (train/validation)
+            cache_dir: Optional directory to cache processed datasets
+            use_cache: Whether to try loading from cache first
             **kwargs: Additional configuration
         """
-        super().__init__(name="natural_questions", split=split, **kwargs)
+        super().__init__(name="natural_questions", split=split, cache_dir=cache_dir, **kwargs)
+        
+        # Try loading from cache first
+        if use_cache and self.load_from_cache():
+            return
+        
+        # Otherwise load from HuggingFace
         self.load()
     
     def load(self) -> None:

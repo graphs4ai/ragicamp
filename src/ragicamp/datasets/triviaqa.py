@@ -1,6 +1,7 @@
 """TriviaQA dataset loader."""
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from datasets import load_dataset
 
@@ -14,16 +15,31 @@ class TriviaQADataset(QADataset):
     and web search results.
     """
     
-    def __init__(self, split: str = "train", subset: str = "unfiltered", **kwargs: Any):
+    def __init__(
+        self, 
+        split: str = "train",
+        subset: str = "unfiltered",
+        cache_dir: Optional[Path] = None,
+        use_cache: bool = True,
+        **kwargs: Any
+    ):
         """Initialize TriviaQA dataset.
         
         Args:
             split: Dataset split (train/validation)
             subset: Dataset subset (unfiltered/filtered)
+            cache_dir: Optional directory to cache processed datasets
+            use_cache: Whether to try loading from cache first
             **kwargs: Additional configuration
         """
-        super().__init__(name="triviaqa", split=split, **kwargs)
+        super().__init__(name="triviaqa", split=split, cache_dir=cache_dir, **kwargs)
         self.subset = subset
+        
+        # Try loading from cache first
+        if use_cache and self.load_from_cache():
+            return
+        
+        # Otherwise load from HuggingFace
         self.load()
     
     def load(self) -> None:

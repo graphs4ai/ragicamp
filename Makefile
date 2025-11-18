@@ -14,6 +14,14 @@ help:
 	@echo "  make setup                - Full setup (install + verify)"
 	@echo "  make verify-install       - Verify all dependencies are working"
 	@echo ""
+	@echo "📚 DATASETS"
+	@echo "  make download-nq          - Download Natural Questions (validation)"
+	@echo "  make download-nq-full     - Download Natural Questions (all splits)"
+	@echo "  make download-triviaqa    - Download TriviaQA (validation)"
+	@echo "  make download-hotpotqa    - Download HotpotQA (validation)"
+	@echo "  make download-all         - Download all datasets (validation splits)"
+	@echo "  make list-datasets        - List downloaded datasets"
+	@echo ""
 	@echo "🏋️  INDEXING & CORPUS"
 	@echo "  make index-wiki-simple    - Index Simple Wikipedia (~200k articles)"
 	@echo "  make index-wiki-small     - Quick test (10k articles)"
@@ -90,6 +98,141 @@ setup: install verify-install
 	@echo ""
 
 # ============================================================================
+# Dataset Download & Management
+# ============================================================================
+
+download-nq:
+	@echo "📚 Downloading Natural Questions (validation split)..."
+	@echo "⏱️  This will take a few minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset natural_questions \
+		--split validation \
+		--output-dir data/datasets
+
+download-nq-full:
+	@echo "📚 Downloading Natural Questions (ALL splits)..."
+	@echo "⚠️  This will download train + validation (~30GB+ cached)"
+	@echo "⏱️  This may take 30+ minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset natural_questions \
+		--all-splits \
+		--output-dir data/datasets
+
+download-nq-train:
+	@echo "📚 Downloading Natural Questions (train split)..."
+	@echo "⚠️  This is a large dataset (~300k examples)"
+	@echo "⏱️  This may take 20+ minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset natural_questions \
+		--split train \
+		--output-dir data/datasets
+
+download-nq-sample:
+	@echo "📚 Downloading Natural Questions sample (1000 examples)..."
+	@echo "⏱️  ~1-2 minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset natural_questions \
+		--split validation \
+		--max-examples 1000 \
+		--output-dir data/datasets
+
+download-triviaqa:
+	@echo "📚 Downloading TriviaQA (validation split)..."
+	@echo "⏱️  This will take a few minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset triviaqa \
+		--split validation \
+		--output-dir data/datasets
+
+download-triviaqa-full:
+	@echo "📚 Downloading TriviaQA (ALL splits)..."
+	@echo "⚠️  This will download train + validation + test"
+	@echo "⏱️  This may take 20+ minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset triviaqa \
+		--all-splits \
+		--output-dir data/datasets
+
+download-hotpotqa:
+	@echo "📚 Downloading HotpotQA (validation split)..."
+	@echo "⏱️  This will take a few minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset hotpotqa \
+		--split validation \
+		--output-dir data/datasets
+
+download-hotpotqa-full:
+	@echo "📚 Downloading HotpotQA (ALL splits)..."
+	@echo "⚠️  This will download train + validation"
+	@echo "⏱️  This may take 15+ minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset hotpotqa \
+		--all-splits \
+		--output-dir data/datasets
+
+download-all:
+	@echo "📚 Downloading all datasets (validation splits)..."
+	@echo "⏱️  This will take 10-15 minutes"
+	@echo ""
+	uv run python experiments/scripts/download_datasets.py \
+		--dataset all \
+		--split validation \
+		--output-dir data/datasets
+
+download-all-full:
+	@echo "📚 Downloading ALL datasets (ALL splits)..."
+	@echo "⚠️  This will download everything (~50GB+ cached)"
+	@echo "⏱️  This may take 1+ hours"
+	@echo ""
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		uv run python experiments/scripts/download_datasets.py \
+			--dataset all \
+			--all-splits \
+			--output-dir data/datasets; \
+	else \
+		echo "Cancelled."; \
+	fi
+
+list-datasets:
+	@echo "📊 Downloaded datasets:"
+	@echo ""
+	@if [ -d data/datasets ]; then \
+		for file in data/datasets/*.json; do \
+			if [ -f "$$file" ]; then \
+				name=$$(basename $$file); \
+				size=$$(du -h "$$file" | cut -f1); \
+				count=$$(jq '.info.filtered_size // 0' "$$file" 2>/dev/null || echo "?"); \
+				printf "  %-40s %8s    %8s examples\n" "$$name" "$$size" "$$count"; \
+			fi \
+		done; \
+		echo ""; \
+		total_size=$$(du -sh data/datasets 2>/dev/null | cut -f1); \
+		echo "  Total size: $$total_size"; \
+	else \
+		echo "  (no datasets downloaded yet)"; \
+		echo "  Run: make download-nq"; \
+	fi
+
+clean-datasets:
+	@echo "🧹 Cleaning downloaded datasets..."
+	@if [ -d data/datasets ]; then \
+		rm -rf data/datasets/*.json; \
+		echo "✓ Datasets removed"; \
+	else \
+		echo "  (no datasets to clean)"; \
+	fi
+
+# ============================================================================
 # Development
 # ============================================================================
 
@@ -124,7 +267,7 @@ clean-outputs:
 	rm -rf outputs/*.json
 	@echo "✅ Outputs cleaned!"
 
-clean-all: clean clean-outputs
+clean-all: clean clean-outputs clean-datasets
 	@echo "✅ Everything cleaned!"
 
 # ============================================================================

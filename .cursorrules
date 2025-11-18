@@ -351,6 +351,13 @@ docs/guides/
 └── my_guide.md
 ```
 
+**Important:** Do NOT create standalone `.md` files in the root directory. Always place documentation in the appropriate location:
+- New feature guides → `docs/guides/`
+- Architecture changes → Update `docs/ARCHITECTURE.md`
+- Implementation details → Add to relevant guide
+- Quick references → Update `QUICK_REFERENCE.md`
+- Temporary summaries → Integrate into existing docs, then delete
+
 ### Import Structure
 
 ```python
@@ -454,6 +461,41 @@ pytest tests/       # Direct pytest
 
 ## Documentation Standards
 
+### Location Guidelines
+
+**✅ DO:**
+- Place feature docs in `docs/guides/`
+- Update existing docs when adding features
+- Keep root directory clean (only README, CHANGELOG, etc.)
+- Integrate implementation details into relevant guides
+- Create examples in `examples/` directory
+
+**❌ DON'T:**
+- Create standalone `.md` files in root (except standard ones)
+- Scatter documentation across the repo
+- Create "improvements" or "changes" docs (use CHANGELOG or integrate)
+- Leave temporary documentation files
+
+### Documentation Structure
+
+```
+docs/
+├── README.md                    # Project overview
+├── ARCHITECTURE.md              # System design
+├── GETTING_STARTED.md           # Quick start
+├── USAGE.md                     # General usage
+├── TROUBLESHOOTING.md           # Common issues
+└── guides/
+    ├── METRICS.md               # Metrics system
+    ├── DATASET_MANAGEMENT.md    # Dataset handling
+    ├── CONFIG_BASED_EVALUATION.md
+    └── ...
+
+examples/                        # Working code examples
+├── dataset_download_example.py
+└── ...
+```
+
 ### Docstrings
 
 ```python
@@ -486,6 +528,15 @@ text = normalize_answer(text)
 # Normalize the text
 text = normalize_answer(text)
 ```
+
+### When Adding New Features
+
+1. **Code first** - Implement with proper docstrings
+2. **Update existing guide** - Add to relevant `docs/guides/` file
+3. **Add example** - Create working example in `examples/`
+4. **Update main docs** - Add links in `docs/README.md` if major feature
+5. **Makefile** - Add commands for common operations
+6. **No loose docs** - Don't leave `.md` files scattered in root
 
 ---
 
@@ -619,10 +670,12 @@ chore: Update dependencies in pyproject.toml
 2. **Use utilities** - Don't duplicate formatting/prompt logic
 3. **Follow type system** - Use Document, not dict
 4. **Keep it simple** - Don't over-engineer
-5. **Add documentation** - Update relevant .md files
+5. **Add documentation properly** - Update relevant files in `docs/guides/`, don't scatter `.md` files
 6. **Test your changes** - At least smoke test
 7. **Update Makefile** - If adding scripts
 8. **Follow LSP** - New implementations should be substitutable
+9. **Clean up** - Remove temporary files, integrate docs into proper locations
+10. **Examples over docs** - Prefer working code examples when possible
 
 ---
 
