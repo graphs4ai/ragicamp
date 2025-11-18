@@ -42,6 +42,10 @@ class TriviaQADataset(QADataset):
         # Otherwise load from HuggingFace
         self.load()
     
+    def get_cache_path(self) -> Path:
+        """Get cache path that includes subset parameter."""
+        return self.cache_dir / f"{self.name}_{self.subset}_{self.split}.json"
+    
     def load(self) -> None:
         """Load TriviaQA from HuggingFace datasets."""
         # Map split names

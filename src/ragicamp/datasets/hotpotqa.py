@@ -42,6 +42,11 @@ class HotpotQADataset(QADataset):
         # Otherwise load from HuggingFace
         self.load()
     
+    def get_cache_path(self) -> Path:
+        """Get cache path that includes distractor parameter."""
+        distractor_str = "distractor" if self.distractor else "fullwiki"
+        return self.cache_dir / f"{self.name}_{distractor_str}_{self.split}.json"
+    
     def load(self) -> None:
         """Load HotpotQA from HuggingFace datasets."""
         # Map split names

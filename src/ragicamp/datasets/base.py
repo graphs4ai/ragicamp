@@ -132,6 +132,9 @@ class QADataset(ABC):
     def get_cache_path(self) -> Path:
         """Get the path where this dataset should be cached.
         
+        Child classes can override this to include dataset-specific parameters
+        in the cache path (e.g., subset, distractor settings).
+        
         Returns:
             Path to cache file
         """
