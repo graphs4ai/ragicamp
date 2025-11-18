@@ -1,4 +1,6 @@
 # Configuration for Bandit-based RAG
+# Uses UCB policy to learn optimal RAG parameters
+# EXPERIMENTAL: For research/development use
 
 agent:
   type: bandit_rag
@@ -47,4 +49,3 @@ output:
   save_policy: true
   output_path: "outputs/bandit_rag_results.json"
   policy_path: "outputs/bandit_policy.json"
-

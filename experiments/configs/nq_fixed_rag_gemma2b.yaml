@@ -1,5 +1,6 @@
 # Natural Questions - Fixed RAG with Gemma 2B
-# Requires pre-indexed retriever artifact
+# REQUIRES: Pre-indexed retriever artifact (run: make index-wiki-small)
+# ~20 minutes on GPU
 
 agent:
   type: fixed_rag
@@ -27,6 +28,10 @@ dataset:
   num_examples: 100
   filter_no_answer: true
 
+# Batch processing for faster evaluation
+evaluation:
+  batch_size: 8
+
 metrics:
   - exact_match
   - f1
@@ -40,4 +45,3 @@ metrics:
 output:
   save_predictions: true
   output_path: "outputs/nq_fixed_rag_gemma2b.json"
-

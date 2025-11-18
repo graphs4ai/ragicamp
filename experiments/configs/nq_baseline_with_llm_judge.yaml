@@ -1,5 +1,6 @@
 # Natural Questions - Baseline with LLM Judge (Binary Classification)
 # Evaluates answers using GPT-4 for binary correctness classification
+# ~5 minutes on GPU (with batch processing)
 
 agent:
   type: direct_llm
@@ -18,6 +19,10 @@ dataset:
   num_examples: 20  # Start small due to API costs
   filter_no_answer: true
 
+# Batch processing for faster evaluation
+evaluation:
+  batch_size: 8
+
 # LLM Judge Model Configuration
 judge_model:
   type: openai
@@ -30,8 +35,8 @@ metrics:
   - name: llm_judge_qa
     params:
       judgment_type: "binary"  # binary: correct/incorrect
+      batch_size: 16  # Process 16 judgments in parallel for speed
 
 output:
   save_predictions: true
   output_path: "outputs/nq_baseline_with_llm_judge.json"
-

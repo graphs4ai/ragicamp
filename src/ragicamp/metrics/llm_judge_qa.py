@@ -18,6 +18,7 @@ class LLMJudgeQAMetric(Metric):
         self,
         judge_model: LanguageModel,
         judgment_type: str = "binary",  # "binary" or "ternary"
+        batch_size: int = 8,  # Number of judgments to process in parallel
         **kwargs: Any
     ):
         """Initialize LLM judge for QA evaluation.
@@ -27,11 +28,13 @@ class LLMJudgeQAMetric(Metric):
             judgment_type: Type of judgment
                 - "binary": correct (1.0) or incorrect (0.0)
                 - "ternary": correct (1.0), partial (0.5), or incorrect (0.0)
+            batch_size: Number of judgments to process in parallel (default: 8)
             **kwargs: Additional configuration
         """
         super().__init__(name="llm_judge_qa", **kwargs)
         self.judge_model = judge_model
         self.judgment_type = judgment_type
+        self.batch_size = batch_size
         
         # Define categories
         if judgment_type == "binary":
@@ -46,7 +49,7 @@ class LLMJudgeQAMetric(Metric):
         questions: List[str] = None,
         **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute LLM judge scores.
+        """Compute LLM judge scores with batch processing.
         
         Args:
             predictions: Predicted answers
@@ -61,9 +64,13 @@ class LLMJudgeQAMetric(Metric):
             - llm_judge_qa_partial: Proportion marked as partially correct (ternary only)
             - llm_judge_qa_incorrect: Proportion marked as incorrect
         """
+        from tqdm import tqdm
+        
         scores = []
         categories_count = {cat: 0 for cat in self.categories}
         
+        # Prepare all prompts first
+        all_prompts = []
         for i, (pred, ref) in enumerate(zip(predictions, references)):
             # Handle multiple references
             refs = [ref] if isinstance(ref, str) else ref
@@ -75,22 +82,36 @@ class LLMJudgeQAMetric(Metric):
                 prediction=pred,
                 references=refs
             )
+            all_prompts.append(prompt)
+        
+        # Process in batches
+        print(f"⚖️  Processing {len(all_prompts)} judgments in batches of {self.batch_size}...")
+        
+        for batch_start in tqdm(range(0, len(all_prompts), self.batch_size), desc="LLM Judge batches"):
+            batch_end = min(batch_start + self.batch_size, len(all_prompts))
+            batch_prompts = all_prompts[batch_start:batch_end]
             
-            # Get judgment with temperature=0 for consistency
-            judgment = self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
+            # Get judgments with temperature=0 for consistency
+            batch_judgments = self.judge_model.generate(
+                batch_prompts, 
+                temperature=0.0, 
+                max_tokens=200
+            )
             
-            # Extract categorical judgment
-            category, score = self._extract_judgment(judgment)
-            scores.append(score)
-            
-            # Safely increment category count (handle unexpected categories from LLM)
-            if category in categories_count:
-                categories_count[category] += 1
-            else:
-                # LLM returned unexpected category - treat as incorrect
-                print(f"Warning: LLM returned unexpected category '{category}' (expected {self.categories}). Treating as 'incorrect'.")
-                categories_count["incorrect"] += 1
-                scores[-1] = 0.0  # Override score to 0.0 for safety
+            # Process each judgment in the batch
+            for judgment in batch_judgments:
+                # Extract categorical judgment
+                category, score = self._extract_judgment(judgment)
+                scores.append(score)
+                
+                # Safely increment category count (handle unexpected categories from LLM)
+                if category in categories_count:
+                    categories_count[category] += 1
+                else:
+                    # LLM returned unexpected category - treat as incorrect
+                    print(f"Warning: LLM returned unexpected category '{category}' (expected {self.categories}). Treating as 'incorrect'.")
+                    categories_count["incorrect"] += 1
+                    scores[-1] = 0.0  # Override score to 0.0 for safety
         
         # Compute metrics
         total = len(scores)

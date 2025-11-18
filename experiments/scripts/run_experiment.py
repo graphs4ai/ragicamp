@@ -268,11 +268,13 @@ def create_metrics(config: list, judge_model_config: dict = None):
                 print(f"⚠️  Skipping LLM Judge (judge_model not configured or API key not set)")
                 continue
             judgment_type = metric_params.get("judgment_type", "binary")
+            judge_batch_size = metric_params.get("batch_size", 8)
             metrics.append(LLMJudgeQAMetric(
                 judge_model=judge_model,
-                judgment_type=judgment_type
+                judgment_type=judgment_type,
+                batch_size=judge_batch_size
             ))
-            print(f"✓ Added LLM Judge ({judgment_type} mode)")
+            print(f"✓ Added LLM Judge ({judgment_type} mode, batch_size={judge_batch_size})")
         elif metric_name == "faithfulness":
             if not FAITHFULNESS_AVAILABLE:
                 print(f"⚠️  Skipping Faithfulness (not installed). Install with: uv sync")

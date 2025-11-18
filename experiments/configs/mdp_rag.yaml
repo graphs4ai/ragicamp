@@ -1,4 +1,6 @@
 # Configuration for MDP-based RAG
+# Uses Q-learning to learn optimal sequential RAG actions
+# EXPERIMENTAL: For research/development use
 
 agent:
   type: mdp_rag
@@ -48,4 +50,3 @@ output:
   save_policy: true
   output_path: "outputs/mdp_rag_results.json"
   policy_path: "outputs/mdp_policy.json"
-

@@ -1,5 +1,6 @@
 # Natural Questions - Baseline (DirectLLM) with Gemma 2B
 # Quick test: 10 examples with fast metrics only
+# ~1-2 minutes on GPU
 
 agent:
   type: direct_llm
@@ -18,6 +19,10 @@ dataset:
   num_examples: 10
   filter_no_answer: true
 
+# Batch processing for faster evaluation
+evaluation:
+  batch_size: 4  # Process 4 questions at once
+
 metrics:
   - exact_match
   - f1
@@ -25,4 +30,3 @@ metrics:
 output:
   save_predictions: true
   output_path: "outputs/nq_baseline_gemma2b_quick.json"
-
