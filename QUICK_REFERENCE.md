@@ -211,6 +211,11 @@ make eval-baseline-quick # Quick test
 make eval-baseline-full  # Full evaluation
 make eval-rag           # RAG evaluation
 
+# Configuration Management (NEW!)
+make validate-config CONFIG=experiments/configs/my.yaml  # Validate config
+make validate-all-configs                                # Validate all configs
+make create-config OUTPUT=my.yaml TYPE=baseline          # Create template
+
 # Indexing
 make index-wiki-small   # Index 10k articles (for testing)
 make index-wiki-simple  # Index 200k articles (for production)

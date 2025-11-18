@@ -7,6 +7,48 @@
 ✅ **Version Control** - Track experiment changes in git  
 ✅ **No Code Changes** - Switch approaches by changing config files  
 ✅ **Compare Easily** - Run different approaches with same settings  
+✅ **Type-Safe** - Validated with Pydantic schemas (NEW!)  
+✅ **Catch Errors Early** - Validation before running (NEW!)
+
+---
+
+## ✨ New Config System Features
+
+### Config Validation
+
+Validate configs before running to catch errors early:
+
+```bash
+# Validate a single config
+make validate-config CONFIG=experiments/configs/my_experiment.yaml
+
+# Validate all configs
+make validate-all-configs
+```
+
+**Example Output:**
+```bash
+✓ Configuration validated successfully
+✓ All required fields present
+✓ All types correct
+```
+
+### Create Config Templates
+
+Generate config templates instead of copying:
+
+```bash
+# Create baseline config
+make create-config OUTPUT=my_baseline.yaml TYPE=baseline
+
+# Create RAG config
+make create-config OUTPUT=my_rag.yaml TYPE=rag
+```
+
+### Better Error Messages
+
+**Before:** `KeyError: 'model_name'` ❌  
+**After:** `field required: model.model_name (type=value_error.missing)` ✅
 
 ---
 
@@ -17,6 +59,10 @@
 ```bash
 cd /home/gabriel_frontera_cloudwalk_io/ragicamp
 
+# Validate first (optional but recommended)
+make validate-config CONFIG=experiments/configs/nq_baseline_gemma2b_quick.yaml
+
+# Run experiment
 uv run python experiments/scripts/run_experiment.py \
   --config experiments/configs/nq_baseline_gemma2b_quick.yaml \
   --mode eval
@@ -24,6 +70,8 @@ uv run python experiments/scripts/run_experiment.py \
 
 **Time**: ~2-3 minutes  
 **Metrics**: Exact Match, F1
+
+> **💡 Tip:** The config is automatically validated when you run the experiment!
 
 ---
 
@@ -401,6 +449,62 @@ print(comparison)
 4. **Document changes** - add comments in YAML
 5. **Reuse configs** - copy and modify for new experiments
 6. **Compare consistently** - use same num_examples for fair comparison
+7. **Validate before running** - catch errors early with `make validate-config`
+8. **Use templates** - start with `make create-config` instead of copying
+
+---
+
+## 🔧 Programmatic Usage (Advanced)
+
+If you need more flexibility, use the config system programmatically:
+
+### Using ComponentFactory
+
+```python
+from ragicamp import ComponentFactory, ConfigLoader
+
+# Load and validate config
+config = ConfigLoader.load_and_validate("experiments/configs/my_config.yaml")
+
+# Create components
+model = ComponentFactory.create_model(config.model.model_dump())
+dataset = ComponentFactory.create_dataset(config.dataset.model_dump())
+agent = ComponentFactory.create_agent(config.agent.model_dump(), model)
+
+# Use components
+response = agent.answer("What is RAG?")
+```
+
+### Creating Custom Components with Registry
+
+```python
+from ragicamp import ComponentRegistry
+from ragicamp.agents.base import RAGAgent
+
+# Register custom agent
+@ComponentRegistry.register_agent("my_custom_agent")
+class MyCustomAgent(RAGAgent):
+    def answer(self, query: str, **kwargs):
+        # Your logic here
+        pass
+
+# Now use in YAML config:
+# agent:
+#   type: my_custom_agent
+#   name: "my_agent"
+```
+
+### Better Imports
+
+```python
+# Clean imports from module root
+from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
+from ragicamp.models import HuggingFaceModel, OpenAIModel
+from ragicamp.datasets import NaturalQuestionsDataset
+from ragicamp import ComponentFactory, ConfigLoader
+
+# No more deep imports!
+```
 
 ---
 
@@ -408,10 +512,18 @@ print(comparison)
 
 | Task | Command |
 |------|---------|
+| **Validate config** | `make validate-config CONFIG=my_config.yaml` |
+| **Create template** | `make create-config OUTPUT=my_config.yaml TYPE=baseline` |
 | **Quick test** | `run_experiment.py --config nq_baseline_gemma2b_quick.yaml --mode eval` |
 | **Full baseline** | `run_experiment.py --config nq_baseline_gemma2b_full.yaml --mode eval` |
 | **RAG eval** | `run_experiment.py --config nq_fixed_rag_gemma2b.yaml --mode eval` |
 | **Custom config** | Copy existing config, edit, and run |
 
-**Key Advantage**: Change RAG approach by just changing the config file! 🚀
+**Key Advantages**: 
+- ✅ Change RAG approach by just changing the config file
+- ✅ Catch errors early with validation
+- ✅ Type-safe with Pydantic
+- ✅ Easy to extend with registry system
+
+🚀
 

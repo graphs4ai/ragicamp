@@ -5,6 +5,8 @@ A modular, production-ready framework for experimenting with Retrieval-Augmented
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+> **🎉 NEW!** Type-safe configs, validation, 100x faster LLM judge, and more! See **[WHATS_NEW.md](WHATS_NEW.md)** and **[CHANGELOG.md](CHANGELOG.md)**
+
 ## ✨ Key Features
 
 - 🎯 **Multiple RAG Strategies** - DirectLLM baseline, FixedRAG, adaptive BanditRAG, and MDP-based agents
@@ -31,22 +33,34 @@ make help
 
 ## 💡 Two Ways to Use
 
-### 1. Config-Based (Recommended)
+### 1. Config-Based (Recommended) ⭐
 
 ```bash
-# Edit experiments/configs/my_experiment.yaml
+# Create from template
+make create-config OUTPUT=my_exp.yaml TYPE=baseline
+
+# Validate config
+make validate-config CONFIG=my_exp.yaml
+
 # Run experiment
 uv run python experiments/scripts/run_experiment.py \
-  --config experiments/configs/my_experiment.yaml \
+  --config my_exp.yaml \
   --mode eval
 ```
+
+**Benefits:**
+- ✅ Type-safe with validation
+- ✅ Reproducible experiments
+- ✅ No code changes needed
+- ✅ Easy to share and version
 
 ### 2. Programmatic
 
 ```python
-from ragicamp.agents.direct_llm import DirectLLMAgent
-from ragicamp.models.huggingface import HuggingFaceModel
-from ragicamp.datasets.nq import NaturalQuestionsDataset
+# Clean imports from module root
+from ragicamp.agents import DirectLLMAgent
+from ragicamp.models import HuggingFaceModel
+from ragicamp.datasets import NaturalQuestionsDataset
 from ragicamp.evaluation.evaluator import Evaluator
 from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
 
@@ -73,12 +87,24 @@ ragicamp/
 │   ├── policies/           # Decision policies (Bandits, MDP)
 │   ├── training/           # Training utilities
 │   ├── evaluation/         # Evaluation utilities
+│   ├── config/             # Pydantic schemas & validation (NEW!)
+│   ├── factory.py          # Component instantiation (NEW!)
+│   ├── registry.py         # Component registration (NEW!)
 │   └── utils/              # Formatting, prompts, artifacts
 ├── experiments/            # Configs and scripts
+├── scripts/                # CLI tools (validate, create configs)
 ├── docs/                   # Documentation
 ├── artifacts/              # Saved models and indices
 └── outputs/                # Evaluation results
 ```
+
+### ✨ New in Latest Version
+
+- **Type-Safe Configs**: Pydantic schemas with validation
+- **Component Factory**: Centralized component creation
+- **Registry System**: Easy extensibility for custom components
+- **Config Validation**: Catch errors before running experiments
+- **Better Imports**: Clean `from ragicamp.agents import DirectLLMAgent`
 
 ## 🎯 Typical Workflow
 
@@ -112,6 +138,8 @@ All evaluations save 3 JSON files:
 
 | Guide | Description |
 |-------|-------------|
+| **[What's New](WHATS_NEW.md)** ⭐ | Latest features and improvements |
+| **[Changelog](CHANGELOG.md)** | Detailed version history |
 | **[Quick Reference](QUICK_REFERENCE.md)** | One-page command cheat sheet |
 | **[Documentation Index](docs/README.md)** | Complete documentation catalog |
 | **[Config Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** | How to use config files |
@@ -144,6 +172,11 @@ make eval-with-llm-judge-mini   # Budget version (GPT-4o-mini)
 # RAG Evaluation
 make index-wiki-small           # Index corpus (once)
 make eval-rag                   # Evaluate with retrieval
+
+# Configuration Management (NEW!)
+make validate-config CONFIG=my.yaml   # Validate a config file
+make validate-all-configs             # Validate all configs
+make create-config OUTPUT=my.yaml     # Create config template
 
 # Utilities
 make help                       # Show all commands
