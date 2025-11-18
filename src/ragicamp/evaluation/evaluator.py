@@ -69,7 +69,6 @@ class Evaluator:
         responses = []
         
         print(f"Evaluating on {len(examples)} examples...")
-        print(f"DEBUG: batch_size = {batch_size}, type = {type(batch_size)}")
         
         # Use batch processing if batch_size is specified
         if batch_size and batch_size > 1:
