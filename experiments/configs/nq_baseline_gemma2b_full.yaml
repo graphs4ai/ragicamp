@@ -24,6 +24,12 @@ evaluation:
   mode: both      # generate (predictions only), evaluate (metrics only), or both
   batch_size: 8   # Process 8 questions at once
 
+# LLM Judge Model Configuration
+judge_model:
+  type: openai
+  model_name: "gpt-4o-mini"  # Budget-friendly option
+  temperature: 0.0
+
 metrics:
   - exact_match
   - f1
@@ -33,6 +39,10 @@ metrics:
   - name: bleurt
     params:
       checkpoint: "BLEURT-20-D3"
+  - name: llm_judge_qa
+    params:
+      judgment_type: "binary"
+      batch_size: 16  # Process 16 judgments in parallel for speed
 
 output:
   save_predictions: true

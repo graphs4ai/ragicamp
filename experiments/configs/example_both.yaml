@@ -33,7 +33,10 @@ metrics:
   - f1
   - bertscore
   - bleurt
-  # - llm_judge_qa  # Uncomment if judge_model is configured
+  - name: llm_judge_qa  # LLM-as-a-judge evaluation
+    params:
+      judgment_type: "binary"  # "binary" or "ternary"
+      batch_size: 16           # Batch for speed
 
 output:
   save_predictions: true

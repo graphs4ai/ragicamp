@@ -356,12 +356,22 @@ eval-baseline-cpu:
 		--mode eval
 
 eval-baseline-full:
-	@echo "🚀 Running baseline evaluation (full - 100 examples, all metrics)"
+	@echo "🚀 Running baseline evaluation (full - 100 examples, all metrics + LLM judge)"
 	@echo "📋 Config: experiments/configs/nq_baseline_gemma2b_full.yaml"
 	@echo "⏱️  ~20-25 minutes on GPU"
 	@echo ""
 	uv run python experiments/scripts/run_experiment.py \
 		--config experiments/configs/nq_baseline_gemma2b_full.yaml \
+		--mode eval
+
+eval-baseline-llm-judge:
+	@echo "🚀 Running baseline evaluation with LLM-as-a-judge"
+	@echo "📋 Config: experiments/configs/nq_baseline_gemma2b_llm_judge.yaml"
+	@echo "⏱️  ~10-15 minutes on GPU (50 examples)"
+	@echo "💡 Demonstrates robust two-phase evaluation with checkpointing"
+	@echo ""
+	uv run python experiments/scripts/run_experiment.py \
+		--config experiments/configs/nq_baseline_gemma2b_llm_judge.yaml \
 		--mode eval
 
 eval-baseline-full-batch:
