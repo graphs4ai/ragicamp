@@ -1,5 +1,0 @@
-bertscore_f1,bertscore_precision,bertscore_recall,exact_match,f1,question,question_index
-0.8397,0.8234,0.8567,1.0,0.8571,when was the last time anyone was on the moon,0
-0.4615,0.4523,0.4712,0.0,0.0,who sang the song i think we're alone now,1
-0.9878,0.9845,0.9912,1.0,1.0,what is the capital of France,2
-

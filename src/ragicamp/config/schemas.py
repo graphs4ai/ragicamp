@@ -137,7 +137,7 @@ class ExperimentConfig(BaseModel):
     agent: Optional[AgentConfig] = Field(None, description="Agent configuration")
     model: Optional[ModelConfig] = Field(None, description="Model configuration")
     dataset: Optional[DatasetConfig] = Field(None, description="Dataset configuration")
-    
+
     # Always required
     metrics: List[Union[str, Dict[str, Any]]] = Field(..., description="Metrics configuration")
 
