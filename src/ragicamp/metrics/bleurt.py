@@ -12,7 +12,6 @@ if "MPLBACKEND" in os.environ:
 
 from ragicamp.metrics.base import Metric
 
-
 # Available BLEURT checkpoints (small ones for faster download/inference)
 BLEURT_CHECKPOINTS = {
     "BLEURT-20": "https://storage.googleapis.com/bleurt-oss-21/BLEURT-20.zip",

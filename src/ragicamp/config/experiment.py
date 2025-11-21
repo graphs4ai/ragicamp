@@ -4,9 +4,10 @@ Simple, type-safe configuration system using Python dataclasses and YAML.
 No heavy dependencies like Hydra - just clean, simple configs.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 import yaml
 
 from ragicamp.corpus.base import CorpusConfig

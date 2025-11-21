@@ -5,6 +5,7 @@ Complementary to faithfulness - focuses on identifying problematic outputs.
 """
 
 from typing import Any, Dict, List, Optional
+
 import numpy as np
 
 from ragicamp.metrics.base import Metric

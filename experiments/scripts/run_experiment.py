@@ -162,7 +162,8 @@ def compute_and_save_metrics(predictions_file, config, judge_model=None):
     responses = []
     for item in predictions_data["predictions"]:
         from unittest.mock import Mock
-        from ragicamp.agents.base import RAGResponse, RAGContext
+
+        from ragicamp.agents.base import RAGContext, RAGResponse
 
         ex = Mock()
         ex.id = item["question_id"]

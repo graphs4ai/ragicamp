@@ -6,6 +6,7 @@ are grounded in the provided documents.
 """
 
 from typing import Any, Dict, List, Optional
+
 import numpy as np
 
 from ragicamp.metrics.base import Metric

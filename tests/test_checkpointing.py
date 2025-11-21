@@ -1,10 +1,11 @@
 """Tests for LLM judge checkpointing system."""
 
 import json
-import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, MagicMock
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
 

@@ -12,9 +12,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from ragicamp.corpus import WikipediaCorpus, CorpusConfig
-from ragicamp.retrievers.dense import DenseRetriever
+from ragicamp.corpus import CorpusConfig, WikipediaCorpus
 from ragicamp.retrievers.base import Document
+from ragicamp.retrievers.dense import DenseRetriever
 
 
 def main():

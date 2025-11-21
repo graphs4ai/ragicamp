@@ -5,7 +5,7 @@ from typing import Iterator, Optional
 from datasets import load_dataset
 from tqdm import tqdm
 
-from ragicamp.corpus.base import DocumentCorpus, CorpusConfig
+from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
 from ragicamp.retrievers.base import Document
 
 

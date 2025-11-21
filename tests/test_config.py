@@ -1,18 +1,18 @@
 """Tests for configuration schemas and validation."""
 
-import pytest
 import tempfile
 from pathlib import Path
 
+import pytest
 from pydantic import ValidationError
 
 from ragicamp.config.schemas import (
-    ModelConfig,
-    DatasetConfig,
     AgentConfig,
+    DatasetConfig,
     EvaluationConfig,
-    MetricConfig,
     ExperimentConfig,
+    MetricConfig,
+    ModelConfig,
 )
 
 

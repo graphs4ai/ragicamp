@@ -11,7 +11,7 @@ Follows best practices from SQuAD and other QA benchmarks:
 import re
 import string
 from collections import Counter
-from typing import Any, Dict, List, Union, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ragicamp.metrics.base import Metric
 

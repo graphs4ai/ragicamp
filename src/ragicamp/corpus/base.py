@@ -5,7 +5,7 @@ This is distinct from QADatasets which contain question-answer pairs for evaluat
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, Optional, Any
+from typing import Any, Dict, Iterator, Optional
 
 from ragicamp.retrievers.base import Document
 

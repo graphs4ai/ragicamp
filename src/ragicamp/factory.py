@@ -8,21 +8,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ragicamp.agents import (
-    RAGAgent,
+    BanditRAGAgent,
     DirectLLMAgent,
     FixedRAGAgent,
-    BanditRAGAgent,
     MDPRAGAgent,
+    RAGAgent,
 )
 from ragicamp.datasets import (
-    QADataset,
-    NaturalQuestionsDataset,
-    TriviaQADataset,
     HotpotQADataset,
+    NaturalQuestionsDataset,
+    QADataset,
+    TriviaQADataset,
 )
 from ragicamp.metrics import Metric
-from ragicamp.models import LanguageModel, HuggingFaceModel, OpenAIModel
-from ragicamp.retrievers import Retriever, DenseRetriever
+from ragicamp.models import HuggingFaceModel, LanguageModel, OpenAIModel
+from ragicamp.retrievers import DenseRetriever, Retriever
 
 
 class ComponentFactory:

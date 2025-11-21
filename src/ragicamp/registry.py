@@ -310,15 +310,15 @@ class ComponentRegistry:
 def _register_builtin_components():
     """Register all built-in components with the registry."""
     from ragicamp.agents import (
+        BanditRAGAgent,
         DirectLLMAgent,
         FixedRAGAgent,
-        BanditRAGAgent,
         MDPRAGAgent,
     )
     from ragicamp.datasets import (
+        HotpotQADataset,
         NaturalQuestionsDataset,
         TriviaQADataset,
-        HotpotQADataset,
     )
     from ragicamp.models import HuggingFaceModel, OpenAIModel
     from ragicamp.retrievers import DenseRetriever, SparseRetriever

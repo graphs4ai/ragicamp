@@ -12,9 +12,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+from ragicamp.datasets.hotpotqa import HotpotQADataset
 from ragicamp.datasets.nq import NaturalQuestionsDataset
 from ragicamp.datasets.triviaqa import TriviaQADataset
-from ragicamp.datasets.hotpotqa import HotpotQADataset
 
 
 def download_dataset(

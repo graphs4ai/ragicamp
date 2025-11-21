@@ -1,13 +1,14 @@
 """Tests for component factory."""
 
-import pytest
 from unittest.mock import Mock, patch
 
-from ragicamp.factory import ComponentFactory
+import pytest
+
 from ragicamp.agents import DirectLLMAgent
-from ragicamp.models.base import LanguageModel
 from ragicamp.datasets.base import QADataset
+from ragicamp.factory import ComponentFactory
 from ragicamp.metrics.base import Metric
+from ragicamp.models.base import LanguageModel
 
 
 class TestModelFactory:
