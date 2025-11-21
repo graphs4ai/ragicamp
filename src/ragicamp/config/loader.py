@@ -190,12 +190,33 @@ class ConfigLoader:
             config = ConfigLoader.load_and_validate(path)
             print(f"✓ Configuration is valid: {path}")
             print(f"\nSummary:")
-            print(f"  Agent: {config.agent.type} ({config.agent.name})")
-            print(f"  Model: {config.model.type} ({config.model.model_name})")
-            print(f"  Dataset: {config.dataset.name} ({config.dataset.split})")
+            
+            # Handle evaluate-only mode where agent/model/dataset might be None
+            if config.agent:
+                print(f"  Agent: {config.agent.type} ({config.agent.name})")
+            else:
+                print(f"  Agent: None (evaluate mode)")
+                
+            if config.model:
+                print(f"  Model: {config.model.type} ({config.model.model_name})")
+            else:
+                print(f"  Model: None (evaluate mode)")
+                
+            if config.dataset:
+                print(f"  Dataset: {config.dataset.name} ({config.dataset.split})")
+            else:
+                print(f"  Dataset: None (evaluate mode)")
+            
             print(
                 f"  Metrics: {', '.join(m['name'] if isinstance(m, dict) else m for m in config.metrics)}"
             )
+            
+            # Show evaluation mode if present
+            if config.evaluation:
+                print(f"  Mode: {config.evaluation.mode}")
+                if config.evaluation.mode == "evaluate" and config.evaluation.predictions_file:
+                    print(f"  Predictions file: {config.evaluation.predictions_file}")
+            
             return True
         except (FileNotFoundError, ValidationError, Exception) as e:
             print(f"✗ Configuration is invalid: {path}")

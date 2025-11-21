@@ -7,7 +7,7 @@ name = "ragicamp"
 version = "0.1.0"
 description = "A modular framework for experimenting with RAG approaches"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9"  # Tested on Python 3.12, compatible with 3.9+
 authors = [
     {name = "RAGiCamp Team"}
 ]

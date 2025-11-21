@@ -21,7 +21,7 @@ Complete guide to RAGiCamp documentation.
 | **[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** | Detailed setup guide | New users |
 | **[docs/USAGE.md](docs/USAGE.md)** | Usage examples | All users |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | System design | Developers |
-| **[docs/AGENTS.md](docs/AGENTS.md)** | Agent types & usage | Researchers |
+| **[AGENTS.md](AGENTS.md)** | Agent types & usage | Researchers |
 
 ---
 
@@ -46,11 +46,12 @@ Located in `docs/guides/`:
 
 ---
 
-## 🧪 Testing Documentation
+## 🧪 Testing & CI Documentation
 
 | Document | Purpose |
 |----------|---------|
 | **[tests/README.md](tests/README.md)** ⭐ **NEW!** | Complete testing guide |
+| **[.github/workflows/README.md](.github/workflows/README.md)** ⭐ **NEW!** | CI/CD pipeline documentation |
 
 **Test Categories:**
 - Two-phase evaluation tests
@@ -60,6 +61,12 @@ Located in `docs/guides/`:
 - Factory pattern tests
 - Agent functionality tests
 
+**CI Pipeline (Python 3.12):**
+- Automated tests on every push/PR
+- Code quality checks (Black, isort)
+- Test coverage reports
+- Config validation
+
 ---
 
 ## 📜 Project Information
@@ -68,7 +75,6 @@ Located in `docs/guides/`:
 |----------|---------|
 | **[CHANGELOG.md](CHANGELOG.md)** | Version history & changes |
 | **[WHATS_NEW.md](WHATS_NEW.md)** | Latest features summary |
-| **[TODO.md](TODO.md)** | Roadmap & future plans |
 
 ---
 
@@ -145,16 +151,40 @@ make format            # Format code
 
 ---
 
+## 📦 Examples & Utilities
+
+| Document | Purpose |
+|----------|---------|
+| **[examples/README.md](examples/README.md)** ⭐ **NEW!** | Guide to utility examples |
+
+**Available Examples:**
+- Dataset download & caching
+- Dataset filtering
+- Path utilities
+- Per-question metrics analysis
+
+**Note:** For running evaluations, use the config-based approach in `experiments/configs/` instead!
+
+---
+
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 32+
+- **Total Documents**: 30+
 - **Main Guides**: 12
-- **Testing Docs**: 1 (NEW!)
+- **Testing Docs**: 2 (tests + CI)
 - **Technical Docs**: 5
 - **Development Docs**: 3
-- **Test Files**: 6
+- **Example Docs**: 1
+- **Test Files**: 6 test files, 86 unit tests
 - **Archives**: 2
 - **Last Updated**: November 21, 2025
+
+**Code Quality:**
+- ✅ Python 3.12 (compatible with 3.9+)
+- ✅ 78/86 tests passing (90.7%)
+- ✅ Automated CI pipeline
+- ✅ Type hints throughout
+- ✅ Formatted with Black & isort
 
 ---
 

@@ -10,9 +10,9 @@ Runs on every push and pull request to `main` or `develop` branches.
 
 **Jobs:**
 
-1. **Tests** - Run test suite across multiple Python versions
-   - Python 3.9, 3.10, 3.11
+1. **Tests** - Run test suite on Python 3.12
    - Runs all unit tests with pytest
+   - Continues on test failures to see all results
    - Uploads test results as artifacts
 
 2. **Lint** - Code quality checks
@@ -70,8 +70,9 @@ For Codecov integration (optional), add these secrets to your GitHub repository:
 
 ### Tests fail locally but pass in CI
 
-- Check Python version (CI runs 3.9, 3.10, 3.11)
+- Check Python version (CI runs 3.12)
 - Ensure all dependencies are installed: `uv sync --extra dev`
+- Make sure you're using the same Python version: `python --version`
 
 ### Formatting fails
 
@@ -93,7 +94,7 @@ make test-coverage
 
 To modify CI behavior:
 
-1. **Add/remove Python versions**: Edit `matrix.python-version` in `ci.yml`
+1. **Change Python version**: Edit `python-version` in each job
 2. **Change test command**: Edit the `Run tests` step
 3. **Add new checks**: Add a new job following existing patterns
 4. **Skip CI**: Add `[skip ci]` to commit message

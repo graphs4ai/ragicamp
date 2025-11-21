@@ -610,34 +610,122 @@ print(response.answer)
 
 ## 📊 Evaluating Agents
 
-### Standard Metrics
+### Modern Approach: Config-Based Evaluation ⭐ **RECOMMENDED**
+
+The easiest and most robust way to evaluate agents is using YAML configs:
+
+```yaml
+# experiments/configs/my_evaluation.yaml
+agent:
+  type: direct_llm
+  name: "my_agent"
+  system_prompt: "You are a helpful assistant."
+
+model:
+  type: huggingface
+  model_name: "google/gemma-2-2b-it"
+  device: "cuda"
+  load_in_8bit: true
+
+dataset:
+  name: natural_questions
+  split: validation
+  num_examples: 100
+
+evaluation:
+  mode: both  # generate → evaluate (most robust!)
+  batch_size: 8
+
+metrics:
+  - exact_match
+  - f1
+  - bertscore
+  
+output:
+  save_predictions: true
+  output_path: "outputs/my_agent_results.json"
+```
+
+**Run it:**
+```bash
+uv run python experiments/scripts/run_experiment.py \
+  --config experiments/configs/my_evaluation.yaml
+```
+
+**Benefits:**
+- ✅ **Two-phase evaluation** - Never lose progress to failures
+- ✅ **Automatic checkpointing** - Resume from where you left off
+- ✅ **Type validation** - Catches errors before running
+- ✅ **Reproducible** - Config files track all settings
+
+### Programmatic API (Advanced)
+
+For custom workflows, use the evaluator directly:
 
 ```python
+from ragicamp.evaluation.evaluator import Evaluator
 from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
 
-metrics = [ExactMatchMetric(), F1Metric()]
-evaluator = Evaluator(agent, dataset, metrics)
-results = evaluator.evaluate()
+# Phase 1: Generate predictions
+evaluator = Evaluator(agent, dataset)
+predictions_file = evaluator.generate_predictions(
+    output_path="outputs/predictions.json",
+    num_examples=100,
+    batch_size=8
+)
+
+# Phase 2: Compute metrics (can retry if it fails!)
+results = evaluator.compute_metrics(
+    predictions_file=predictions_file,
+    metrics=[ExactMatchMetric(), F1Metric()],
+    output_path="outputs/results.json"
+)
+
+print(f"Exact Match: {results['exact_match']:.4f}")
+print(f"F1 Score: {results['f1']:.4f}")
 ```
 
 ### Advanced: LLM-as-a-Judge
 
-For high-quality binary correctness labels:
+For high-quality correctness judgments with automatic checkpointing:
 
-```python
-from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
-from ragicamp.models.openai import OpenAIModel
+```yaml
+# In your config:
+judge_model:
+  type: openai
+  model_name: "gpt-4o-mini"  # Budget-friendly
+  temperature: 0.0
 
-# Create GPT-4 judge
-judge_model = OpenAIModel("gpt-4o", temperature=0.0)
-llm_judge = LLMJudgeQAMetric(judge_model, judgment_type="binary")
-
-# Add to evaluation
-metrics = [ExactMatchMetric(), F1Metric(), llm_judge]
-evaluator = Evaluator(agent, dataset, metrics)
+metrics:
+  - exact_match
+  - f1
+  - name: llm_judge_qa
+    params:
+      judgment_type: "binary"  # correct/incorrect
+      batch_size: 16           # Process 16 judgments at once
+      # Checkpoint auto-configured by system!
 ```
 
-**See:** [Metrics Guide](guides/METRICS.md) and [LLM Judge Guide](guides/LLM_JUDGE.md)
+**Features:**
+- ✅ **Saves progress every 5 batches** automatically
+- ✅ **Resumes from checkpoint** if API fails
+- ✅ **Batch processing** for speed (16 judgments at once)
+- ✅ **Budget-friendly** using gpt-4o-mini
+
+**Example:**
+```bash
+# Run with LLM judge
+make eval-baseline-llm-judge
+
+# If it fails at batch 35/57? Just run again!
+# It automatically resumes from checkpoint
+```
+
+**See:** 
+- [Two-Phase Evaluation Guide](guides/TWO_PHASE_EVALUATION.md) - Robust evaluation workflow
+- [Metrics Guide](guides/METRICS.md) - Choosing evaluation metrics
+- [LLM Judge Guide](guides/LLM_JUDGE.md) - Using GPT-4 for evaluation
+- [Config Guide](guides/CONFIG_BASED_EVALUATION.md) - Config-driven experiments
 
 ---
 
