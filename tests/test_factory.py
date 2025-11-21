@@ -126,15 +126,17 @@ class TestDatasetFactory:
     @patch("ragicamp.factory.NaturalQuestionsDataset")
     def test_create_natural_questions_dataset(self, mock_nq):
         """Test creating Natural Questions dataset."""
-        # Mock the dataset instance
-        mock_dataset = Mock()
+        # Create a MagicMock that supports len()
+        from unittest.mock import MagicMock
+
+        mock_dataset = MagicMock()
         mock_dataset.__len__.return_value = 100
+        mock_dataset.examples = [{"question": "q", "answers": ["a"]}] * 100
         mock_nq.return_value = mock_dataset
 
         config = {
             "name": "natural_questions",
             "split": "validation",
-            "num_examples": 50,
             "filter_no_answer": True,
         }
 
@@ -142,6 +144,8 @@ class TestDatasetFactory:
 
         # Should create NaturalQuestionsDataset
         mock_nq.assert_called_once()
+        # Verify split was passed correctly
+        assert mock_nq.call_args.kwargs["split"] == "validation"
 
     def test_create_dataset_invalid_name(self):
         """Test creating dataset with invalid name."""
@@ -177,38 +181,28 @@ class TestMetricsFactory:
 
     def test_create_metric_with_params(self):
         """Test creating metric with parameters."""
-        metrics_config = [{"name": "bertscore", "params": {"model_type": "bert-base-uncased"}}]
+        # Test with exact_match which supports params
+        metrics_config = [{"name": "exact_match", "params": {"normalize_answer": True}}]
 
-        with patch("ragicamp.factory.BERTScoreMetric") as mock_bertscore:
-            # Mock the import check
-            import sys
-
-            sys.modules["ragicamp.metrics.bertscore"] = Mock()
-
-            try:
-                metrics = ComponentFactory.create_metrics(metrics_config)
-            except:
-                pass  # May fail due to actual imports, but we check the call
+        metrics = ComponentFactory.create_metrics(metrics_config)
+        assert len(metrics) == 1
+        assert metrics[0].name == "exact_match"
 
     def test_create_llm_judge_metric(self):
         """Test creating LLM judge metric with judge model."""
+        from ragicamp.models.base import LanguageModel
+
         judge_model = Mock(spec=LanguageModel)
         metrics_config = [
             {"name": "llm_judge_qa", "params": {"judgment_type": "binary", "batch_size": 8}}
         ]
 
-        with patch("ragicamp.factory.LLMJudgeQAMetric") as mock_llm_judge:
-            # Mock availability check
-            import sys
+        # Test that factory can handle llm_judge_qa config
+        metrics = ComponentFactory.create_metrics(metrics_config, judge_model=judge_model)
 
-            module_mock = Mock()
-            module_mock.LLMJudgeQAMetric = mock_llm_judge
-            sys.modules["ragicamp.metrics.llm_judge_qa"] = module_mock
-
-            try:
-                metrics = ComponentFactory.create_metrics(metrics_config, judge_model=judge_model)
-            except:
-                pass
+        # Should have created the metric
+        assert len(metrics) == 1
+        assert metrics[0].name == "llm_judge_qa"
 
     def test_skip_unavailable_metric(self):
         """Test that unavailable metrics are skipped with warning."""

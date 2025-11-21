@@ -9,8 +9,8 @@ from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
 class MockMetric(Metric):
     """Mock metric for testing base functionality."""
 
-    def __init__(self, name="mock"):
-        super().__init__(name)
+    def __init__(self, name="mock", **kwargs):
+        super().__init__(name, **kwargs)
         self.compute_called = False
         self.compute_single_called = False
 
@@ -134,12 +134,12 @@ class TestF1Score:
         """Test F1 with partial token overlap."""
         metric = F1Metric()
 
-        predictions = ["Paris is the capital"]
+        predictions = ["Paris is nice"]
         references = [["The capital is Paris"]]
 
         result = metric.compute(predictions, references)
 
-        # Should have some overlap
+        # Should have some overlap (only "Paris" and "is" match)
         assert 0.0 < result["f1"] < 1.0
 
     def test_f1_no_overlap(self):

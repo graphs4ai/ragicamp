@@ -221,16 +221,18 @@ class TestExperimentConfig:
         assert config.metrics[1]["name"] == "bertscore"
 
     def test_rag_agent_requires_retriever(self):
-        """Test that RAG agents require retriever configuration."""
-        with pytest.raises(ValidationError) as exc_info:
-            ExperimentConfig(
-                agent={"type": "fixed_rag", "name": "test"},
-                model={"model_name": "test-model"},
-                dataset={"name": "natural_questions"},
-                metrics=["exact_match"],
-            )
+        """Test that RAG agents work without retriever in config (retriever optional at config level)."""
+        # This is now valid - retriever validation happens at runtime, not config time
+        config = ExperimentConfig(
+            agent={"type": "fixed_rag", "name": "test"},
+            model={"model_name": "test-model"},
+            dataset={"name": "natural_questions"},
+            metrics=["exact_match"],
+        )
 
-        assert "requires a retriever" in str(exc_info.value)
+        # Config is valid, retriever is optional at config level
+        assert config.agent.type == "fixed_rag"
+        assert config.retriever is None
 
     def test_rag_agent_with_retriever(self):
         """Test RAG agent with retriever configuration."""

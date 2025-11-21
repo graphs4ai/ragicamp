@@ -151,6 +151,8 @@ outputs/
 
 ### Agent Pattern
 
+**For complete agent documentation, see [AGENTS.md](AGENTS.md)**
+
 ```python
 class MyAgent(RAGAgent):
     def __init__(self, name: str, model: LanguageModel, **kwargs):
@@ -168,6 +170,12 @@ class MyAgent(RAGAgent):
         # 3. Return proper response
         return RAGResponse(answer=answer, context=context)
 ```
+
+**Key principles:**
+- Always return `RAGResponse` with `RAGContext`
+- Use `PromptBuilder` and `ContextFormatter` utilities
+- Implement `save()` and `load()` for artifacts
+- Type hints on all methods
 
 ### Retriever Pattern
 
@@ -390,14 +398,14 @@ from ragicamp.utils.formatting import ContextFormatter
 
 ### Adding a New Agent
 
-1. Create `src/ragicamp/agents/my_agent.py`
-2. Inherit from `RAGAgent`
-3. Implement `answer()` method
-4. Use `PromptBuilder` and `ContextFormatter`
-5. Return `RAGResponse` with `RAGContext`
-6. Optional: Add `save()` and `load()` methods
-7. Add tests in `tests/test_agents.py`
-8. Update `docs/AGENTS.md` with example
+**See [AGENTS.md](AGENTS.md) for detailed guide on creating agents.**
+
+Quick checklist:
+1. Create `src/ragicamp/agents/my_agent.py` inheriting from `RAGAgent`
+2. Implement `answer()` returning `RAGResponse`
+3. Add `save()` and `load()` if needed
+4. Add tests in `tests/test_agents.py`
+5. Update `AGENTS.md` with example
 
 ### Adding a New Metric
 
@@ -736,10 +744,10 @@ path = manager.get_agent_path("agent_v1")
 
 ## Resources
 
-- **Main docs:** `docs/README.md`
+- **Agent guide:** [AGENTS.md](AGENTS.md) - Complete agent documentation
 - **Architecture:** `docs/ARCHITECTURE.md`
-- **Agent guide:** `docs/AGENTS.md`
 - **Quick start:** `docs/GETTING_STARTED.md`
+- **Guides:** `docs/guides/` - Feature-specific guides
 - **API patterns:** Look at existing implementations
 
 **Remember:** Keep it simple, type-safe, and reusable! 🚀
