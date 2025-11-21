@@ -73,8 +73,32 @@ class MetricConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     """Evaluation configuration."""
 
+    mode: str = Field(
+        default="both",
+        description="Evaluation mode: 'generate' (predictions only), 'evaluate' (metrics only), or 'both'"
+    )
     batch_size: Optional[int] = Field(default=None, description="Batch size for evaluation")
     num_examples: Optional[int] = Field(default=None, description="Number of examples to evaluate")
+    predictions_file: Optional[str] = Field(
+        default=None,
+        description="Path to predictions file (required for 'evaluate' mode)"
+    )
+
+    @validator("mode")
+    def validate_mode(cls, v):
+        """Validate mode is one of the allowed values."""
+        allowed = ["generate", "evaluate", "both"]
+        if v not in allowed:
+            raise ValueError(f"mode must be one of {allowed}, got '{v}'")
+        return v
+
+    @validator("predictions_file")
+    def validate_predictions_file(cls, v, values):
+        """Ensure predictions_file is set for evaluate mode."""
+        mode = values.get("mode")
+        if mode == "evaluate" and not v:
+            raise ValueError("predictions_file must be set when mode='evaluate'")
+        return v
 
     class Config:
         extra = "allow"

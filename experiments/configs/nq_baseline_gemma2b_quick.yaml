@@ -19,9 +19,10 @@ dataset:
   num_examples: 10
   filter_no_answer: true
 
-# Batch processing for faster evaluation
+# Evaluation settings
 evaluation:
-  batch_size: 4  # Process 4 questions at once
+  mode: both      # generate (predictions only), evaluate (metrics only), or both
+  batch_size: 4   # Process 4 questions at once
 
 metrics:
   - exact_match

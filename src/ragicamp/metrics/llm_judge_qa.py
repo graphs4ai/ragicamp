@@ -51,14 +51,16 @@ class LLMJudgeQAMetric(Metric):
         predictions: List[str],
         references: Union[List[str], List[List[str]]],
         questions: List[str] = None,
+        checkpoint_path: Optional[str] = None,
         **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute LLM judge scores with batch processing.
+        """Compute LLM judge scores with batch processing and checkpointing.
         
         Args:
             predictions: Predicted answers
             references: Reference answers
             questions: Questions for context (highly recommended)
+            checkpoint_path: Path to save/load checkpoint (for resume capability)
             **kwargs: Additional parameters
             
         Returns:
@@ -69,12 +71,33 @@ class LLMJudgeQAMetric(Metric):
             - llm_judge_qa_incorrect: Proportion marked as incorrect
         """
         from tqdm import tqdm
+        import json
+        from pathlib import Path
         
         scores = []
         categories_count = {cat: 0 for cat in self.categories}
         
-        # Clear cache for new evaluation
-        self._judgment_cache.clear()
+        # Try to load checkpoint if it exists
+        start_batch = 0
+        if checkpoint_path and Path(checkpoint_path).exists():
+            print(f"📂 Found checkpoint at {checkpoint_path}, resuming...")
+            try:
+                with open(checkpoint_path, 'r') as f:
+                    checkpoint_data = json.load(f)
+                    self._judgment_cache = checkpoint_data.get("cache", {})
+                    # Convert cache keys back to tuples if needed
+                    self._judgment_cache = {k: tuple(v) if isinstance(v, list) else v 
+                                           for k, v in self._judgment_cache.items()}
+                    start_batch = checkpoint_data.get("last_batch", 0) + 1
+                    print(f"✓ Resumed from batch {start_batch}")
+            except Exception as e:
+                print(f"⚠️  Could not load checkpoint: {e}")
+                print("   Starting from scratch...")
+                self._judgment_cache.clear()
+                start_batch = 0
+        else:
+            # Clear cache for new evaluation
+            self._judgment_cache.clear()
         
         # Prepare all prompts and cache keys
         all_prompts = []
@@ -98,38 +121,69 @@ class LLMJudgeQAMetric(Metric):
             all_prompts.append(prompt)
         
         # Process in batches
+        total_batches = (len(all_prompts) + self.batch_size - 1) // self.batch_size
         print(f"⚖️  Processing {len(all_prompts)} judgments in batches of {self.batch_size}...")
+        if start_batch > 0:
+            print(f"   Resuming from batch {start_batch}/{total_batches}")
         
-        for batch_start in tqdm(range(0, len(all_prompts), self.batch_size), desc="LLM Judge batches"):
-            batch_end = min(batch_start + self.batch_size, len(all_prompts))
-            batch_prompts = all_prompts[batch_start:batch_end]
-            batch_keys = cache_keys[batch_start:batch_end]
-            
-            # Get judgments with temperature=0 for consistency
-            batch_judgments = self.judge_model.generate(
-                batch_prompts, 
-                temperature=0.0, 
-                max_tokens=200
-            )
-            
-            # Process each judgment in the batch
-            for cache_key, judgment in zip(batch_keys, batch_judgments):
-                # Extract categorical judgment
-                category, score = self._extract_judgment(judgment)
+        try:
+            for batch_idx in tqdm(range(start_batch, total_batches), 
+                                  desc="LLM Judge batches",
+                                  initial=start_batch,
+                                  total=total_batches):
+                batch_start = batch_idx * self.batch_size
+                batch_end = min(batch_start + self.batch_size, len(all_prompts))
+                batch_prompts = all_prompts[batch_start:batch_end]
+                batch_keys = cache_keys[batch_start:batch_end]
                 
-                # Store in cache for later compute_single() calls
-                self._judgment_cache[cache_key] = (category, score)
+                # Get judgments with temperature=0 for consistency
+                batch_judgments = self.judge_model.generate(
+                    batch_prompts, 
+                    temperature=0.0, 
+                    max_tokens=200
+                )
                 
+                # Process each judgment in the batch
+                for cache_key, judgment in zip(batch_keys, batch_judgments):
+                    # Extract categorical judgment
+                    category, score = self._extract_judgment(judgment)
+                    
+                    # Store in cache for later compute_single() calls
+                    self._judgment_cache[cache_key] = (category, score)
+                
+                # Save checkpoint after each batch
+                if checkpoint_path and (batch_idx + 1) % 5 == 0:  # Save every 5 batches
+                    self._save_checkpoint(checkpoint_path, batch_idx)
+        
+        except Exception as e:
+            # Save checkpoint on error
+            if checkpoint_path:
+                print(f"\n⚠️  Error occurred: {e}")
+                print(f"💾 Saving checkpoint to {checkpoint_path}...")
+                self._save_checkpoint(checkpoint_path, batch_idx)
+                print(f"✓ Checkpoint saved. You can resume by running the same command.")
+            raise  # Re-raise the error
+        
+        # Compute final scores from cache
+        for cache_key in cache_keys:
+            if cache_key in self._judgment_cache:
+                category, score = self._judgment_cache[cache_key]
                 scores.append(score)
                 
-                # Safely increment category count (handle unexpected categories from LLM)
+                # Safely increment category count
                 if category in categories_count:
                     categories_count[category] += 1
                 else:
-                    # LLM returned unexpected category - treat as incorrect
-                    print(f"Warning: LLM returned unexpected category '{category}' (expected {self.categories}). Treating as 'incorrect'.")
                     categories_count["incorrect"] += 1
-                    scores[-1] = 0.0  # Override score to 0.0 for safety
+                    scores[-1] = 0.0
+        
+        # Clean up checkpoint on success
+        if checkpoint_path and Path(checkpoint_path).exists():
+            try:
+                Path(checkpoint_path).unlink()
+                print(f"✓ Removed checkpoint file (evaluation completed)")
+            except:
+                pass
         
         # Compute metrics
         total = len(scores)
@@ -146,6 +200,31 @@ class LLMJudgeQAMetric(Metric):
             results["llm_judge_qa_partial"] = categories_count.get("partially_correct", 0) / total if total > 0 else 0.0
         
         return results
+    
+    def _save_checkpoint(self, checkpoint_path: str, last_batch: int) -> None:
+        """Save checkpoint of judgment cache.
+        
+        Args:
+            checkpoint_path: Path to save checkpoint
+            last_batch: Index of last completed batch
+        """
+        import json
+        from pathlib import Path
+        
+        # Ensure directory exists
+        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        checkpoint_data = {
+            "last_batch": last_batch,
+            "cache": self._judgment_cache,
+            "judgment_type": self.judgment_type,
+            "batch_size": self.batch_size
+        }
+        
+        with open(checkpoint_path, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2)
+        
+        print(f"  💾 Checkpoint saved (batch {last_batch})")
     
     def _create_judgment_prompt(
         self,

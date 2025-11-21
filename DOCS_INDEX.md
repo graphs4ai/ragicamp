@@ -31,7 +31,8 @@ Located in `docs/guides/`:
 
 | Guide | Purpose |
 |-------|---------|
-| **[CONFIG_BASED_EVALUATION.md](docs/guides/CONFIG_BASED_EVALUATION.md)** | Complete config guide (MUST READ) |
+| **[TWO_PHASE_EVALUATION.md](docs/guides/TWO_PHASE_EVALUATION.md)** ⭐ **NEW!** | Robust two-phase evaluation (MUST READ) |
+| **[CONFIG_BASED_EVALUATION.md](docs/guides/CONFIG_BASED_EVALUATION.md)** | Complete config guide |
 | **[METRICS.md](docs/guides/METRICS.md)** | Choosing metrics |
 | **[LLM_JUDGE.md](docs/guides/LLM_JUDGE.md)** | Using GPT-4 for evaluation |
 | **[BATCH_PROCESSING.md](docs/guides/BATCH_PROCESSING.md)** | Batch generation guide |
@@ -92,8 +93,9 @@ Historical documents (completed work):
 #### 👋 **New to RAGiCamp**
 1. Start with [README.md](README.md)
 2. Follow [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
-3. Try commands from [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-4. Read [docs/guides/CONFIG_BASED_EVALUATION.md](docs/guides/CONFIG_BASED_EVALUATION.md)
+3. Read [docs/guides/TWO_PHASE_EVALUATION.md](docs/guides/TWO_PHASE_EVALUATION.md) ⭐ **Essential!**
+4. Try commands from [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
+5. Read [docs/guides/CONFIG_BASED_EVALUATION.md](docs/guides/CONFIG_BASED_EVALUATION.md)
 
 #### 🔁 **Returning User**
 1. Check [WHATS_NEW.md](WHATS_NEW.md) for latest features
@@ -121,12 +123,12 @@ Historical documents (completed work):
 
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 30+
-- **Main Guides**: 11
+- **Total Documents**: 31+
+- **Main Guides**: 12
 - **Technical Docs**: 5
 - **Development Docs**: 3
 - **Archives**: 2
-- **Last Updated**: November 18, 2025
+- **Last Updated**: November 21, 2025
 
 ---
 
@@ -134,6 +136,8 @@ Historical documents (completed work):
 
 ### By Topic
 
+- **Evaluation**: TWO_PHASE_EVALUATION.md ⭐, CONFIG_BASED_EVALUATION.md
+- **Robustness**: TWO_PHASE_EVALUATION.md (checkpointing, error recovery)
 - **Configuration**: CONFIG_BASED_EVALUATION.md, CONFIG_SYSTEM_BENEFITS.md
 - **Metrics**: METRICS.md, LLM_JUDGE.md, FAITHFULNESS_METRICS_SUMMARY.md
 - **Datasets**: DATASET_MANAGEMENT.md

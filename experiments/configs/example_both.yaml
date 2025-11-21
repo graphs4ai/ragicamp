@@ -1,0 +1,41 @@
+# Example: Generate predictions AND compute metrics
+# This is the "classic" mode that does everything in one run
+# Only use this if you're confident metrics won't fail
+
+agent:
+  type: direct_llm
+  name: "gemma_2b_baseline_both"
+  system_prompt: "You are a helpful AI assistant. Answer questions accurately and concisely."
+
+model:
+  type: huggingface
+  model_name: "google/gemma-2-2b-it"
+  device: "cuda"
+  load_in_8bit: true
+
+dataset:
+  name: natural_questions
+  split: validation
+  num_examples: 100
+  filter_no_answer: true
+
+evaluation:
+  mode: both      # Generate predictions, then compute metrics
+  batch_size: 8   # Process 8 questions at once for speed
+
+# Optional: Judge model for LLM-based metrics
+judge_model:
+  type: openai
+  model_name: "gpt-4o-mini"  # Budget option
+
+metrics:
+  - exact_match
+  - f1
+  - bertscore
+  - bleurt
+  # - llm_judge_qa  # Uncomment if judge_model is configured
+
+output:
+  save_predictions: true
+  output_path: "outputs/nq_baseline_complete.json"
+

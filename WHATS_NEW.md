@@ -1,26 +1,69 @@
 # What's New in RAGiCamp 🎉
 
-**November 18, 2025** - Major architecture improvements!
+**November 21, 2025** - Robust two-phase evaluation!
 
 ---
 
 ## 🚀 TL;DR
 
 RAGiCamp now has:
+- ✅ **Two-phase evaluation** - Never lose progress to API failures!
+- ✅ **Automatic checkpointing** - LLM judge resumes from where it left off
+- ✅ **Modular design** - Generate predictions once, compute metrics many times
+- ✅ **Three evaluation modes** - generate, evaluate, or both
 - ✅ **Type-safe configs** with validation
-- ✅ **Better error messages**  
-- ✅ **Easy extensibility** (factory + registry)
-- ✅ **Cleaner imports**
 - ✅ **100x faster LLM judge**
-- ✅ **New CLI tools**
+- ✅ **Better error handling**
 
 **Everything is backward compatible!** Your existing code still works.
 
 ---
 
-## ✨ Top 5 New Features
+## ✨ Top New Features
 
-### 1. Config Validation
+### 1. 🛡️ Two-Phase Evaluation (GAME CHANGER!)
+
+**The Problem**: Spend 2 hours generating predictions, then LLM judge fails at minute 100 with API 403 error. Lost all progress! 😢
+
+**The Solution**: Two-phase evaluation
+
+```bash
+# Phase 1: Generate predictions (saved immediately)
+mode: generate → Takes 50 minutes → predictions_raw.json ✓
+
+# Phase 2: Compute metrics (can retry!)
+python scripts/compute_metrics.py → If it fails, just run again!
+```
+
+**Benefits**:
+- ✅ **Never lose predictions** - Saved before metrics computation
+- ✅ **Retry on failure** - API errors? Just run metrics again
+- ✅ **Experiment freely** - Try different metrics on same predictions
+- ✅ **Auto-checkpointing** - LLM judge saves progress every 5 batches
+
+**Three modes**:
+```yaml
+evaluation:
+  mode: generate  # Generate predictions only (safest)
+  mode: evaluate  # Compute metrics only (on existing predictions)
+  mode: both      # Do everything (classic mode, but still saves predictions first!)
+```
+
+**Real example**:
+```bash
+# You ran this and it failed at batch 35/57 with 403 error:
+python scripts/compute_metrics.py --predictions outputs/predictions.json --config llm_judge.yaml
+# ❌ Error: openai.PermissionDeniedError: Error code: 403
+
+# No problem! Just run again:
+python scripts/compute_metrics.py --predictions outputs/predictions.json --config llm_judge.yaml
+# ✓ Resumed from batch 35, continued from there
+# ✓ Success!
+```
+
+See **[Two-Phase Evaluation Guide](docs/guides/TWO_PHASE_EVALUATION.md)**
+
+### 2. Config Validation
 
 Catch errors **before** running experiments:
 
@@ -38,7 +81,7 @@ make validate-config CONFIG=my_experiment.yaml
 - Better error messages
 - Type safety
 
-### 2. Config Templates
+### 3. Config Templates
 
 Generate configs instead of copying:
 
@@ -57,7 +100,7 @@ make eval CONFIG=my_baseline.yaml              # Run it
 - Always up-to-date
 - No copy-paste errors
 
-### 3. Component Registry
+### 4. Component Registry
 
 Add custom components without modifying core code:
 
@@ -83,7 +126,7 @@ class MyAwesomeAgent(RAGAgent):
 - No core code changes
 - Clean separation
 
-### 4. Better Imports
+### 5. Better Imports
 
 Cleaner, simpler imports:
 
@@ -104,7 +147,7 @@ from ragicamp.datasets import NaturalQuestionsDataset
 - Easier to remember
 - Better IDE autocomplete
 
-### 5. 100x Faster LLM Judge
+### 6. 100x Faster LLM Judge
 
 Fixed caching bug - LLM judge now reuses judgments:
 

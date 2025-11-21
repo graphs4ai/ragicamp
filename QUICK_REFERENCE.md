@@ -1,26 +1,76 @@
-# RAGiCamp Quick Reference - Config-Based Evaluation
+# RAGiCamp Quick Reference
 
-## 🚀 TL;DR - One Command to Rule Them All
+## 🚀 TL;DR - Robust Two-Phase Workflow
 
 ```bash
-cd /home/gabriel_frontera_cloudwalk_io/ragicamp
+# NEW: Two-phase evaluation (never lose progress!)
 
-# Quick test (2-3 min)
+# Phase 1: Generate predictions (saved immediately)
+evaluation:
+  mode: generate  # In your config
+uv run python experiments/scripts/run_experiment.py --config my_config.yaml
+
+# Phase 2: Compute metrics (can retry if it fails!)
+python scripts/compute_metrics.py \
+  --predictions outputs/predictions_raw.json \
+  --config my_config.yaml
+```
+
+## 📋 Quick Test Commands
+
+```bash
+# Quick test (10 examples)
 make eval-baseline-quick
 
-# Quick test with batching (1-2 min - FASTER!)
-make eval-baseline-quick-batch
-
-# Full evaluation (20-25 min)
+# Full evaluation (100 examples)  
 make eval-baseline-full
-
-# Full with batching (10-15 min - 2X FASTER!)
-make eval-baseline-full-batch
 
 # Compare with RAG
 make index-wiki-small    # Once
 make eval-rag            # Then evaluate
 ```
+
+---
+
+## 🛡️ Three Evaluation Modes
+
+### Mode 1: Generate (Predictions Only) - SAFEST
+
+```yaml
+evaluation:
+  mode: generate  # Only generate predictions
+  batch_size: 32
+```
+
+**When to use**: Large evaluations, when you want to compute metrics later
+
+**Benefits**: Never lose predictions to API failures!
+
+### Mode 2: Evaluate (Metrics Only)
+
+```yaml
+evaluation:
+  mode: evaluate  # Only compute metrics
+  predictions_file: "outputs/predictions_raw.json"
+```
+
+**When to use**: Compute metrics on existing predictions, retry after failures
+
+**Benefits**: Experiment with different metrics without regenerating
+
+### Mode 3: Both (Classic) 
+
+```yaml
+evaluation:
+  mode: both  # Generate + compute metrics
+  batch_size: 8
+```
+
+**When to use**: Quick tests only
+
+**Benefits**: One command does everything (but still saves predictions first!)
+
+**Recommendation**: Use `generate` mode for large evaluations!
 
 ---
 

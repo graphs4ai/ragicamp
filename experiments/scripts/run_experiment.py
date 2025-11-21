@@ -8,6 +8,7 @@ This script provides a clean, config-driven way to run RAG experiments.
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -60,28 +61,20 @@ def load_retriever(config):
     return ComponentFactory.create_retriever(config)
 
 
-def run_evaluation(config):
-    """Run evaluation mode.
+def run_generate(config):
+    """Run generate mode - only generate predictions.
     
     Args:
         config: Full experiment configuration
     """
     print("\n" + "="*70)
-    print("=== Evaluation Mode ===")
+    print("=== GENERATE MODE: Predictions Only ===")
     print("="*70 + "\n")
     
     # Create model
     print("Creating model...")
     model = ComponentFactory.create_model(config.model.model_dump())
     print(f"✓ Model loaded: {config.model.model_name}\n")
-    
-    # Create judge model if needed
-    judge_model = None
-    if config.judge_model:
-        print("Creating LLM judge model...")
-        judge_model = create_judge_model(config.judge_model.model_dump())
-        if judge_model:
-            print(f"✓ Created judge model: {config.judge_model.model_name}\n")
     
     # Create retriever if needed for RAG agents
     retriever = None
@@ -107,45 +100,126 @@ def run_evaluation(config):
     dataset = ComponentFactory.create_dataset(config.dataset.model_dump())
     print(f"Dataset size: {len(dataset)}\n")
     
+    # Create evaluator (without metrics)
+    evaluator = Evaluator(
+        agent=agent,
+        dataset=dataset
+    )
+    
+    # Get settings
+    batch_size = config.evaluation.batch_size
+    num_examples = config.evaluation.num_examples
+    output_path = config.output.output_path
+    
+    # Generate predictions
+    predictions_file = evaluator.generate_predictions(
+        output_path=output_path,
+        num_examples=num_examples,
+        batch_size=batch_size
+    )
+    
+    print(f"✓ Predictions saved to: {predictions_file}")
+    print(f"\n💡 Next: Compute metrics with:")
+    print(f"   python scripts/compute_metrics.py --predictions {predictions_file} --config {sys.argv[sys.argv.index('--config')+1]}\n")
+
+
+def run_evaluate(config):
+    """Run evaluate mode - only compute metrics on existing predictions.
+    
+    Args:
+        config: Full experiment configuration
+    """
+    print("\n" + "="*70)
+    print("=== EVALUATE MODE: Metrics Only ===")
+    print("="*70 + "\n")
+    
+    # Get predictions file
+    predictions_file = config.evaluation.predictions_file
+    if not predictions_file:
+        raise ValueError("predictions_file must be set in config for evaluate mode")
+    
+    print(f"Loading predictions from: {predictions_file}")
+    
+    # Load predictions
+    with open(predictions_file, 'r') as f:
+        predictions_data = json.load(f)
+    
+    print(f"✓ Loaded {predictions_data['num_examples']} predictions")
+    print(f"  Agent: {predictions_data['agent_name']}")
+    print(f"  Dataset: {predictions_data['dataset_name']}\n")
+    
+    # Create judge model if needed
+    judge_model = None
+    if config.judge_model:
+        print("Creating LLM judge model...")
+        judge_model = create_judge_model(config.judge_model.model_dump())
+        if judge_model:
+            print(f"✓ Created judge model: {config.judge_model.model_name}\n")
+    
     # Create metrics
     print("Creating metrics...")
-    # Convert metrics to list of dicts/strings
     metrics_config = [
         m if isinstance(m, str) else m 
         for m in config.metrics
     ]
+    
+    # Add checkpoint support for LLM judge metrics
+    checkpoint_dir = Path("outputs/checkpoints")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    for metric_config in metrics_config:
+        if isinstance(metric_config, dict):
+            metric_name = metric_config.get("name", "")
+            if metric_name in ["llm_judge", "llm_judge_qa"]:
+                if "params" not in metric_config:
+                    metric_config["params"] = {}
+                metric_config["params"]["checkpoint_path"] = str(
+                    checkpoint_dir / f"{predictions_data['agent_name']}_llm_judge_checkpoint.json"
+                )
+    
     metrics = ComponentFactory.create_metrics(
         metrics_config,
         judge_model=judge_model
     )
     
-    # Show which metrics are loaded
-    metric_names = [m.name for m in metrics]
-    for name in metric_names:
-        print(f"  - {name}")
+    for metric in metrics:
+        print(f"  - {metric.name}")
     print()
     
-    # Create evaluator
-    evaluator = Evaluator(
-        agent=agent,
-        dataset=dataset,
-        metrics=metrics
-    )
+    # Extract predictions and references
+    predictions = []
+    references = []
+    questions = []
     
-    # Run evaluation
-    print(f"Evaluating on {len(dataset)} examples...")
+    for item in predictions_data["predictions"]:
+        predictions.append(item["prediction"])
+        references.append(item["expected_answers"])
+        questions.append(item["question"])
     
-    # Get evaluation and output settings
-    batch_size = config.evaluation.batch_size
-    save_predictions = config.output.save_predictions
-    output_path = config.output.output_path
+    # Compute metrics
+    print("="*70)
+    print("COMPUTING METRICS")
+    print("="*70 + "\n")
     
-    # Run evaluation
-    results = evaluator.evaluate(
-        save_predictions=save_predictions,
-        output_path=output_path,
-        batch_size=batch_size
-    )
+    results = {}
+    for metric in metrics:
+        print(f"  - {metric.name}")
+        try:
+            if metric.name in ["llm_judge", "llm_judge_qa"]:
+                scores_dict = metric.compute(
+                    predictions=predictions,
+                    references=references,
+                    questions=questions
+                )
+            else:
+                scores_dict = metric.compute(
+                    predictions=predictions,
+                    references=references
+                )
+            results.update(scores_dict)
+        except Exception as e:
+            print(f"    ⚠️  Error: {e}")
+            results[f"{metric.name}_error"] = str(e)
     
     # Print results
     print("\n" + "="*70)
@@ -157,9 +231,162 @@ def run_evaluation(config):
         else:
             print(f"  {metric_name}: {score}")
     print("="*70 + "\n")
+
+
+def run_both(config):
+    """Run both modes - generate predictions then compute metrics.
     
-    if save_predictions and output_path:
-        print(f"✓ Results saved to: {output_path}\n")
+    Args:
+        config: Full experiment configuration
+    """
+    print("\n" + "="*70)
+    print("=== BOTH MODE: Generate + Evaluate ===")
+    print("="*70 + "\n")
+    
+    # Phase 1: Generate predictions
+    print("=" * 70)
+    print("PHASE 1: GENERATING PREDICTIONS")
+    print("=" * 70)
+    
+    # Create model
+    print("\nCreating model...")
+    model = ComponentFactory.create_model(config.model.model_dump())
+    print(f"✓ Model loaded: {config.model.model_name}\n")
+    
+    # Create retriever if needed for RAG agents
+    retriever = None
+    agent_type = config.agent.type
+    if agent_type in ["fixed_rag", "bandit_rag", "mdp_rag"]:
+        if not config.retriever:
+            raise ValueError(f"{agent_type} agent requires a retriever configuration")
+        print("Loading retriever...")
+        retriever = load_retriever(config.retriever.model_dump())
+        print(f"✓ Retriever loaded\n")
+    
+    # Create agent
+    print("Creating agent...")
+    agent = ComponentFactory.create_agent(
+        config.agent.model_dump(),
+        model=model,
+        retriever=retriever
+    )
+    print(f"✓ Agent created: {agent.name}\n")
+    
+    # Load dataset
+    print("Loading dataset...")
+    dataset = ComponentFactory.create_dataset(config.dataset.model_dump())
+    print(f"Dataset size: {len(dataset)}\n")
+    
+    # Create evaluator (without metrics yet)
+    evaluator = Evaluator(
+        agent=agent,
+        dataset=dataset
+    )
+    
+    # Get settings
+    batch_size = config.evaluation.batch_size
+    num_examples = config.evaluation.num_examples
+    output_path = config.output.output_path
+    
+    # Generate predictions
+    predictions_file = evaluator.generate_predictions(
+        output_path=output_path,
+        num_examples=num_examples,
+        batch_size=batch_size
+    )
+    
+    # Phase 2: Compute metrics
+    print("\n" + "=" * 70)
+    print("PHASE 2: COMPUTING METRICS")
+    print("=" * 70 + "\n")
+    
+    # Load the predictions we just saved
+    with open(predictions_file, 'r') as f:
+        predictions_data = json.load(f)
+    
+    # Create judge model if needed
+    judge_model = None
+    if config.judge_model:
+        print("Creating LLM judge model...")
+        judge_model = create_judge_model(config.judge_model.model_dump())
+        if judge_model:
+            print(f"✓ Created judge model: {config.judge_model.model_name}\n")
+    
+    # Create metrics
+    print("Creating metrics...")
+    metrics_config = [
+        m if isinstance(m, str) else m 
+        for m in config.metrics
+    ]
+    
+    # Add checkpoint support for LLM judge metrics
+    checkpoint_dir = Path("outputs/checkpoints")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    
+    for metric_config in metrics_config:
+        if isinstance(metric_config, dict):
+            metric_name = metric_config.get("name", "")
+            if metric_name in ["llm_judge", "llm_judge_qa"]:
+                if "params" not in metric_config:
+                    metric_config["params"] = {}
+                metric_config["params"]["checkpoint_path"] = str(
+                    checkpoint_dir / f"{config.agent.name}_llm_judge_checkpoint.json"
+                )
+    
+    metrics = ComponentFactory.create_metrics(
+        metrics_config,
+        judge_model=judge_model
+    )
+    
+    for metric in metrics:
+        print(f"  - {metric.name}")
+    print()
+    
+    # Extract predictions and references
+    predictions = []
+    references = []
+    questions = []
+    
+    for item in predictions_data["predictions"]:
+        predictions.append(item["prediction"])
+        references.append(item["expected_answers"])
+        questions.append(item["question"])
+    
+    # Compute metrics
+    results = {}
+    for metric in metrics:
+        print(f"Computing {metric.name}...")
+        try:
+            if metric.name in ["llm_judge", "llm_judge_qa"]:
+                scores_dict = metric.compute(
+                    predictions=predictions,
+                    references=references,
+                    questions=questions
+                )
+            else:
+                scores_dict = metric.compute(
+                    predictions=predictions,
+                    references=references
+                )
+            results.update(scores_dict)
+        except Exception as e:
+            print(f"  ⚠️  Error: {e}")
+            results[f"{metric.name}_error"] = str(e)
+    
+    # Print results
+    print("\n" + "="*70)
+    print("FINAL RESULTS")
+    print("="*70)
+    for metric_name, score in results.items():
+        if isinstance(score, float):
+            print(f"  {metric_name}: {score:.4f}")
+        else:
+            print(f"  {metric_name}: {score}")
+    print("="*70 + "\n")
+    
+    print(f"✓ Complete results saved")
+    print(f"  Predictions: {predictions_file}")
+    print(f"  Summary: {Path(predictions_file).parent / f'{config.agent.name}_summary.json'}\n")
 
 
 def run_training(config):
@@ -279,13 +506,21 @@ Examples:
         config.output.output_path = args.output
         config.output.save_predictions = True
     
-    # Run appropriate mode
-    if args.mode == "eval":
-        run_evaluation(config)
-    elif args.mode == "train":
+    # Determine mode from config or args
+    if args.mode == "train":
         run_training(config)
     else:
-        raise ValueError(f"Unknown mode: {args.mode}")
+        # Use evaluation mode from config
+        eval_mode = config.evaluation.mode
+        
+        if eval_mode == "generate":
+            run_generate(config)
+        elif eval_mode == "evaluate":
+            run_evaluate(config)
+        elif eval_mode == "both":
+            run_both(config)
+        else:
+            raise ValueError(f"Unknown evaluation mode: {eval_mode}")
 
 
 if __name__ == "__main__":

@@ -5,14 +5,15 @@ A modular, production-ready framework for experimenting with Retrieval-Augmented
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **🎉 NEW!** Type-safe configs, validation, 100x faster LLM judge, and more! See **[WHATS_NEW.md](WHATS_NEW.md)** and **[CHANGELOG.md](CHANGELOG.md)**
+> **🎉 NEW!** Two-phase evaluation (never lose progress), LLM judge checkpointing, and robust error handling! See **[WHATS_NEW.md](WHATS_NEW.md)**
 
 ## ✨ Key Features
 
+- 🛡️ **Robust Two-Phase Evaluation** - Generate predictions first, compute metrics later (never lose progress to API failures!)
+- 💾 **Automatic Checkpointing** - LLM judge saves progress every 5 batches, resume from where you left off
 - 🎯 **Multiple RAG Strategies** - DirectLLM baseline, FixedRAG, adaptive BanditRAG, and MDP-based agents
 - 📊 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore, BLEURT), and LLM-as-a-judge evaluation
 - ⚙️ **Config-Driven** - Run experiments by editing YAML configs, no code changes needed
-- 💾 **Production-Ready** - Save/load trained models, artifact management, reproducible experiments
 - 🔬 **Research-Friendly** - Built-in RL training, policy optimization, experiment tracking
 
 ## 🚀 Quick Start
@@ -30,6 +31,45 @@ make eval-baseline-full
 # See all available commands
 make help
 ```
+
+## 🛡️ Robust Two-Phase Evaluation
+
+RAGiCamp uses a **two-phase approach** to ensure you never lose progress:
+
+```yaml
+# Phase 1: Generate predictions (saved immediately)
+evaluation:
+  mode: generate  # Generate predictions, save them
+  batch_size: 32
+
+# Phase 2: Compute metrics (can retry if it fails)
+evaluation:
+  mode: evaluate  # Compute metrics on saved predictions
+  predictions_file: "outputs/predictions_raw.json"
+```
+
+**Why this matters:**
+- ✅ **Never lose progress** - Predictions saved before metrics computation
+- ✅ **Retry on failure** - If LLM judge fails (API 403, timeout), just run again
+- ✅ **Resume from checkpoint** - LLM judge saves progress every 5 batches
+- ✅ **Experiment freely** - Try different metrics on same predictions
+
+**Example: Large evaluation (3610 questions)**
+```bash
+# Step 1: Generate predictions (50 minutes, but only once!)
+uv run python experiments/scripts/run_experiment.py \
+  --config configs/generate_3610.yaml  # mode: generate
+
+# Step 2: Compute metrics (can retry if it fails)
+python scripts/compute_metrics.py \
+  --predictions outputs/predictions_raw.json \
+  --config configs/with_llm_judge.yaml
+
+# If LLM judge fails at batch 35/57? No problem!
+# Just run again - it resumes from checkpoint automatically
+```
+
+See **[Two-Phase Evaluation Guide](docs/guides/TWO_PHASE_EVALUATION.md)** for details.
 
 ## 💡 Two Ways to Use
 
@@ -54,7 +94,7 @@ uv run python experiments/scripts/run_experiment.py \
 - ✅ No code changes needed
 - ✅ Easy to share and version
 
-### 2. Programmatic
+### 2. Programmatic (Two-Phase API)
 
 ```python
 # Clean imports from module root
@@ -62,16 +102,25 @@ from ragicamp.agents import DirectLLMAgent
 from ragicamp.models import HuggingFaceModel
 from ragicamp.datasets import NaturalQuestionsDataset
 from ragicamp.evaluation.evaluator import Evaluator
-from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
+from ragicamp.metrics import ExactMatchMetric, F1Metric
 
 # Create agent
 model = HuggingFaceModel('google/gemma-2-2b-it')
 agent = DirectLLMAgent(name="baseline", model=model)
-
-# Evaluate
 dataset = NaturalQuestionsDataset(split="validation")
-evaluator = Evaluator(agent, dataset, [ExactMatchMetric(), F1Metric()])
-results = evaluator.evaluate(num_examples=100)
+
+# Phase 1: Generate predictions (saved automatically)
+evaluator = Evaluator(agent, dataset)
+predictions_file = evaluator.generate_predictions(
+    output_path="outputs/predictions.json",
+    num_examples=100,
+    batch_size=8
+)
+# → Predictions saved! Safe from failures during metrics computation
+
+# Phase 2: Compute metrics separately (can retry)
+from scripts.compute_metrics import compute_metrics_on_predictions
+# ... or use config-based approach (recommended)
 ```
 
 ## 🏗️ Architecture
