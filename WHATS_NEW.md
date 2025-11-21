@@ -164,6 +164,34 @@ Cost savings: 100x cheaper! 💰
 - Much lower API costs
 - More experiments, same budget
 
+### 7. 🧪 Comprehensive Test Suite
+
+**NEW!** Full unit test coverage for robustness:
+
+```bash
+# Run all tests
+make test
+
+# Test specific features
+make test-two-phase      # Two-phase evaluation
+make test-checkpoint     # Checkpoint system
+make test-config         # Config validation
+```
+
+**What's tested:**
+- ✅ Two-phase evaluation (generate + evaluate modes)
+- ✅ Checkpointing (save & resume)
+- ✅ Config validation (all three modes)
+- ✅ Metrics computation
+- ✅ Factory pattern
+- ✅ Error handling
+
+**Coverage targets:**
+- Core components: **>80%**
+- Critical paths: **100%**
+
+See **[tests/README.md](tests/README.md)** for details.
+
 ---
 
 ## 🛠️ New Commands

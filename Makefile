@@ -42,8 +42,15 @@ help:
 	@echo "  make eval-with-llm-judge-mini  - Budget version (GPT-4o-mini)"
 	@echo "  make eval-with-llm-judge-ternary - Ternary judge (correct/partial/incorrect)"
 	@echo ""
-	@echo "🧪 DEVELOPMENT"
-	@echo "  make test                 - Run tests"
+	@echo "🧪 TESTING"
+	@echo "  make test                 - Run all tests"
+	@echo "  make test-fast            - Run tests (skip slow ones)"
+	@echo "  make test-coverage        - Run tests with coverage report"
+	@echo "  make test-two-phase       - Test two-phase evaluation"
+	@echo "  make test-checkpoint      - Test checkpointing"
+	@echo "  make test-config          - Test config validation"
+	@echo ""
+	@echo "🔧 DEVELOPMENT"
 	@echo "  make lint                 - Run linting"
 	@echo "  make format               - Format code (black + isort)"
 	@echo "  make clean                - Clean generated files"
@@ -240,16 +247,55 @@ clean-datasets:
 	fi
 
 # ============================================================================
-# Development
+# Testing
 # ============================================================================
 
 test:
-	@echo "🧪 Running tests..."
+	@echo "🧪 Running all tests..."
 	uv run pytest tests/ -v
+
+test-fast:
+	@echo "⚡ Running fast tests (skip slow ones)..."
+	uv run pytest tests/ -v -m "not slow"
 
 test-coverage:
 	@echo "🧪 Running tests with coverage..."
 	uv run pytest tests/ --cov=src/ragicamp --cov-report=html --cov-report=term
+	@echo ""
+	@echo "✅ Coverage report generated: htmlcov/index.html"
+	@echo "   Open with: open htmlcov/index.html (macOS) or xdg-open htmlcov/index.html (Linux)"
+
+test-two-phase:
+	@echo "🧪 Testing two-phase evaluation..."
+	uv run pytest tests/test_two_phase_evaluation.py -v
+
+test-checkpoint:
+	@echo "🧪 Testing checkpoint system..."
+	uv run pytest tests/test_checkpointing.py -v
+
+test-config:
+	@echo "🧪 Testing config validation..."
+	uv run pytest tests/test_config.py -v
+
+test-metrics:
+	@echo "🧪 Testing metrics..."
+	uv run pytest tests/test_metrics.py -v
+
+test-factory:
+	@echo "🧪 Testing factory..."
+	uv run pytest tests/test_factory.py -v
+
+test-agents:
+	@echo "🧪 Testing agents..."
+	uv run pytest tests/test_agents.py -v
+
+test-watch:
+	@echo "👀 Running tests in watch mode..."
+	uv run pytest-watch tests/ -v
+
+# ============================================================================
+# Development
+# ============================================================================
 
 lint:
 	@echo "🔍 Running linters..."

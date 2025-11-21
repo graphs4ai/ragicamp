@@ -267,9 +267,45 @@ make list-artifacts             # List saved models/indices
 - **Benchmarking**: Compare models and approaches systematically
 - **Learning**: Understand RAG, RL, and QA evaluation methods
 
+## 🧪 Testing
+
+RAGiCamp has comprehensive unit tests covering all core functionality:
+
+```bash
+# Run all tests
+make test
+
+# Run specific test categories
+make test-two-phase      # Two-phase evaluation tests
+make test-checkpoint     # Checkpointing tests
+make test-config         # Config validation tests
+
+# Run with coverage
+make test-coverage
+
+# Fast tests only (skip slow ones)
+make test-fast
+```
+
+**Test Coverage:**
+- ✅ Two-phase evaluation system (generate → evaluate)
+- ✅ LLM judge checkpointing (resume from failures)
+- ✅ Config validation (all three modes)
+- ✅ Metrics computation (EM, F1, etc.)
+- ✅ Component factory
+- ✅ Agent functionality
+
+See **[tests/README.md](tests/README.md)** for detailed testing guide.
+
 ## 🤝 Contributing
 
 Contributions welcome! This is a research framework designed for experimentation.
+
+**Before contributing:**
+1. Run tests: `make test`
+2. Check coverage: `make test-coverage`
+3. Format code: `make format`
+4. Validate configs: `make validate-all-configs`
 
 ## 📄 License
 

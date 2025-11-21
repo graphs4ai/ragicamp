@@ -46,6 +46,22 @@ Located in `docs/guides/`:
 
 ---
 
+## 🧪 Testing Documentation
+
+| Document | Purpose |
+|----------|---------|
+| **[tests/README.md](tests/README.md)** ⭐ **NEW!** | Complete testing guide |
+
+**Test Categories:**
+- Two-phase evaluation tests
+- Checkpointing system tests  
+- Config validation tests
+- Metrics computation tests
+- Factory pattern tests
+- Agent functionality tests
+
+---
+
 ## 📜 Project Information
 
 | Document | Purpose |
@@ -110,9 +126,17 @@ Historical documents (completed work):
 
 #### 💻 **Developer**
 1. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design
-2. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) - Detailed analysis
-3. [CONFIG_SYSTEM_BENEFITS.md](CONFIG_SYSTEM_BENEFITS.md) - Config system
-4. [docs/guides/PATH_UTILITIES.md](docs/guides/PATH_UTILITIES.md) - Utility functions
+2. [tests/README.md](tests/README.md) ⭐ - Testing guide
+3. [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) - Detailed analysis
+4. [CONFIG_SYSTEM_BENEFITS.md](CONFIG_SYSTEM_BENEFITS.md) - Config system
+5. [docs/guides/PATH_UTILITIES.md](docs/guides/PATH_UTILITIES.md) - Utility functions
+
+**Before contributing:**
+```bash
+make test              # Run all tests
+make test-coverage     # Check coverage
+make format            # Format code
+```
 
 #### 🐛 **Troubleshooting**
 1. [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues
@@ -123,10 +147,12 @@ Historical documents (completed work):
 
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 31+
+- **Total Documents**: 32+
 - **Main Guides**: 12
+- **Testing Docs**: 1 (NEW!)
 - **Technical Docs**: 5
 - **Development Docs**: 3
+- **Test Files**: 6
 - **Archives**: 2
 - **Last Updated**: November 21, 2025
 
@@ -138,6 +164,7 @@ Historical documents (completed work):
 
 - **Evaluation**: TWO_PHASE_EVALUATION.md ⭐, CONFIG_BASED_EVALUATION.md
 - **Robustness**: TWO_PHASE_EVALUATION.md (checkpointing, error recovery)
+- **Testing**: tests/README.md ⭐ (unit tests, coverage, test guide)
 - **Configuration**: CONFIG_BASED_EVALUATION.md, CONFIG_SYSTEM_BENEFITS.md
 - **Metrics**: METRICS.md, LLM_JUDGE.md, FAITHFULNESS_METRICS_SUMMARY.md
 - **Datasets**: DATASET_MANAGEMENT.md

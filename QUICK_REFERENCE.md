@@ -256,12 +256,19 @@ See: `examples/path_utilities_example.py`
 make install              # Install dependencies
 make setup               # Full setup with BLEURT
 
+# Testing (NEW!)
+make test                # Run all tests
+make test-fast           # Run fast tests only
+make test-coverage       # Run with coverage report
+make test-two-phase      # Test two-phase evaluation
+make test-checkpoint     # Test checkpointing
+
 # Evaluation (Config-Based - RECOMMENDED)
 make eval-baseline-quick # Quick test
 make eval-baseline-full  # Full evaluation
 make eval-rag           # RAG evaluation
 
-# Configuration Management (NEW!)
+# Configuration Management
 make validate-config CONFIG=experiments/configs/my.yaml  # Validate config
 make validate-all-configs                                # Validate all configs
 make create-config OUTPUT=my.yaml TYPE=baseline          # Create template
