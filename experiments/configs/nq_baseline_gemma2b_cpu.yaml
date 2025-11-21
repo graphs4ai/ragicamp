@@ -19,9 +19,10 @@ dataset:
   num_examples: 10  # Keep small for CPU (slower)
   filter_no_answer: true
 
-# Note: batch_size has minimal benefit on CPU
+# Evaluation settings
 evaluation:
-  batch_size: 2  # Small batch for CPU
+  mode: both      # generate (predictions only), evaluate (metrics only), or both
+  batch_size: 2   # Small batch for CPU
 
 metrics:
   - exact_match
