@@ -26,4 +26,3 @@ __all__ = [
     "TrainingConfig",
     "create_config_template",
 ]
-

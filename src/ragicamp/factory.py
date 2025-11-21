@@ -45,7 +45,7 @@ class ComponentFactory:
         model_type = config.get("type", "huggingface")
         config_copy = dict(config)
         config_copy.pop("type", None)
-        
+
         # Remove generation-specific parameters (used in generate(), not __init__)
         generation_params = ["max_tokens", "temperature", "top_p", "stop"]
         for param in generation_params:
@@ -57,8 +57,7 @@ class ComponentFactory:
             return OpenAIModel(**config_copy)
         else:
             raise ValueError(
-                f"Unknown model type: {model_type}. "
-                f"Available: huggingface, openai"
+                f"Unknown model type: {model_type}. " f"Available: huggingface, openai"
             )
 
     @staticmethod
@@ -101,9 +100,7 @@ class ComponentFactory:
             policy = kwargs.get("policy")
             if policy is None:
                 raise ValueError("bandit_rag agent requires a policy")
-            return BanditRAGAgent(
-                model=model, retriever=retriever, policy=policy, **config_copy
-            )
+            return BanditRAGAgent(model=model, retriever=retriever, policy=policy, **config_copy)
 
         elif agent_type == "mdp_rag":
             if retriever is None:
@@ -111,9 +108,7 @@ class ComponentFactory:
             policy = kwargs.get("policy")
             if policy is None:
                 raise ValueError("mdp_rag agent requires a policy")
-            return MDPRAGAgent(
-                model=model, retriever=retriever, policy=policy, **config_copy
-            )
+            return MDPRAGAgent(model=model, retriever=retriever, policy=policy, **config_copy)
 
         else:
             raise ValueError(
@@ -262,9 +257,7 @@ class ComponentFactory:
                     print(f"⚠️  Skipping LLM Judge (not available)")
                     continue
                 if not judge_model:
-                    print(
-                        f"⚠️  Skipping LLM Judge (judge_model not configured)"
-                    )
+                    print(f"⚠️  Skipping LLM Judge (judge_model not configured)")
                     continue
                 judgment_type = metric_params.get("judgment_type", "binary")
                 batch_size = metric_params.get("batch_size", 8)
@@ -319,7 +312,5 @@ class ComponentFactory:
             return SparseRetriever(**config_copy)
         else:
             raise ValueError(
-                f"Unknown retriever type: {retriever_type}. "
-                f"Available: dense, sparse"
+                f"Unknown retriever type: {retriever_type}. " f"Available: dense, sparse"
             )
-

@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Type
 
 class ComponentRegistry:
     """Registry for dynamically registering and retrieving components.
-    
+
     Allows users to register custom components that can then be used
     in YAML configurations without modifying core code.
     """
@@ -54,9 +54,7 @@ class ComponentRegistry:
 
         def decorator(model_class: Type) -> Type:
             if name in cls._models:
-                print(
-                    f"Warning: Overwriting existing model registration: {name}"
-                )
+                print(f"Warning: Overwriting existing model registration: {name}")
             cls._models[name] = model_class
             return model_class
 
@@ -77,9 +75,7 @@ class ComponentRegistry:
         """
         if name not in cls._models:
             available = ", ".join(sorted(cls._models.keys()))
-            raise ValueError(
-                f"Unknown model: {name}. Available: {available or 'none'}"
-            )
+            raise ValueError(f"Unknown model: {name}. Available: {available or 'none'}")
         return cls._models[name]
 
     @classmethod
@@ -107,9 +103,7 @@ class ComponentRegistry:
 
         def decorator(agent_class: Type) -> Type:
             if name in cls._agents:
-                print(
-                    f"Warning: Overwriting existing agent registration: {name}"
-                )
+                print(f"Warning: Overwriting existing agent registration: {name}")
             cls._agents[name] = agent_class
             return agent_class
 
@@ -130,9 +124,7 @@ class ComponentRegistry:
         """
         if name not in cls._agents:
             available = ", ".join(sorted(cls._agents.keys()))
-            raise ValueError(
-                f"Unknown agent: {name}. Available: {available or 'none'}"
-            )
+            raise ValueError(f"Unknown agent: {name}. Available: {available or 'none'}")
         return cls._agents[name]
 
     @classmethod
@@ -160,9 +152,7 @@ class ComponentRegistry:
 
         def decorator(metric_class: Type) -> Type:
             if name in cls._metrics:
-                print(
-                    f"Warning: Overwriting existing metric registration: {name}"
-                )
+                print(f"Warning: Overwriting existing metric registration: {name}")
             cls._metrics[name] = metric_class
             return metric_class
 
@@ -183,9 +173,7 @@ class ComponentRegistry:
         """
         if name not in cls._metrics:
             available = ", ".join(sorted(cls._metrics.keys()))
-            raise ValueError(
-                f"Unknown metric: {name}. Available: {available or 'none'}"
-            )
+            raise ValueError(f"Unknown metric: {name}. Available: {available or 'none'}")
         return cls._metrics[name]
 
     @classmethod
@@ -213,9 +201,7 @@ class ComponentRegistry:
 
         def decorator(dataset_class: Type) -> Type:
             if name in cls._datasets:
-                print(
-                    f"Warning: Overwriting existing dataset registration: {name}"
-                )
+                print(f"Warning: Overwriting existing dataset registration: {name}")
             cls._datasets[name] = dataset_class
             return dataset_class
 
@@ -236,9 +222,7 @@ class ComponentRegistry:
         """
         if name not in cls._datasets:
             available = ", ".join(sorted(cls._datasets.keys()))
-            raise ValueError(
-                f"Unknown dataset: {name}. Available: {available or 'none'}"
-            )
+            raise ValueError(f"Unknown dataset: {name}. Available: {available or 'none'}")
         return cls._datasets[name]
 
     @classmethod
@@ -266,9 +250,7 @@ class ComponentRegistry:
 
         def decorator(retriever_class: Type) -> Type:
             if name in cls._retrievers:
-                print(
-                    f"Warning: Overwriting existing retriever registration: {name}"
-                )
+                print(f"Warning: Overwriting existing retriever registration: {name}")
             cls._retrievers[name] = retriever_class
             return retriever_class
 
@@ -289,9 +271,7 @@ class ComponentRegistry:
         """
         if name not in cls._retrievers:
             available = ", ".join(sorted(cls._retrievers.keys()))
-            raise ValueError(
-                f"Unknown retriever: {name}. Available: {available or 'none'}"
-            )
+            raise ValueError(f"Unknown retriever: {name}. Available: {available or 'none'}")
         return cls._retrievers[name]
 
     @classmethod
@@ -354,9 +334,7 @@ def _register_builtin_components():
     ComponentRegistry.register_agent("mdp_rag")(MDPRAGAgent)
 
     # Register datasets
-    ComponentRegistry.register_dataset("natural_questions")(
-        NaturalQuestionsDataset
-    )
+    ComponentRegistry.register_dataset("natural_questions")(NaturalQuestionsDataset)
     ComponentRegistry.register_dataset("triviaqa")(TriviaQADataset)
     ComponentRegistry.register_dataset("hotpotqa")(HotpotQADataset)
 
@@ -369,4 +347,3 @@ def _register_builtin_components():
 
 # Auto-register built-in components when module is imported
 _register_builtin_components()
-

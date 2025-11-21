@@ -75,13 +75,12 @@ class EvaluationConfig(BaseModel):
 
     mode: str = Field(
         default="both",
-        description="Evaluation mode: 'generate' (predictions only), 'evaluate' (metrics only), or 'both'"
+        description="Evaluation mode: 'generate' (predictions only), 'evaluate' (metrics only), or 'both'",
     )
     batch_size: Optional[int] = Field(default=None, description="Batch size for evaluation")
     num_examples: Optional[int] = Field(default=None, description="Number of examples to evaluate")
     predictions_file: Optional[str] = Field(
-        default=None,
-        description="Path to predictions file (required for 'evaluate' mode)"
+        default=None, description="Path to predictions file (required for 'evaluate' mode)"
     )
 
     @validator("mode")
@@ -141,9 +140,15 @@ class ExperimentConfig(BaseModel):
     metrics: List[Union[str, Dict[str, Any]]] = Field(..., description="Metrics configuration")
 
     # Optional fields
-    judge_model: Optional[ModelConfig] = Field(default=None, description="Judge model for LLM metrics")
-    retriever: Optional[RetrieverConfig] = Field(default=None, description="Retriever configuration")
-    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig, description="Evaluation settings")
+    judge_model: Optional[ModelConfig] = Field(
+        default=None, description="Judge model for LLM metrics"
+    )
+    retriever: Optional[RetrieverConfig] = Field(
+        default=None, description="Retriever configuration"
+    )
+    evaluation: EvaluationConfig = Field(
+        default_factory=EvaluationConfig, description="Evaluation settings"
+    )
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
     training: Optional[TrainingConfig] = Field(default=None, description="Training settings")
 
@@ -167,10 +172,7 @@ class ExperimentConfig(BaseModel):
             elif isinstance(metric, dict):
                 if "name" not in metric:
                     raise ValueError("Metric dict must have 'name' field")
-                normalized.append({
-                    "name": metric["name"],
-                    "params": metric.get("params", {})
-                })
+                normalized.append({"name": metric["name"], "params": metric.get("params", {})})
             else:
                 raise ValueError(f"Invalid metric type: {type(metric)}")
         return normalized
@@ -194,4 +196,3 @@ def parse_metric_config(metric: Union[str, Dict[str, Any]]) -> MetricConfig:
         return MetricConfig(**metric)
     else:
         raise ValueError(f"Invalid metric type: {type(metric)}")
-

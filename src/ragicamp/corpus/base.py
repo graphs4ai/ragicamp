@@ -13,7 +13,7 @@ from ragicamp.retrievers.base import Document
 @dataclass
 class CorpusConfig:
     """Configuration for a document corpus.
-    
+
     Attributes:
         name: Human-readable corpus identifier
         source: Source identifier (e.g., "wikimedia/wikipedia")
@@ -21,25 +21,26 @@ class CorpusConfig:
         max_docs: Optional limit on documents to load (for testing)
         metadata: Additional corpus-specific configuration
     """
+
     name: str
     source: str
     version: str = "latest"
     max_docs: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def __str__(self) -> str:
         return f"{self.name} ({self.source}:{self.version})"
 
 
 class DocumentCorpus:
     """Base class for document corpora.
-    
+
     A corpus provides documents for retrieval. Critically, corpora should NOT
     contain answer information - they are pure document sources.
-    
+
     This prevents data leakage where the retrieval system has access to
     training answers.
-    
+
     Example:
         >>> config = CorpusConfig(
         ...     name="wikipedia_simple",
@@ -50,33 +51,33 @@ class DocumentCorpus:
         >>> for doc in corpus.load(max_docs=10):
         ...     print(doc.text[:100])
     """
-    
+
     def __init__(self, config: CorpusConfig):
         """Initialize corpus with configuration.
-        
+
         Args:
             config: Corpus configuration
         """
         self.config = config
-    
+
     def load(self, max_docs: Optional[int] = None) -> Iterator[Document]:
         """Load documents from corpus.
-        
+
         Args:
             max_docs: Optional limit on number of documents to yield.
                      If None, uses config.max_docs. If both None, yields all.
-        
+
         Yields:
             Document objects WITHOUT answer information
-            
+
         Raises:
             NotImplementedError: If subclass doesn't implement this method
         """
         raise NotImplementedError("Subclasses must implement load()")
-    
+
     def get_info(self) -> Dict[str, Any]:
         """Get corpus metadata.
-        
+
         Returns:
             Dictionary with corpus information including:
             - name: Corpus name
@@ -88,12 +89,11 @@ class DocumentCorpus:
             "name": self.config.name,
             "source": self.config.source,
             "version": self.config.version,
-            **self.config.metadata
+            **self.config.metadata,
         }
-    
+
     def __str__(self) -> str:
         return str(self.config)
-    
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.config})"
-

@@ -21,35 +21,31 @@ def main():
     print("=" * 60)
     print("RAGiCamp Baseline Comparison")
     print("=" * 60)
-    
+
     # Create model
     print("\nLoading model...")
     model = HuggingFaceModel(
-        model_name="google/flan-t5-small",  # Use small model for faster testing
-        device="cpu"
+        model_name="google/flan-t5-small", device="cpu"  # Use small model for faster testing
     )
-    
+
     # Create retriever
     print("Creating retriever...")
-    retriever = DenseRetriever(
-        name="demo_retriever",
-        embedding_model="all-MiniLM-L6-v2"
-    )
-    
+    retriever = DenseRetriever(name="demo_retriever", embedding_model="all-MiniLM-L6-v2")
+
     # Load dataset
     print("Loading dataset...")
     dataset = NaturalQuestionsDataset(split="validation")
     # Use small subset for demo
     dataset.examples = dataset.examples[:10]
     print(f"Using {len(dataset)} examples")
-    
+
     # Create agents
     print("\nCreating agents...")
     agents = [
         DirectLLMAgent(
             name="Baseline_1_DirectLLM",
             model=model,
-            system_prompt="Answer the following question concisely."
+            system_prompt="Answer the following question concisely.",
         ),
         # Note: For FixedRAG to work, you need to index documents first
         # This is just a skeleton - will need actual document corpus
@@ -60,27 +56,22 @@ def main():
         #     top_k=5
         # )
     ]
-    
+
     # Create metrics
-    metrics = [
-        ExactMatchMetric(),
-        F1Metric()
-    ]
-    
+    metrics = [ExactMatchMetric(), F1Metric()]
+
     # Create evaluator
     evaluator = Evaluator(
-        agent=agents[0],  # Will be replaced in compare_agents
-        dataset=dataset,
-        metrics=metrics
+        agent=agents[0], dataset=dataset, metrics=metrics  # Will be replaced in compare_agents
     )
-    
+
     # Compare agents
     print("\n" + "=" * 60)
     print("Running Comparison")
     print("=" * 60)
-    
+
     results = evaluator.compare_agents(agents)
-    
+
     print("\n" + "=" * 60)
     print("Comparison Complete!")
     print("=" * 60)
@@ -88,4 +79,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

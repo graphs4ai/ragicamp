@@ -35,7 +35,7 @@ class ConfigLoader:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
 
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return yaml.safe_load(f)
 
     @staticmethod
@@ -56,7 +56,7 @@ class ConfigLoader:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
 
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return json.load(f)
 
     @staticmethod
@@ -75,9 +75,9 @@ class ConfigLoader:
         path = Path(path)
         suffix = path.suffix.lower()
 
-        if suffix in ['.yaml', '.yml']:
+        if suffix in [".yaml", ".yml"]:
             return ConfigLoader.load_yaml(path)
-        elif suffix == '.json':
+        elif suffix == ".json":
             return ConfigLoader.load_json(path)
         else:
             raise ValueError(f"Unsupported config format: {suffix}")
@@ -101,9 +101,9 @@ class ConfigLoader:
             print("\n❌ Configuration validation failed:")
             print("\nErrors:")
             for error in e.errors():
-                location = " -> ".join(str(x) for x in error['loc'])
+                location = " -> ".join(str(x) for x in error["loc"])
                 print(f"  • {location}: {error['msg']}")
-                if 'ctx' in error and 'error' in error['ctx']:
+                if "ctx" in error and "error" in error["ctx"]:
                     print(f"    Details: {error['ctx']['error']}")
             print("\nPlease fix the configuration and try again.\n")
             raise
@@ -126,10 +126,7 @@ class ConfigLoader:
         return ConfigLoader.validate(config_dict)
 
     @staticmethod
-    def merge_configs(
-        base: Dict[str, Any],
-        override: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def merge_configs(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
         """Merge two configurations (override takes precedence).
 
         Args:
@@ -196,7 +193,9 @@ class ConfigLoader:
             print(f"  Agent: {config.agent.type} ({config.agent.name})")
             print(f"  Model: {config.model.type} ({config.model.model_name})")
             print(f"  Dataset: {config.dataset.name} ({config.dataset.split})")
-            print(f"  Metrics: {', '.join(m['name'] if isinstance(m, dict) else m for m in config.metrics)}")
+            print(
+                f"  Metrics: {', '.join(m['name'] if isinstance(m, dict) else m for m in config.metrics)}"
+            )
             return True
         except (FileNotFoundError, ValidationError, Exception) as e:
             print(f"✗ Configuration is invalid: {path}")
@@ -242,8 +241,7 @@ def create_config_template(output_path: Union[str, Path]):
     }
 
     output_path = Path(output_path)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         yaml.dump(template, f, default_flow_style=False, sort_keys=False)
 
     print(f"✓ Created template configuration: {output_path}")
-

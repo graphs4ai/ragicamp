@@ -96,8 +96,8 @@ class LLMJudgeQAMetric(Metric):
                 self._judgment_cache.clear()
                 start_batch = 0
         else:
-            # Clear cache for new evaluation
-            self._judgment_cache.clear()
+        # Clear cache for new evaluation
+        self._judgment_cache.clear()
         
         # Prepare all prompts and cache keys
         all_prompts = []
@@ -132,24 +132,24 @@ class LLMJudgeQAMetric(Metric):
                                   initial=start_batch,
                                   total=total_batches):
                 batch_start = batch_idx * self.batch_size
-                batch_end = min(batch_start + self.batch_size, len(all_prompts))
-                batch_prompts = all_prompts[batch_start:batch_end]
-                batch_keys = cache_keys[batch_start:batch_end]
+            batch_end = min(batch_start + self.batch_size, len(all_prompts))
+            batch_prompts = all_prompts[batch_start:batch_end]
+            batch_keys = cache_keys[batch_start:batch_end]
+            
+            # Get judgments with temperature=0 for consistency
+            batch_judgments = self.judge_model.generate(
+                batch_prompts, 
+                temperature=0.0, 
+                max_tokens=200
+            )
+            
+            # Process each judgment in the batch
+            for cache_key, judgment in zip(batch_keys, batch_judgments):
+                # Extract categorical judgment
+                category, score = self._extract_judgment(judgment)
                 
-                # Get judgments with temperature=0 for consistency
-                batch_judgments = self.judge_model.generate(
-                    batch_prompts, 
-                    temperature=0.0, 
-                    max_tokens=200
-                )
-                
-                # Process each judgment in the batch
-                for cache_key, judgment in zip(batch_keys, batch_judgments):
-                    # Extract categorical judgment
-                    category, score = self._extract_judgment(judgment)
-                    
-                    # Store in cache for later compute_single() calls
-                    self._judgment_cache[cache_key] = (category, score)
+                # Store in cache for later compute_single() calls
+                self._judgment_cache[cache_key] = (category, score)
                 
                 # Save checkpoint after each batch
                 if checkpoint_path and (batch_idx + 1) % 5 == 0:  # Save every 5 batches

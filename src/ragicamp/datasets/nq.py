@@ -10,20 +10,20 @@ from ragicamp.datasets.base import QADataset, QAExample
 
 class NaturalQuestionsDataset(QADataset):
     """Loader for Google's Natural Questions dataset.
-    
+
     Natural Questions contains real Google search queries with
     answers from Wikipedia articles.
     """
-    
+
     def __init__(
-        self, 
+        self,
         split: str = "train",
         cache_dir: Optional[Path] = None,
         use_cache: bool = True,
-        **kwargs: Any
+        **kwargs: Any,
     ):
         """Initialize NQ dataset.
-        
+
         Args:
             split: Dataset split (train/validation)
             cache_dir: Optional directory to cache processed datasets
@@ -31,19 +31,19 @@ class NaturalQuestionsDataset(QADataset):
             **kwargs: Additional configuration
         """
         super().__init__(name="natural_questions", split=split, cache_dir=cache_dir, **kwargs)
-        
+
         # Try loading from cache first
         if use_cache and self.load_from_cache():
             return
-        
+
         # Otherwise load from HuggingFace
         self.load()
-    
+
     def load(self) -> None:
         """Load Natural Questions from HuggingFace datasets."""
         # Load from HuggingFace
         dataset = load_dataset("nq_open", split=self.split)
-        
+
         # Convert to our format
         for i, item in enumerate(dataset):
             example = QAExample(
@@ -51,7 +51,6 @@ class NaturalQuestionsDataset(QADataset):
                 question=item["question"],
                 answers=item["answer"],  # NQ has multiple acceptable answers
                 context=None,  # Open-domain version doesn't include context
-                metadata={"source": "natural_questions"}
+                metadata={"source": "natural_questions"},
             )
             self.examples.append(example)
-

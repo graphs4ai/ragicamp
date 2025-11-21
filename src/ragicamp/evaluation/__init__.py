@@ -3,4 +3,3 @@
 from ragicamp.evaluation.evaluator import Evaluator
 
 __all__ = ["Evaluator"]
-

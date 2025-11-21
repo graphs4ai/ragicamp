@@ -6,4 +6,3 @@ from ragicamp.factory import ComponentFactory
 from ragicamp.registry import ComponentRegistry
 
 __all__ = ["ComponentFactory", "ComponentRegistry"]
-
