@@ -91,7 +91,7 @@ class EvaluationConfig(BaseModel):
             raise ValueError(f"mode must be one of {allowed}, got '{v}'")
         return v
 
-    @validator("predictions_file")
+    @validator("predictions_file", always=True)
     def validate_predictions_file(cls, v, values):
         """Ensure predictions_file is set for evaluate mode."""
         mode = values.get("mode")
@@ -133,10 +133,12 @@ class TrainingConfig(BaseModel):
 class ExperimentConfig(BaseModel):
     """Complete experiment configuration."""
 
-    # Required fields
-    agent: AgentConfig = Field(..., description="Agent configuration")
-    model: ModelConfig = Field(..., description="Model configuration")
-    dataset: DatasetConfig = Field(..., description="Dataset configuration")
+    # Fields required only for generate/both modes
+    agent: Optional[AgentConfig] = Field(None, description="Agent configuration")
+    model: Optional[ModelConfig] = Field(None, description="Model configuration")
+    dataset: Optional[DatasetConfig] = Field(None, description="Dataset configuration")
+    
+    # Always required
     metrics: List[Union[str, Dict[str, Any]]] = Field(..., description="Metrics configuration")
 
     # Optional fields
@@ -151,6 +153,30 @@ class ExperimentConfig(BaseModel):
     )
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
     training: Optional[TrainingConfig] = Field(default=None, description="Training settings")
+
+    @validator("agent")
+    def validate_agent_for_mode(cls, v, values):
+        """Validate that agent is provided when needed."""
+        evaluation = values.get("evaluation")
+        if evaluation and evaluation.mode in ["generate", "both"] and not v:
+            raise ValueError("agent is required for 'generate' and 'both' modes")
+        return v
+
+    @validator("model")
+    def validate_model_for_mode(cls, v, values):
+        """Validate that model is provided when needed."""
+        evaluation = values.get("evaluation")
+        if evaluation and evaluation.mode in ["generate", "both"] and not v:
+            raise ValueError("model is required for 'generate' and 'both' modes")
+        return v
+
+    @validator("dataset")
+    def validate_dataset_for_mode(cls, v, values):
+        """Validate that dataset is provided when needed."""
+        evaluation = values.get("evaluation")
+        if evaluation and evaluation.mode in ["generate", "both"] and not v:
+            raise ValueError("dataset is required for 'generate' and 'both' modes")
+        return v
 
     @validator("retriever")
     def validate_retriever(cls, v, values):
