@@ -3,7 +3,7 @@
 from typing import Any, List, Optional, Union
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from ragicamp.models.base import LanguageModel
 
@@ -16,6 +16,7 @@ class HuggingFaceModel(LanguageModel):
         model_name: str,
         device: Optional[str] = None,
         load_in_8bit: bool = False,
+        load_in_4bit: bool = False,
         **kwargs: Any,
     ):
         """Initialize HuggingFace model.
@@ -24,22 +25,37 @@ class HuggingFaceModel(LanguageModel):
             model_name: HuggingFace model identifier
             device: Device to load model on (cuda/cpu)
             load_in_8bit: Whether to use 8-bit quantization
+            load_in_4bit: Whether to use 4-bit quantization
             **kwargs: Additional model loading arguments
         """
         super().__init__(model_name, **kwargs)
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
+        # Prepare quantization config if needed
+        quantization_config = None
+        use_quantization = load_in_8bit or load_in_4bit
+
+        if load_in_4bit:
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+        elif load_in_8bit:
+            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map="auto" if load_in_8bit else None,
-            load_in_8bit=load_in_8bit,
+            device_map="auto" if use_quantization else None,
+            quantization_config=quantization_config,
             **kwargs,
         )
 
-        if not load_in_8bit:
+        if not use_quantization:
             self.model = self.model.to(self.device)
 
         self.model.eval()
