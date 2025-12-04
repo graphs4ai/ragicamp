@@ -25,17 +25,16 @@ class HuggingFaceModel(LanguageModel):
             model_name: HuggingFace model identifier
             device: Device to load model on (cuda/cpu)
             load_in_8bit: Whether to use 8-bit quantization
-            load_in_4bit: Whether to use 4-bit quantization
+            load_in_4bit: Whether to use 4-bit quantization (more aggressive)
             **kwargs: Additional model loading arguments
         """
         super().__init__(model_name, **kwargs)
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Prepare quantization config if needed
-        quantization_config = None
         use_quantization = load_in_8bit or load_in_4bit
 
+        # Configure quantization using BitsAndBytesConfig (new API)
+        quantization_config = None
         if load_in_4bit:
             quantization_config = BitsAndBytesConfig(
                 load_in_4bit=True,

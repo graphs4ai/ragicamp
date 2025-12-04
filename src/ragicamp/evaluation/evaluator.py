@@ -1,9 +1,4 @@
-"""Evaluator for RAG systems.
-
-The evaluator works in two phases for robustness:
-1. Generate predictions and save them (never lose progress)
-2. Compute metrics on saved predictions (can retry/recompute)
-"""
+"""Evaluator for RAG systems."""
 
 import json
 from typing import Any, Dict, List, Optional
@@ -19,54 +14,42 @@ from ragicamp.utils.paths import ensure_dir
 class Evaluator:
     """Evaluator for RAG agents.
 
-    Works in two phases:
-    1. generate_predictions() - Generate and save predictions
-    2. compute_metrics() - Compute metrics on saved predictions
-
-    This two-phase approach ensures you never lose predictions due to
-    metrics computation failures (API errors, crashes, etc).
+    Runs evaluation on a dataset and computes multiple metrics.
     """
 
-    def __init__(
-        self,
-        agent: RAGAgent,
-        dataset: QADataset,
-        metrics: Optional[List[Metric]] = None,
-        **kwargs: Any,
-    ):
+    def __init__(self, agent: RAGAgent, dataset: QADataset, metrics: List[Metric], **kwargs: Any):
         """Initialize evaluator.
 
         Args:
             agent: The RAG agent to evaluate
             dataset: Evaluation dataset
-            metrics: List of metrics to compute (optional, can add later)
+            metrics: List of metrics to compute
             **kwargs: Additional configuration
         """
         self.agent = agent
         self.dataset = dataset
-        self.metrics = metrics or []
+        self.metrics = metrics
         self.config = kwargs
 
-    def generate_predictions(
+    def evaluate(
         self,
-        output_path: str,
         num_examples: Optional[int] = None,
+        save_predictions: bool = False,
+        output_path: Optional[str] = None,
         batch_size: Optional[int] = None,
         **kwargs: Any,
-    ) -> str:
-        """Generate predictions and save them (Phase 1).
-
-        This generates predictions for the dataset and saves them to a JSON file.
-        Metrics are NOT computed in this phase - use compute_metrics() afterward.
+    ) -> Dict[str, Any]:
+        """Evaluate the agent on the dataset.
 
         Args:
-            output_path: Path to save predictions (e.g., "outputs/predictions.json")
-            num_examples: Generate for first N examples (None = all)
+            num_examples: Evaluate on first N examples (None = all)
+            save_predictions: Whether to save predictions
+            output_path: Path to save results
             batch_size: Number of examples to process in parallel (None = sequential)
-            **kwargs: Additional generation parameters
+            **kwargs: Additional evaluation parameters
 
         Returns:
-            Path to saved predictions file
+            Dictionary with metric scores and statistics
         """
         # Prepare examples
         examples = list(self.dataset)
@@ -75,27 +58,23 @@ class Evaluator:
 
         # Generate predictions
         predictions = []
+        references = []
+        questions = []
         responses = []
 
-        print(f"\n{'='*70}")
-        print(f"PHASE 1: GENERATING PREDICTIONS")
-        print(f"{'='*70}")
-        print(f"Dataset: {self.dataset.name}")
-        print(f"Agent: {self.agent.name}")
-        print(f"Examples: {len(examples)}")
-        print(f"{'='*70}\n")
+        print(f"Evaluating on {len(examples)} examples...")
 
         # Use batch processing if batch_size is specified
         if batch_size and batch_size > 1:
             print(f"Using batch processing with batch_size={batch_size}")
-            print(f"Total batches: {(len(examples) + batch_size - 1) // batch_size}\n")
+            print(f"Total batches: {(len(examples) + batch_size - 1) // batch_size}")
 
             import time
 
             batch_times = []
 
             # Process in batches
-            for i in tqdm(range(0, len(examples), batch_size), desc="Generating predictions"):
+            for i in tqdm(range(0, len(examples), batch_size), desc="Processing batches"):
                 batch_start = time.time()
 
                 batch_examples = examples[i : i + batch_size]
@@ -110,38 +89,69 @@ class Evaluator:
                 # Store results
                 for example, response in zip(batch_examples, batch_responses):
                     predictions.append(response.answer)
+                    references.append(example.answers)
+                    questions.append(example.question)
                     responses.append(response)
 
             # Print timing stats
             if batch_times:
                 avg_time = sum(batch_times) / len(batch_times)
-                print(f"\n📊 Generation stats:")
+                print(f"\nBatch processing stats:")
                 print(f"  Average time per batch: {avg_time:.2f}s")
                 print(f"  Average time per question: {avg_time / batch_size:.2f}s")
                 print(f"  Throughput: {batch_size / avg_time:.2f} questions/second")
         else:
-            # Sequential processing
-            for example in tqdm(examples, desc="Generating predictions"):
-                response = self.agent.answer(example.question, **kwargs)
+            # Sequential processing (original behavior)
+            for example in tqdm(examples, desc="Generating answers"):
+                # Generate answer
+                response = self.agent.answer(example.question)
+
+                # Store
                 predictions.append(response.answer)
+                references.append(example.answers)
+                questions.append(example.question)
                 responses.append(response)
 
-        # Save predictions
-        print(f"\n{'='*70}")
-        print("💾 SAVING PREDICTIONS")
-        print(f"{'='*70}")
-        predictions_file = self._save_predictions_only(
-            examples=examples,
-            predictions=predictions,
-            responses=responses,
-            output_path=output_path,
-        )
-        print(f"✓ Predictions saved!")
-        print(f"\n💡 Next step: Compute metrics")
-        print(f"   python scripts/compute_metrics.py --predictions {predictions_file}")
-        print(f"{'='*70}\n")
+        # Compute metrics
+        print("\nComputing metrics...")
+        results = {}
 
-        return predictions_file
+        for metric in self.metrics:
+            print(f"  - {metric.name}")
+
+            # Handle metrics that need questions
+            if metric.name == "llm_judge":
+                scores_dict = metric.compute(
+                    predictions=predictions, references=references, questions=questions
+                )
+            else:
+                scores_dict = metric.compute(predictions=predictions, references=references)
+
+            # All metrics now return Dict[str, float]
+            results.update(scores_dict)
+
+        # Add statistics
+        results["num_examples"] = len(examples)
+        results["agent_name"] = self.agent.name
+        results["dataset_name"] = self.dataset.name
+
+        # Compute per-question metrics
+        per_question_metrics = self._compute_per_question_metrics(
+            predictions, references, questions
+        )
+
+        # Save if requested
+        if save_predictions and output_path:
+            self._save_results(
+                examples=examples,
+                predictions=predictions,
+                responses=responses,
+                results=results,
+                per_question_metrics=per_question_metrics,
+                output_path=output_path,
+            )
+
+        return results
 
     def _compute_per_question_metrics(
         self, predictions: List[str], references: List[Any], questions: List[str]
@@ -225,85 +235,6 @@ class Evaluator:
                 }
 
         return stats
-
-    def _save_predictions_only(
-        self, examples: List[Any], predictions: List[str], responses: List[Any], output_path: str
-    ) -> str:
-        """Save predictions (before metrics computation).
-
-        Saves two files:
-        1. {dataset}_questions.json - Dataset questions and expected answers
-        2. {agent}_predictions_raw.json - Raw predictions without metrics
-
-        Args:
-            examples: Dataset examples
-            predictions: Generated predictions
-            responses: Full agent responses
-            output_path: Base path for output files
-
-        Returns:
-            Path to the saved predictions file
-        """
-        from datetime import datetime
-        from pathlib import Path
-
-        # Determine output directory
-        output_dir = Path(output_path).parent
-
-        # Ensure output directory exists
-        ensure_dir(output_dir)
-
-        # Get names
-        dataset_name = self.dataset.name if hasattr(self.dataset, "name") else "unknown"
-        timestamp = datetime.now().isoformat()
-
-        # 1. Save dataset questions (reusable across runs)
-        questions_path = output_dir / f"{dataset_name}_questions.json"
-        questions_data = {
-            "dataset_name": dataset_name,
-            "num_questions": len(examples),
-            "questions": [
-                {
-                    "id": ex.id,
-                    "question": ex.question,
-                    "expected_answer": ex.answers[0] if ex.answers else None,
-                    "all_acceptable_answers": ex.answers,
-                }
-                for ex in examples
-            ],
-        }
-
-        with open(questions_path, "w") as f:
-            json.dump(questions_data, f, indent=2)
-
-        print(f"  Dataset questions: {questions_path}")
-
-        # 2. Save raw predictions (without metrics)
-        predictions_path = output_dir / f"{self.agent.name}_predictions_raw.json"
-        predictions_data = {
-            "agent_name": self.agent.name,
-            "dataset_name": dataset_name,
-            "timestamp": timestamp,
-            "num_examples": len(examples),
-            "status": "predictions_only",
-            "predictions": [
-                {
-                    "question_id": ex.id,
-                    "question": ex.question,
-                    "expected_answers": ex.answers,
-                    "prediction": pred,
-                    "metadata": resp.metadata if hasattr(resp, "metadata") else {},
-                }
-                for ex, pred, resp in zip(examples, predictions, responses)
-            ],
-        }
-
-        with open(predictions_path, "w") as f:
-            json.dump(predictions_data, f, indent=2)
-
-        print(f"  Predictions: {predictions_path}")
-
-        return str(predictions_path)
 
     def _save_results(
         self,
