@@ -3,6 +3,7 @@
 Index a document corpus for RAG retrieval.
 
 Uses the new DocumentCorpus abstraction for clean, data-leak-free indexing.
+Supports document chunking for better retrieval quality.
 """
 
 import argparse
@@ -12,7 +13,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from ragicamp.corpus import CorpusConfig, WikipediaCorpus
+from ragicamp.corpus import ChunkConfig, CorpusConfig, DocumentChunker, WikipediaCorpus
 from ragicamp.retrievers.base import Document
 from ragicamp.retrievers.dense import DenseRetriever
 
@@ -51,6 +52,27 @@ def main():
         "--artifact-name", type=str, required=True, help="Name for the saved retriever artifact"
     )
 
+    # Chunking arguments
+    parser.add_argument(
+        "--chunk-strategy",
+        type=str,
+        default=None,
+        choices=["fixed", "sentence", "paragraph", "recursive"],
+        help="Chunking strategy (default: no chunking, index full documents)",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=512,
+        help="Target chunk size in chars (default: 512)",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=50,
+        help="Overlap between chunks in chars (default: 50)",
+    )
+
     args = parser.parse_args()
 
     print("=" * 70)
@@ -63,6 +85,13 @@ def main():
     print(f"Artifact name: {args.artifact_name}")
     if args.max_docs:
         print(f"Max documents: {args.max_docs} (testing)")
+    if args.chunk_strategy:
+        print(f"\n📄 Chunking enabled:")
+        print(f"   Strategy: {args.chunk_strategy}")
+        print(f"   Chunk size: {args.chunk_size} chars")
+        print(f"   Overlap: {args.chunk_overlap} chars")
+    else:
+        print(f"\n📄 Chunking: disabled (indexing full documents)")
     print("\n" + "=" * 70 + "\n")
 
     # Create corpus configuration
@@ -85,25 +114,39 @@ def main():
         index_type="flat",
     )
 
-    # Index documents
-    print(f"\nIndexing documents from corpus...")
-    print("⚠️  This will take time (computing embeddings)")
-
-    documents = []
+    # Load documents from corpus
+    print(f"\nLoading documents from corpus...")
+    raw_documents = []
     for doc in corpus.load(max_docs=args.max_docs):
-        documents.append(doc)
+        raw_documents.append(doc)
 
-        if len(documents) % 1000 == 0:
-            print(f"  Collected {len(documents)} documents...")
+        if len(raw_documents) % 1000 == 0:
+            print(f"  Loaded {len(raw_documents)} documents...")
 
-    print(f"\n✓ Collected {len(documents)} documents")
+    print(f"\n✓ Loaded {len(raw_documents)} raw documents")
 
-    if len(documents) == 0:
+    if len(raw_documents) == 0:
         print("✗ No documents collected. Exiting.")
         sys.exit(1)
 
-    # Index all documents
-    print("\nIndexing documents with retriever...")
+    # Apply chunking if enabled
+    if args.chunk_strategy:
+        print(f"\n📄 Chunking documents with '{args.chunk_strategy}' strategy...")
+        chunk_config = ChunkConfig(
+            strategy=args.chunk_strategy,
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+        )
+        chunker = DocumentChunker(chunk_config)
+        documents = list(chunker.chunk_documents(iter(raw_documents)))
+        print(f"✓ Created {len(documents)} chunks from {len(raw_documents)} documents")
+        print(f"  Avg chunks per doc: {len(documents) / len(raw_documents):.1f}")
+    else:
+        documents = raw_documents
+        print(f"\n📄 Using {len(documents)} full documents (no chunking)")
+
+    # Index all documents/chunks
+    print("\n⚠️  Computing embeddings (this will take time)...")
     retriever.index_documents(documents)
 
     # Save the index
@@ -120,7 +163,12 @@ def main():
     print("INDEXING COMPLETE")
     print("=" * 70)
     print(f"\nArtifact: {args.artifact_name}")
-    print(f"Documents indexed: {len(documents)}")
+    if args.chunk_strategy:
+        print(f"Raw documents: {len(raw_documents)}")
+        print(f"Chunks indexed: {len(documents)}")
+        print(f"Chunk strategy: {args.chunk_strategy}")
+    else:
+        print(f"Documents indexed: {len(documents)}")
     print(f"Saved to: {artifact_path}")
     print("\n⚠️  IMPORTANT: Documents contain NO answer information!")
     print("This is correct for RAG - the model must extract answers from context.")

@@ -1,0 +1,45 @@
+# Natural Questions - Fixed RAG with Phi-3.5 Mini
+# Uses pre-indexed Wikipedia corpus for retrieval
+# ~10-15 minutes on GPU for 20 examples
+
+agent:
+  type: fixed_rag
+  name: "phi3_fixed_rag"
+  top_k: 5                    # Can use more docs with smaller model
+  system_prompt: "You are a helpful assistant. Use the provided context to answer questions accurately and concisely."
+
+model:
+  type: huggingface
+  model_name: "microsoft/Phi-3.5-mini-instruct"  # Small but powerful!
+  device: "cuda"
+  load_in_8bit: true          # 8-bit is fine for smaller model
+  max_tokens: 256
+  trust_remote_code: true     # Required for Phi-3
+
+# Pre-indexed Wikipedia corpus (run: make index-wiki-small)
+retriever:
+  type: dense
+  name: "wikipedia_retriever"
+  embedding_model: "all-MiniLM-L6-v2"
+  index_type: "flat"
+  artifact_path: "wikipedia_small"  # Load pre-indexed corpus
+
+dataset:
+  name: natural_questions
+  split: validation
+  num_examples: 20            # Reduced for testing
+  filter_no_answer: true
+
+# With smaller model, we can batch again
+evaluation:
+  mode: both
+  batch_size: 4               # Phi-3 is small enough to batch
+
+metrics:
+  - exact_match
+  - f1
+
+output:
+  save_predictions: true
+  output_path: "outputs/nq_fixed_rag_phi3.json"
+

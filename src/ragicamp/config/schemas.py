@@ -38,6 +38,26 @@ class DatasetConfig(BaseModel):
         extra = "allow"
 
 
+class ChunkingConfig(BaseModel):
+    """Document chunking configuration."""
+
+    strategy: str = Field(
+        default="recursive",
+        description="Chunking strategy: 'fixed', 'sentence', 'paragraph', 'recursive'",
+    )
+    chunk_size: int = Field(default=512, description="Target chunk size in characters")
+    chunk_overlap: int = Field(default=50, description="Overlap between chunks")
+    min_chunk_size: int = Field(default=50, description="Minimum chunk size (discard smaller)")
+
+    @validator("strategy")
+    def validate_strategy(cls, v):
+        """Validate chunking strategy."""
+        allowed = ["fixed", "sentence", "paragraph", "recursive"]
+        if v not in allowed:
+            raise ValueError(f"strategy must be one of {allowed}, got '{v}'")
+        return v
+
+
 class RetrieverConfig(BaseModel):
     """Retriever configuration."""
 
@@ -46,6 +66,9 @@ class RetrieverConfig(BaseModel):
     embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model")
     index_type: str = Field(default="flat", description="Index type")
     artifact_path: Optional[str] = Field(default=None, description="Path to saved artifact")
+    chunking: Optional[ChunkingConfig] = Field(
+        default=None, description="Document chunking config (for indexing)"
+    )
 
     class Config:
         extra = "allow"

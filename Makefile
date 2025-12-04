@@ -24,7 +24,8 @@ help:
 	@echo ""
 	@echo "🏋️  INDEXING & CORPUS"
 	@echo "  make index-wiki-simple    - Index Simple Wikipedia (~200k articles)"
-	@echo "  make index-wiki-small     - Quick test (10k articles)"
+	@echo "  make index-wiki-small     - Quick test (10k articles, full docs)"
+	@echo "  make index-wiki-small-chunked - Quick test (10k articles, CHUNKED - better!)"
 	@echo "  make list-artifacts       - List saved artifacts"
 	@echo "  make clean-artifacts      - Remove all artifacts"
 	@echo ""
@@ -393,11 +394,11 @@ eval-baseline-all-metrics:
 		--mode eval
 
 eval-rag:
-	@echo "🔍 Running FixedRAG evaluation"
+	@echo "🔍 Running FixedRAG evaluation (with chunked corpus)"
 	@echo "📋 Config: experiments/configs/nq_fixed_rag_gemma2b.yaml"
-	@if [ ! -d artifacts/retrievers/wikipedia_small ]; then \
-		echo "⚠️  Wikipedia index not found. Indexing first..."; \
-		$(MAKE) index-wiki-small; \
+	@if [ ! -d artifacts/retrievers/wikipedia_small_chunked ]; then \
+		echo "⚠️  Chunked Wikipedia index not found. Indexing first..."; \
+		$(MAKE) index-wiki-small-chunked; \
 	fi
 	uv run python experiments/scripts/run_experiment.py \
 		--config experiments/configs/nq_fixed_rag_gemma2b.yaml \
@@ -571,6 +572,22 @@ index-wiki-small:
 		--embedding-model all-MiniLM-L6-v2 \
 		--max-docs 10000 \
 		--artifact-name wikipedia_small
+
+# Chunked indexing (better retrieval quality!)
+index-wiki-small-chunked:
+	@echo "📚 Indexing 10k Wikipedia articles WITH CHUNKING..."
+	@echo "📄 Strategy: recursive (512 chars, 50 overlap)"
+	@echo "✨ Better retrieval quality than full-document indexing!"
+	@echo ""
+	uv run python experiments/scripts/index_corpus.py \
+		--corpus-name wikipedia_simple \
+		--corpus-version 20231101.simple \
+		--embedding-model all-MiniLM-L6-v2 \
+		--max-docs 10000 \
+		--chunk-strategy recursive \
+		--chunk-size 512 \
+		--chunk-overlap 50 \
+		--artifact-name wikipedia_small_chunked
 
 list-artifacts:
 	@echo "📦 Saved artifacts:"

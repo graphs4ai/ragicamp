@@ -31,7 +31,7 @@ class HuggingFaceModel(LanguageModel):
         super().__init__(model_name, **kwargs)
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        use_quantization = load_in_8bit or load_in_4bit
+        self._use_quantization = load_in_8bit or load_in_4bit
 
         # Configure quantization using BitsAndBytesConfig (new API)
         quantization_config = None
@@ -49,12 +49,13 @@ class HuggingFaceModel(LanguageModel):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map="auto" if use_quantization else None,
+            device_map="auto" if self._use_quantization else None,
             quantization_config=quantization_config,
+            low_cpu_mem_usage=True,  # Reduces peak memory during loading
             **kwargs,
         )
 
-        if not use_quantization:
+        if not self._use_quantization:
             self.model = self.model.to(self.device)
 
         self.model.eval()
