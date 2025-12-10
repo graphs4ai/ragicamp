@@ -11,6 +11,7 @@ defaults:
   - optional retriever: null  # Only loaded for RAG agents
   - optional judge: gpt4_mini # LLM judge (optional)
   - optional mlflow: default  # MLflow tracking (optional)
+  - optional experiment: null # Experiment presets (optional)
   - _self_
 
 # Output configuration

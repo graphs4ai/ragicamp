@@ -8,4 +8,4 @@ metrics:
   - name: llm_judge_qa
     params:
       judgment_type: binary
-      batch_size: 16
+      batch_size: 50  # Parallel API calls

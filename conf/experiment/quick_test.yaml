@@ -3,12 +3,12 @@
 # Usage: python -m ragicamp.cli.run experiment=quick_test
 
 defaults:
-  - /model: gemma_2b_4bit
-  - /dataset: nq
-  - /agent: direct_llm
-  - /metrics: fast
-  - /evaluation: quick
-  - /mlflow: disabled
+  - override /model: gemma_2b_4bit
+  - override /dataset: nq
+  - override /agent: direct_llm
+  - override /metrics: fast
+  - override /evaluation: quick
+  - override /mlflow: disabled
 
 # Experiment metadata
 experiment:

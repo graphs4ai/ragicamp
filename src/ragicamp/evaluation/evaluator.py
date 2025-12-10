@@ -2,6 +2,7 @@
 
 import gc
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -38,6 +39,32 @@ class Evaluator:
         self.dataset = dataset
         self.metrics = metrics or []
         self.config = kwargs
+
+    def _unload_model(self) -> None:
+        """Unload the agent's model to free GPU memory.
+        
+        This allows heavy metrics (BERTScore, BLEURT) to use the GPU.
+        """
+        # Try the proper unload method first
+        if hasattr(self.agent, "model") and hasattr(self.agent.model, "unload"):
+            self.agent.model.unload()
+            return
+            
+        # Fallback: manual cleanup
+        if hasattr(self.agent, "model"):
+            model_obj = self.agent.model
+            if hasattr(model_obj, "model"):
+                del model_obj.model
+            if hasattr(model_obj, "tokenizer"):
+                del model_obj.tokenizer
+            del self.agent.model
+            
+        # Force cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        
+        print("🗑️  Agent model unloaded to free GPU for metrics")
 
     def evaluate(
         self,
@@ -153,7 +180,6 @@ class Evaluator:
         else:
             # Sequential processing with checkpointing
             import time
-            from pathlib import Path
 
             start_time = time.time()
             failures = []  # Track failed questions
@@ -268,19 +294,16 @@ class Evaluator:
                             f"ETA: {eta_minutes:.0f}min\n"
                         )
 
-        # Free model memory before computing metrics (prevents OOM with heavy metrics like BERTScore)
-        if hasattr(self.agent, "model") and hasattr(self.agent.model, "model"):
-            del self.agent.model.model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gc.collect()
+        # Unload model to free GPU memory before computing metrics
+        # This is critical for heavy metrics like BERTScore and BLEURT that need GPU
+        self._unload_model()
 
-        # Compute metrics
-        print("\nComputing metrics...")
+        # Compute metrics (each metric handles its own GPU loading/unloading)
+        print("\n📊 Computing metrics...")
         results = {}
 
         for metric in self.metrics:
-            print(f"  - {metric.name}")
+            print(f"  ▶ {metric.name}")
 
             # Handle metrics that need questions
             if metric.name == "llm_judge":
@@ -359,7 +382,6 @@ class Evaluator:
             >>> # Later: compute metrics on pred_file
         """
         from datetime import datetime
-        from pathlib import Path
 
         # Prepare examples
         examples = list(self.dataset)
@@ -542,10 +564,93 @@ class Evaluator:
 
         return raw_output_path  # Return the _raw path for two-phase workflow
 
+    @staticmethod
+    def compute_metrics_from_file(
+        predictions_path: str,
+        metrics: List[Metric],
+        output_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute metrics from saved predictions file (Phase 2 of two-phase evaluation).
+        
+        This method loads predictions from disk and computes metrics WITHOUT needing
+        the original model. Use after generate_predictions().
+        
+        Args:
+            predictions_path: Path to predictions JSON file (from generate_predictions)
+            metrics: List of metrics to compute
+            output_path: Optional path to save results
+            
+        Returns:
+            Dictionary with metric scores
+            
+        Example:
+            >>> # Phase 1: Generate (uses GPU for LLM)
+            >>> pred_file = evaluator.generate_predictions("outputs/preds.json")
+            >>> 
+            >>> # Phase 2: Evaluate (GPU freed, loads metrics one by one)
+            >>> results = Evaluator.compute_metrics_from_file(pred_file, metrics)
+        """
+        from datetime import datetime
+        
+        print(f"📂 Loading predictions from: {predictions_path}")
+        
+        with open(predictions_path, "r") as f:
+            data = json.load(f)
+        
+        # Extract predictions and references
+        predictions_list = data.get("predictions", [])
+        predictions = [p["prediction"] for p in predictions_list]
+        references = [p["expected_answers"] for p in predictions_list]
+        questions = [p["question"] for p in predictions_list]
+        
+        print(f"📊 Loaded {len(predictions)} predictions")
+        print(f"📊 Computing {len(metrics)} metrics...")
+        
+        results = {}
+        
+        for metric in metrics:
+            print(f"  ▶ {metric.name}")
+            try:
+                # Handle metrics that need questions (like LLM judge)
+                if metric.name == "llm_judge":
+                    scores_dict = metric.compute(
+                        predictions=predictions, 
+                        references=references, 
+                        questions=questions
+                    )
+                else:
+                    scores_dict = metric.compute(
+                        predictions=predictions, 
+                        references=references
+                    )
+                results.update(scores_dict)
+            except Exception as e:
+                print(f"    ⚠️ {metric.name} failed: {e}")
+                results[metric.name] = None
+        
+        # Add metadata
+        results["num_examples"] = len(predictions)
+        results["agent_name"] = data.get("agent_name", "unknown")
+        results["dataset_name"] = data.get("dataset_name", "unknown")
+        results["predictions_file"] = predictions_path
+        results["evaluated_at"] = datetime.now().isoformat()
+        
+        # Save results if requested
+        if output_path:
+            ensure_dir(output_path)
+            with open(output_path, "w") as f:
+                json.dump(results, f, indent=2)
+            print(f"✓ Results saved to: {output_path}")
+        
+        return results
+
     def _compute_per_question_metrics(
         self, predictions: List[str], references: List[Any], questions: List[str]
     ) -> List[Dict[str, Any]]:
         """Compute metrics for each individual question.
+        
+        NOTE: Heavy GPU metrics (BERTScore, BLEURT) are skipped here to avoid
+        repeated model loading. They provide aggregate scores in the main compute().
 
         Args:
             predictions: List of predictions
@@ -555,6 +660,9 @@ class Evaluator:
         Returns:
             List of per-question metric scores
         """
+        # Heavy metrics that should NOT be computed per-question (too slow)
+        SKIP_PER_QUESTION = {"bertscore", "bleurt"}
+        
         per_question = []
 
         for i, (pred, ref, q) in enumerate(zip(predictions, references, questions)):
@@ -562,10 +670,14 @@ class Evaluator:
 
             # Compute each metric individually for this question
             for metric in self.metrics:
+                # Skip heavy GPU metrics - they provide aggregate scores only
+                if metric.name in SKIP_PER_QUESTION:
+                    continue
+                    
                 try:
                     score = metric.compute_single(pred, ref)
                     if isinstance(score, dict):
-                        # Handle metrics that return multiple scores (like BERTScore)
+                        # Handle metrics that return multiple scores
                         for key, value in score.items():
                             question_metrics[key] = value
                     else:
@@ -651,7 +763,6 @@ class Evaluator:
         """
         import os
         from datetime import datetime
-        from pathlib import Path
 
         # Determine output directory and base name
         output_dir = Path(output_path).parent

@@ -1,7 +1,10 @@
-# GPT-4o Mini Judge
+# GPT-4.1 Mini Judge (Default)
 # Budget-friendly LLM judge (~$0.05-0.10 per 100 questions)
 # Requires OPENAI_API_KEY
+#
+# Performance: ~30s for 100 questions with parallel calls
 
 type: openai
-model_name: "gpt-4o-mini"
+model_name: "gpt-4.1-mini"
 temperature: 0.0
+max_workers: 20  # Parallel API calls (safe for OpenAI rate limits)

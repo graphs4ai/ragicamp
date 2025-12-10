@@ -12,14 +12,14 @@
 #     prompt=concise,sentence,explained
 
 defaults:
-  - /model: gemma_2b_4bit
-  - /dataset: nq
-  - /agent: direct_llm
-  - /metrics: standard
-  - /evaluation: standard
-  - /prompt: concise
-  - /judge: gpt4_mini
-  - /mlflow: default
+  - override /model: gemma_2b_4bit
+  - override /dataset: nq
+  - override /agent: direct_llm
+  - override /metrics: baseline
+  - override /evaluation: standard
+  - override /prompt: concise
+  - override /judge: gpt4_mini
+  - override /mlflow: default
 
 # Apply prompt to agent
 agent:

@@ -64,12 +64,22 @@ Across multiple datasets, models, and configurations.
 
 ## Metrics
 
+### DirectLLM Experiments
+| Metric | Type | Speed | Notes |
+|--------|------|-------|-------|
+| Exact Match | Token | Fast | Binary, strict |
+| F1 | Token | Fast | Partial credit |
+| BERTScore | Semantic | ~1min/100ex | Contextual embedding similarity |
+| BLEURT | Semantic | ~1min/100ex | Learned evaluation metric |
+| LLM Judge | LLM | ~2min/100ex | GPT-4 correctness judgment |
+
+### RAG Experiments (additional)
 | Metric | Type | Notes |
 |--------|------|-------|
-| Exact Match | Token | Binary, strict |
-| F1 | Token | Partial credit |
-| LLM Judge | Semantic | GPT-4 evaluation |
-| Faithfulness | RAG | Ragas (RAG only) |
+| Faithfulness | RAG | Answer grounded in context (Ragas) |
+| Answer Relevancy | RAG | Answer addresses question (Ragas) |
+
+**Note**: LLM Judge requires `OPENAI_API_KEY` environment variable.
 
 ---
 

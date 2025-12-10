@@ -1,0 +1,10 @@
+# Evaluate Only (Phase 2)
+# Computes metrics from a saved predictions file.
+# No model loading required - just loads predictions and runs metrics.
+#
+# Usage:
+#   python -m ragicamp.cli.run evaluation=evaluate \
+#     evaluation.predictions_path=outputs/.../predictions_raw.json
+
+mode: evaluate
+# predictions_path: null  # Set via CLI override or auto-detect

@@ -1,12 +1,15 @@
 # Full Metrics Suite
 # All available metrics (slow, GPU-intensive)
 # Consider using two-phase evaluation for heavy metrics
+#
+# Note: Requires OPENAI_API_KEY for llm_judge
 
 metrics:
   - exact_match
   - f1
   - bertscore
+  - bleurt
   - name: llm_judge_qa
     params:
       judgment_type: binary
-      batch_size: 16
+      batch_size: 50  # Parallel API calls

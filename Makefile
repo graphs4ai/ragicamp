@@ -141,6 +141,27 @@ baseline-study-direct:
 	@echo "🚀 Running DirectLLM baseline study..."
 	uv run python scripts/experiments/run_baseline_study.py --direct-only
 
+# Two-phase baseline: Generate predictions only (Phase 1)
+# Saves predictions to disk, no metrics. Safe for unstable environments.
+baseline-generate:
+	@echo "🚀 Phase 1: Generating predictions..."
+	uv run python -m ragicamp.cli.run \
+		experiment=baseline_study_direct \
+		evaluation.mode=generate
+
+# Two-phase baseline: Compute metrics only (Phase 2)
+# Requires predictions from Phase 1. Pass PREDS_PATH=path/to/predictions.json
+baseline-evaluate:
+	@echo "📊 Phase 2: Computing metrics..."
+	@if [ -z "$(PREDS_PATH)" ]; then \
+		echo "❌ Error: PREDS_PATH not set. Usage: make baseline-evaluate PREDS_PATH=outputs/.../predictions_raw.json"; \
+		exit 1; \
+	fi
+	uv run python -m ragicamp.cli.run \
+		experiment=baseline_study_direct \
+		evaluation.mode=evaluate \
+		evaluation.predictions_path=$(PREDS_PATH)
+
 # RAG experiments only (needs index)
 baseline-study-rag:
 	@echo "🔍 Running RAG baseline study..."
@@ -255,6 +276,16 @@ list-artifacts:
 compare:
 	@echo "📊 Comparing experiments..."
 	@uv run python scripts/eval/compare.py outputs/
+
+# Compare baseline study results with visualization
+compare-baseline:
+	@echo "📊 Comparing baseline study results..."
+	@uv run python scripts/analysis/compare_baseline.py outputs/
+
+# Compare and export to CSV
+compare-csv:
+	@echo "📊 Exporting results to CSV..."
+	@uv run python scripts/analysis/compare_baseline.py outputs/ --csv outputs/comparison.csv
 
 report:
 	@echo "📝 Generating report..."

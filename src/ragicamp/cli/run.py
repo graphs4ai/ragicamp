@@ -105,20 +105,59 @@ def run_evaluation(cfg: DictConfig) -> Dict[str, Any]:
     metrics_config = config.get("metrics", [])
     output_config = config.get("output", {})
     
+    # Determine mode early to avoid loading unnecessary components
+    mode = eval_config.get("mode", "both")
+    
     results = {}
     
     try:
-        # Create model
+        # Phase 2 (evaluate only): Skip model loading, just compute metrics
+        if mode == "evaluate":
+            predictions_path = eval_config.get("predictions_path")
+            if not predictions_path:
+                raise ValueError(
+                    "evaluation.predictions_path required for mode=evaluate. "
+                    "Run with mode=generate first to create predictions."
+                )
+            
+            # Load metrics only
+            with LogContext(logger, "Creating metrics"):
+                judge_model = None
+                judge_config = config.get("judge_model") or config.get("judge")
+                if judge_config:
+                    judge_model = ComponentFactory.create_model(dict(judge_config))
+                
+                if isinstance(metrics_config, dict):
+                    metrics_list = metrics_config.get("metrics", [])
+                else:
+                    metrics_list = metrics_config if metrics_config else ["exact_match", "f1"]
+                
+                metrics = ComponentFactory.create_metrics(
+                    metrics_list,
+                    judge_model=judge_model,
+                )
+            
+            # Compute metrics from saved predictions
+            output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+            output_path = str(output_dir / "metrics.json")
+            
+            with LogContext(logger, "Metrics", predictions=predictions_path):
+                results = Evaluator.compute_metrics_from_file(
+                    predictions_path=predictions_path,
+                    metrics=metrics,
+                    output_path=output_path,
+                )
+            
+            # Skip to results logging
+            logger.info("Evaluation complete!")
+            for key, value in results.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    logger.info(f"  {key}: {value:.4f}")
+            return results
+        
+        # For generate or both modes: Load model and agent
         with LogContext(logger, "Loading model", model=model_config.get("model_name")):
-            model = ComponentFactory.create_model(
-                model_type=model_config.get("type", "huggingface"),
-                model_name=model_config.get("model_name"),
-                device=model_config.get("device", "cuda"),
-                load_in_8bit=model_config.get("load_in_8bit", False),
-                load_in_4bit=model_config.get("load_in_4bit", False),
-                **{k: v for k, v in model_config.items() 
-                   if k not in ["type", "model_name", "device", "load_in_8bit", "load_in_4bit"]}
-            )
+            model = ComponentFactory.create_model(dict(model_config))
         
         # Create retriever if needed
         retriever = None
@@ -126,45 +165,38 @@ def run_evaluation(cfg: DictConfig) -> Dict[str, Any]:
             retriever_config = config.get("retriever", {})
             if retriever_config:
                 with LogContext(logger, "Loading retriever"):
-                    retriever = ComponentFactory.create_retriever(
-                        retriever_type=retriever_config.get("type", "dense"),
-                        **retriever_config
-                    )
+                    retriever = ComponentFactory.create_retriever(dict(retriever_config))
         
         # Create agent
         with LogContext(logger, "Creating agent", agent_type=agent_config.get("type")):
             agent = ComponentFactory.create_agent(
-                agent_type=agent_config.get("type", "direct_llm"),
+                config=dict(agent_config),
                 model=model,
                 retriever=retriever,
-                **{k: v for k, v in agent_config.items() if k != "type"}
             )
         
         # Load dataset
         with LogContext(logger, "Loading dataset", dataset=dataset_config.get("name")):
-            dataset = ComponentFactory.create_dataset(
-                dataset_name=dataset_config.get("name", "natural_questions"),
-                split=dataset_config.get("split", "validation"),
-                num_examples=dataset_config.get("num_examples"),
-                filter_no_answer=dataset_config.get("filter_no_answer", True),
-            )
+            dataset = ComponentFactory.create_dataset(dict(dataset_config))
         
-        # Create metrics
-        with LogContext(logger, "Creating metrics"):
-            judge_model = None
-            if config.get("judge_model"):
-                judge_config = config["judge_model"]
-                judge_model = ComponentFactory.create_model(
-                    model_type=judge_config.get("type", "openai"),
-                    model_name=judge_config.get("model_name"),
-                    **{k: v for k, v in judge_config.items() if k not in ["type", "model_name"]}
+        # Skip metrics for generate-only mode (Phase 1)
+        metrics = []
+        if mode != "generate":
+            with LogContext(logger, "Creating metrics"):
+                judge_model = None
+                judge_config = config.get("judge_model") or config.get("judge")
+                if judge_config:
+                    judge_model = ComponentFactory.create_model(dict(judge_config))
+                
+                if isinstance(metrics_config, dict):
+                    metrics_list = metrics_config.get("metrics", [])
+                else:
+                    metrics_list = metrics_config if metrics_config else ["exact_match", "f1"]
+                
+                metrics = ComponentFactory.create_metrics(
+                    metrics_list,
+                    judge_model=judge_model,
                 )
-            
-            metrics = ComponentFactory.create_metrics(
-                metrics_config,
-                model=model,
-                judge_model=judge_model,
-            )
         
         # Create evaluator
         evaluator = Evaluator(
@@ -180,19 +212,33 @@ def run_evaluation(cfg: DictConfig) -> Dict[str, Any]:
             output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
             output_path = str(output_dir / "results.json")
         
-        # Run evaluation
-        mode = eval_config.get("mode", "both")
-        
-        with LogContext(logger, "Evaluation", mode=mode, examples=len(dataset)):
-            results = evaluator.evaluate(
-                num_examples=dataset_config.get("num_examples"),
-                save_predictions=output_config.get("save_predictions", True),
-                output_path=output_path,
-                batch_size=eval_config.get("batch_size"),
-                checkpoint_every=eval_config.get("checkpoint_every"),
-                resume_from_checkpoint=eval_config.get("resume_from_checkpoint", True),
-                retry_failures=eval_config.get("retry_failures", True),
-            )
+        # Run based on mode (evaluate mode already handled above with early return)
+        if mode == "generate":
+            # Phase 1: Generate predictions only (no metrics)
+            with LogContext(logger, "Generation", examples=len(dataset)):
+                predictions_path = evaluator.generate_predictions(
+                    output_path=output_path,
+                    num_examples=dataset_config.get("num_examples"),
+                    batch_size=eval_config.get("batch_size"),
+                    checkpoint_every=eval_config.get("checkpoint_every"),
+                    resume_from_checkpoint=eval_config.get("resume_from_checkpoint", True),
+                    retry_failures=eval_config.get("retry_failures", True),
+                )
+            logger.info("Generation complete! Predictions saved to: %s", predictions_path)
+            results = {"predictions_path": predictions_path, "mode": "generate"}
+            
+        else:
+            # Default (mode=both): Generate and evaluate in one pass
+            with LogContext(logger, "Evaluation", mode=mode, examples=len(dataset)):
+                results = evaluator.evaluate(
+                    num_examples=dataset_config.get("num_examples"),
+                    save_predictions=output_config.get("save_predictions", True),
+                    output_path=output_path,
+                    batch_size=eval_config.get("batch_size"),
+                    checkpoint_every=eval_config.get("checkpoint_every"),
+                    resume_from_checkpoint=eval_config.get("resume_from_checkpoint", True),
+                    retry_failures=eval_config.get("retry_failures", True),
+                )
         
         # Log results
         logger.info("Evaluation complete!")

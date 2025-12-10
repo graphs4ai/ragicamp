@@ -1,0 +1,24 @@
+# RAG Baseline Study Metrics
+# Comprehensive metrics for RAG evaluation
+# Includes: token-based, semantic, LLM-judge, and RAG-specific
+#
+# Note: Requires OPENAI_API_KEY for llm_judge and Ragas metrics
+
+metrics:
+  # Token-based (fast)
+  - exact_match
+  - f1
+  
+  # Semantic similarity (GPU, ~1min for 100 examples)
+  - bertscore
+  - bleurt
+  
+  # LLM-as-a-Judge (parallel API calls, ~30s for 100 examples)
+  - name: llm_judge_qa
+    params:
+      judgment_type: binary
+      batch_size: 50  # Process 50 at a time (parallel)
+  
+  # RAG-specific (Ragas, requires context)
+  # - faithfulness     # Uncomment when Ragas is configured
+  # - answer_relevancy # Uncomment when Ragas is configured

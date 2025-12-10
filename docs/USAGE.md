@@ -171,7 +171,7 @@ model = HuggingFaceModel(
 from ragicamp.models.openai import OpenAIModel
 
 model = OpenAIModel(
-    model_name="gpt-3.5-turbo",
+    model_name="gpt-4.1-mini",
     api_key="your-api-key"  # Or set OPENAI_API_KEY env var
 )
 ```

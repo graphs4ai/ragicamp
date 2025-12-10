@@ -3,14 +3,14 @@
 # Usage: python -m ragicamp.cli.run experiment=rag
 
 defaults:
-  - /model: gemma_2b_4bit
-  - /dataset: nq
-  - /agent: fixed_rag
-  - /retriever: dense
-  - /metrics: rag
-  - /evaluation: standard
-  - /judge: gpt4_mini
-  - /mlflow: default
+  - override /model: gemma_2b_4bit
+  - override /dataset: nq
+  - override /agent: fixed_rag
+  - override /retriever: dense
+  - override /metrics: rag
+  - override /evaluation: standard
+  - override /judge: gpt4_mini
+  - override /mlflow: default
 
 # Experiment metadata
 experiment:
