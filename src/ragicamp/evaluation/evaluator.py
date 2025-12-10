@@ -1,8 +1,10 @@
 """Evaluator for RAG systems."""
 
+import gc
 import json
 from typing import Any, Dict, List, Optional
 
+import torch
 from tqdm import tqdm
 
 from ragicamp.agents.base import RAGAgent
@@ -37,6 +39,8 @@ class Evaluator:
         save_predictions: bool = False,
         output_path: Optional[str] = None,
         batch_size: Optional[int] = None,
+        checkpoint_every: Optional[int] = None,
+        resume_from_checkpoint: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Evaluate the agent on the dataset.
@@ -46,6 +50,8 @@ class Evaluator:
             save_predictions: Whether to save predictions
             output_path: Path to save results
             batch_size: Number of examples to process in parallel (None = sequential)
+            checkpoint_every: Save checkpoint every N examples (None = no checkpointing)
+            resume_from_checkpoint: Try to resume from existing checkpoint
             **kwargs: Additional evaluation parameters
 
         Returns:
@@ -61,8 +67,25 @@ class Evaluator:
         references = []
         questions = []
         responses = []
+        start_idx = 0
 
-        print(f"Evaluating on {len(examples)} examples...")
+        # Try to resume from checkpoint
+        checkpoint_path = None
+        if output_path and checkpoint_every:
+            checkpoint_path = output_path.replace('.json', '_checkpoint.json')
+            
+            if resume_from_checkpoint and Path(checkpoint_path).exists():
+                print(f"📂 Resuming from checkpoint: {checkpoint_path}")
+                with open(checkpoint_path, 'r') as f:
+                    checkpoint_data = json.load(f)
+                    predictions = checkpoint_data['predictions']
+                    references = checkpoint_data['references']
+                    questions = checkpoint_data['questions']
+                    responses = checkpoint_data.get('responses', [])
+                    start_idx = len(predictions)
+                    print(f"✓ Resumed from {start_idx}/{len(examples)} examples")
+
+        print(f"Evaluating on {len(examples)} examples (starting from {start_idx})...")
 
         # Use batch processing if batch_size is specified
         if batch_size and batch_size > 1:
@@ -101,8 +124,16 @@ class Evaluator:
                 print(f"  Average time per question: {avg_time / batch_size:.2f}s")
                 print(f"  Throughput: {batch_size / avg_time:.2f} questions/second")
         else:
-            # Sequential processing (original behavior)
-            for example in tqdm(examples, desc="Generating answers"):
+            # Sequential processing with checkpointing
+            import time
+            from pathlib import Path
+            
+            start_time = time.time()
+            
+            for i, example in enumerate(tqdm(examples[start_idx:], 
+                                             desc="Generating answers",
+                                             initial=start_idx,
+                                             total=len(examples))):
                 # Generate answer
                 response = self.agent.answer(example.question)
 
@@ -111,6 +142,45 @@ class Evaluator:
                 references.append(example.answers)
                 questions.append(example.question)
                 responses.append(response)
+                
+                # Clear GPU cache after each generation to prevent accumulation
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                # Save checkpoint
+                if checkpoint_path and checkpoint_every and (len(predictions) % checkpoint_every == 0):
+                    checkpoint_data = {
+                        'predictions': predictions,
+                        'references': references,
+                        'questions': questions,
+                        'completed': len(predictions),
+                        'total': len(examples),
+                    }
+                    ensure_dir(checkpoint_path)
+                    with open(checkpoint_path, 'w') as f:
+                        json.dump(checkpoint_data, f, indent=2)
+                    
+                    # Print progress stats
+                    elapsed = time.time() - start_time
+                    avg_time = elapsed / len(predictions)
+                    remaining = len(examples) - len(predictions)
+                    eta_seconds = remaining * avg_time
+                    eta_minutes = eta_seconds / 60
+                    
+                    if torch.cuda.is_available():
+                        allocated = torch.cuda.memory_allocated() / 1024**3
+                        total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                        print(f"\n💾 Checkpoint saved | "
+                              f"Progress: {len(predictions)}/{len(examples)} | "
+                              f"GPU: {allocated:.1f}/{total_mem:.1f} GiB | "
+                              f"ETA: {eta_minutes:.0f}min\n")
+
+        # Free model memory before computing metrics (prevents OOM with heavy metrics like BERTScore)
+        if hasattr(self.agent, 'model') and hasattr(self.agent.model, 'model'):
+            del self.agent.model.model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
 
         # Compute metrics
         print("\nComputing metrics...")

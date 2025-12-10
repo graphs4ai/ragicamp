@@ -5,16 +5,16 @@ A modular, production-ready framework for experimenting with Retrieval-Augmented
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **🎉 NEW!** Two-phase evaluation (never lose progress), LLM judge checkpointing, and robust error handling! See **[WHATS_NEW.md](WHATS_NEW.md)**
+>**🎉 NEW!** Automatic checkpointing, memory-efficient evaluation, and RL training support! See **[WHATS_NEW.md](WHATS_NEW.md)**
 
 ## ✨ Key Features
 
-- 🛡️ **Robust Two-Phase Evaluation** - Generate predictions first, compute metrics later (never lose progress to API failures!)
-- 💾 **Automatic Checkpointing** - LLM judge saves progress every 5 batches, resume from where you left off
+- 🛡️ **Robust Evaluation** - Automatic checkpointing, resume from failures, never lose progress
+- 💾 **Memory Efficient** - Automatic GPU memory management between generation and metrics
 - 🎯 **Multiple RAG Strategies** - DirectLLM baseline, FixedRAG, adaptive BanditRAG, and MDP-based agents
-- 📊 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore, BLEURT), and LLM-as-a-judge evaluation
+- 📊 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore, BLEURT), and LLM-as-a-judge
 - ⚙️ **Config-Driven** - Run experiments by editing YAML configs, no code changes needed
-- 🔬 **Research-Friendly** - Built-in RL training, policy optimization, experiment tracking
+- 🔬 **Research-Ready** - Built-in RL training, policy optimization, experiment tracking
 
 ## 🚀 Quick Start
 
@@ -25,103 +25,83 @@ make install
 # Quick evaluation (10 examples)
 make eval-baseline-quick
 
-# Full evaluation with all metrics (100 examples)
+# Full evaluation (100 examples)
 make eval-baseline-full
 
-# See all available commands
+# RAG with Wikipedia
+make index-wiki-small-chunked  # Index once
+make eval-rag-wiki-simple      # Then evaluate
+
+# See all commands
 make help
 ```
 
-## 🛡️ Robust Two-Phase Evaluation
+## 💡 Evaluation Workflow
 
-RAGiCamp uses a **two-phase approach** to ensure you never lose progress:
+### Simple (One Command)
+
+```bash
+# Everything in one go - with automatic checkpointing
+make eval-baseline-quick
+```
+
+### Advanced (Two-Phase for Large Runs)
 
 ```yaml
 # Phase 1: Generate predictions (saved immediately)
 evaluation:
-  mode: generate  # Generate predictions, save them
-  batch_size: 32
+  mode: generate
+  checkpoint_every: 10  # Save every 10 questions
 
-# Phase 2: Compute metrics (can retry if it fails)
+# Phase 2: Compute metrics separately (can retry if fails)
 evaluation:
-  mode: evaluate  # Compute metrics on saved predictions
+  mode: evaluate
   predictions_file: "outputs/predictions_raw.json"
 ```
 
-**Why this matters:**
-- ✅ **Never lose progress** - Predictions saved before metrics computation
-- ✅ **Retry on failure** - If LLM judge fails (API 403, timeout), just run again
-- ✅ **Resume from checkpoint** - LLM judge saves progress every 5 batches
+**Why two-phase:**
+- ✅ **Never lose progress** - Predictions saved before metrics
+- ✅ **Retry on failure** - If BERTScore/LLM judge fails, just run again
 - ✅ **Experiment freely** - Try different metrics on same predictions
 
-**Example: Large evaluation (3610 questions)**
-```bash
-# Step 1: Generate predictions (50 minutes, but only once!)
-uv run python experiments/scripts/run_experiment.py \
-  --config configs/generate_3610.yaml  # mode: generate
+See **[Evaluation Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** for details.
 
-# Step 2: Compute metrics (can retry if it fails)
-python scripts/compute_metrics.py \
-  --predictions outputs/predictions_raw.json \
-  --config configs/with_llm_judge.yaml
-
-# If LLM judge fails at batch 35/57? No problem!
-# Just run again - it resumes from checkpoint automatically
-```
-
-See **[Two-Phase Evaluation Guide](docs/guides/TWO_PHASE_EVALUATION.md)** for details.
-
-## 💡 Two Ways to Use
-
-### 1. Config-Based (Recommended) ⭐
+## 🎯 Config-Based Workflow ⭐
 
 ```bash
 # Create from template
 make create-config OUTPUT=my_exp.yaml TYPE=baseline
 
-# Validate config
+# Validate
 make validate-config CONFIG=my_exp.yaml
 
-# Run experiment
+# Run
 uv run python experiments/scripts/run_experiment.py \
-  --config my_exp.yaml \
-  --mode eval
+  --config my_exp.yaml
 ```
 
-**Benefits:**
-- ✅ Type-safe with validation
-- ✅ Reproducible experiments
-- ✅ No code changes needed
-- ✅ Easy to share and version
+**Edit config to change everything:**
+```yaml
+agent:
+  type: fixed_rag  # or: direct_llm, bandit_rag, mdp_rag
 
-### 2. Programmatic (Two-Phase API)
+model:
+  model_name: "google/gemma-2-2b-it"
+  load_in_4bit: true
 
-```python
-# Clean imports from module root
-from ragicamp.agents import DirectLLMAgent
-from ragicamp.models import HuggingFaceModel
-from ragicamp.datasets import NaturalQuestionsDataset
-from ragicamp.evaluation.evaluator import Evaluator
-from ragicamp.metrics import ExactMatchMetric, F1Metric
+retriever:
+  artifact_path: "wikipedia_simple_chunked_1024_overlap_128"
 
-# Create agent
-model = HuggingFaceModel('google/gemma-2-2b-it')
-agent = DirectLLMAgent(name="baseline", model=model)
-dataset = NaturalQuestionsDataset(split="validation")
+dataset:
+  num_examples: 100
 
-# Phase 1: Generate predictions (saved automatically)
-evaluator = Evaluator(agent, dataset)
-predictions_file = evaluator.generate_predictions(
-    output_path="outputs/predictions.json",
-    num_examples=100,
-    batch_size=8
-)
-# → Predictions saved! Safe from failures during metrics computation
-
-# Phase 2: Compute metrics separately (can retry)
-from scripts.compute_metrics import compute_metrics_on_predictions
-# ... or use config-based approach (recommended)
+metrics:
+  - exact_match
+  - f1
+  - bertscore
 ```
+
+No code changes needed! ✅
 
 ## 🏗️ Architecture
 

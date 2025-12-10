@@ -58,6 +58,10 @@ class HuggingFaceModel(LanguageModel):
         if not self._use_quantization:
             self.model = self.model.to(self.device)
 
+        # Enable gradient checkpointing to save memory (trades compute for memory)
+        if hasattr(self.model, 'gradient_checkpointing_enable'):
+            self.model.gradient_checkpointing_enable()
+
         self.model.eval()
 
     def generate(

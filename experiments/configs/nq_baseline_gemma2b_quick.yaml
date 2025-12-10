@@ -11,12 +11,12 @@ model:
   type: huggingface
   model_name: "google/gemma-2-2b-it"
   device: "cuda"
-  load_in_8bit: true
+  load_in_4bit: true
 
 dataset:
   name: natural_questions
   split: validation
-  num_examples: 10
+  num_examples: 100
   filter_no_answer: true
 
 # Evaluation settings
@@ -24,9 +24,25 @@ evaluation:
   mode: both      # generate (predictions only), evaluate (metrics only), or both
   batch_size: 4   # Process 4 questions at once
 
+# Metrics for evaluation
 metrics:
-  - exact_match
-  - f1
+  - exact_match               # Binary match (case-insensitive)
+  - f1                        # Token-level F1 score
+  # bertscore removed - uses ~2-3GB GPU memory (can compute later with two-phase eval)
+  # Add more if needed:
+  # - bleurt                  # Learned metric (slow but high quality)
+  - name: llm_judge_qa      # GPT-4 evaluation (requires OPENAI_API_KEY)
+    params:
+      judgment_type: "binary"
+      batch_size: 16
+
+# Optional: LLM Judge (uncomment to enable GPT-4 evaluation)
+# Requires: export OPENAI_API_KEY='your-key-here'
+judge_model:
+  type: openai
+  model_name: "gpt-4o-mini"  # Budget-friendly: $0.05-0.10 per 100 questions
+  temperature: 0.0
+
 
 output:
   save_predictions: true
