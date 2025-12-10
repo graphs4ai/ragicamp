@@ -41,60 +41,30 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Enable MLflow Tracking
+> **Prerequisites:** `uv sync` to install dependencies
 
-Add to your config:
-
-```yaml
-mlflow:
-  enabled: true
-  experiment_name: "rag_evaluation"
-  run_name: "gemma_2b_baseline"
-  tracking_uri: null  # Defaults to ./mlruns
-  log_artifacts: true
-```
-
-Run your experiment:
+### 1. Run Example
 
 ```bash
 uv run python experiments/scripts/run_experiment.py \
-  --config experiments/configs/my_config.yaml
+  --config experiments/configs/example_mlflow_ragas.yaml
 ```
 
-View results in MLflow UI:
+### 2. View Results
 
 ```bash
 mlflow ui
 # Open http://localhost:5000
 ```
 
-### Use Ragas Metrics
+### 3. That's It!
 
-In your config, just add Ragas metric names:
-
-```yaml
-metrics:
-  - exact_match
-  - f1
-  - faithfulness          # Ragas metric!
-  - answer_relevancy      # Ragas metric!
-  - context_precision     # Ragas metric!
-  - bertscore            # Custom metric (Ragas doesn't have this)
-```
-
-### Enable State Management
-
-```yaml
-evaluation:
-  mode: both
-  save_state: true  # Default: true
-  state_file: null  # Auto-generated
-  
-  # Force rerun specific phases
-  force_rerun_phases: []  # e.g., ["metrics"] to rerun only metrics
-```
+Your experiment is now tracked with:
+- ✅ MLflow (automatic)
+- ✅ Ragas metrics (faithfulness, answer relevancy)
+- ✅ State management (resumable)
 
 ---
 

@@ -5,24 +5,54 @@ A modular, production-ready framework for experimenting with Retrieval-Augmented
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
->**🎉 NEW!** Automatic checkpointing, memory-efficient evaluation, and RL training support! See **[WHATS_NEW.md](WHATS_NEW.md)**
+> **🆕 NEW in v0.2!**  
+> - 🎯 **MLflow Integration** - Auto-track experiments with beautiful UI  
+> - 📊 **Ragas Metrics** - State-of-the-art RAG evaluation  
+> - 🔄 **Phase-Level State** - Resume from any point  
+> → [5-Minute Quick Start](docs/guides/QUICKSTART_V02.md) | [Release Notes](docs/V02_RELEASE_NOTES.md)
 
 ## ✨ Key Features
 
-- 🛡️ **Robust Evaluation** - Automatic checkpointing, resume from failures, never lose progress
-- 💾 **Memory Efficient** - Automatic GPU memory management between generation and metrics
-- 🎯 **Multiple RAG Strategies** - DirectLLM baseline, FixedRAG, adaptive BanditRAG, and MDP-based agents
-- 📊 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore, BLEURT), and LLM-as-a-judge
-- ⚙️ **Config-Driven** - Run experiments by editing YAML configs, no code changes needed
-- 🔬 **Research-Ready** - Built-in RL training, policy optimization, experiment tracking
+### Production-Ready Evaluation
+
+- 🎯 **MLflow Tracking** - Automatic experiment tracking, visual comparison, never lose results
+- 📊 **Ragas Metrics** - State-of-the-art RAG evaluation (faithfulness, answer relevancy, context precision)
+- 🛡️ **Robust Execution** - Phase-level resumption, automatic checkpointing, OOM recovery
+- 💾 **Memory Efficient** - Automatic GPU memory management between phases
+
+### Flexible RAG System
+
+- 🤖 **Multiple Strategies** - DirectLLM, FixedRAG, BanditRAG, MDP-based agents
+- 📈 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore), RAG-specific (Ragas), LLM-judge
+- ⚙️ **Config-Driven** - Run experiments via YAML configs, zero code changes
+- 🔬 **Research-Ready** - Built-in RL training, policy optimization, hyperparameter tuning
 
 ## 🚀 Quick Start
 
+### Try v0.2 Features (5 minutes)
+
 ```bash
-# Install dependencies
+# 1. Install dependencies
+uv sync
+
+# 2. Run example with MLflow + Ragas
+uv run python experiments/scripts/run_experiment.py \
+  --config experiments/configs/example_mlflow_ragas.yaml
+
+# 3. View results in MLflow UI
+mlflow ui
+# Open http://localhost:5000
+```
+
+**See:** [Complete Quick Start Guide](docs/guides/QUICKSTART_V02.md)
+
+### Standard Workflow
+
+```bash
+# Install
 make install
 
-# Quick evaluation (10 examples)
+# Quick test (10 examples)
 make eval-baseline-quick
 
 # Full evaluation (100 examples)
@@ -30,7 +60,7 @@ make eval-baseline-full
 
 # RAG with Wikipedia
 make index-wiki-small-chunked  # Index once
-make eval-rag-wiki-simple      # Then evaluate
+make eval-rag-wiki-simple      # Evaluate
 
 # See all commands
 make help
@@ -163,24 +193,70 @@ All evaluations save 3 JSON files:
 - `{agent}_predictions.json` - Per-question predictions & metrics
 - `{agent}_summary.json` - Overall metrics & statistics
 
+## 🆕 What's New in v0.2
+
+### MLflow Tracking
+```yaml
+# Auto-enabled - just add to config
+mlflow:
+  enabled: true
+  experiment_name: "my_experiments"
+```
+Track all experiments with beautiful UI. Compare runs, never lose results.
+
+### Ragas Metrics
+```yaml
+# Just add metric names
+metrics:
+  - exact_match
+  - faithfulness       # NEW: Ragas
+  - answer_relevancy   # NEW: Ragas
+```
+State-of-the-art RAG evaluation metrics.
+
+### State Management
+```bash
+# Run experiment
+make eval-rag-wiki-simple
+# It crashes? Just rerun - it resumes automatically!
+make eval-rag-wiki-simple
+```
+Phase-level resumption, rerun specific phases.
+
+**Learn More:** [Quick Start](docs/guides/QUICKSTART_V02.md) | [Full Guide](docs/guides/MLFLOW_RAGAS_GUIDE.md) | [Release Notes](docs/V02_RELEASE_NOTES.md)
+
+---
+
 ## 📚 Documentation
+
+### Quick Access
 
 | Guide | Description |
 |-------|-------------|
-| **[What's New](WHATS_NEW.md)** ⭐ | Latest features and improvements |
-| **[Changelog](CHANGELOG.md)** | Detailed version history |
-| **[Quick Reference](QUICK_REFERENCE.md)** | One-page command cheat sheet |
-| **[Documentation Index](docs/README.md)** | Complete documentation catalog |
-| **[Config Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** | How to use config files |
-| **[Metrics Guide](docs/guides/METRICS.md)** | Choosing the right metrics |
-| **[LLM Judge Guide](docs/guides/LLM_JUDGE.md)** | Using GPT-4 for evaluation |
-| **[Architecture](docs/ARCHITECTURE.md)** | System design & components |
-| **[Agents Guide](docs/AGENTS.md)** | Understanding different agents |
+| **[v0.2 Quick Start](docs/guides/QUICKSTART_V02.md)** ⭐ | 5-minute guide to new features |
+| **[MLflow & Ragas Guide](docs/guides/MLFLOW_RAGAS_GUIDE.md)** ⭐ | Complete v0.2 feature guide |
+| **[Quick Reference](QUICK_REFERENCE.md)** | Command cheat sheet |
+| **[Documentation Index](docs/README.md)** | Complete docs catalog |
 
-**📖 Navigation Tips:**
-- **New here?** Start with [Quick Reference](QUICK_REFERENCE.md) for commands, then [docs/](docs/README.md) for full docs
-- **Need help?** Check [docs/README.md](docs/README.md) - it's the complete documentation index
-- **Specific topic?** Browse [docs/guides/](docs/guides/) for focused guides on configs, metrics, LLM judge, etc.
+### Feature Guides
+
+| Guide | Description |
+|-------|-------------|
+| **[Config Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** | YAML-based experiments |
+| **[Metrics Guide](docs/guides/METRICS.md)** | Choosing metrics |
+| **[LLM Judge Guide](docs/guides/LLM_JUDGE.md)** | GPT-4 evaluation |
+| **[Two-Phase Guide](docs/guides/TWO_PHASE_EVALUATION.md)** | Separate generation/metrics |
+
+### System Guides
+
+| Guide | Description |
+|-------|-------------|
+| **[Architecture](docs/ARCHITECTURE.md)** | System design |
+| **[Agents Guide](docs/AGENTS.md)** | Agent types |
+| **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common issues |
+
+**📖 First time here?**  
+→ Try [5-minute quick start](docs/guides/QUICKSTART_V02.md) or read [full docs](docs/README.md)
 
 ## 🛠️ Common Commands
 
