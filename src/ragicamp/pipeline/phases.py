@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
 
-from ragicamp.pipeline.resource_manager import ResourceManager, managed_model
+from ragicamp.utils.resource_manager import ResourceManager, managed_model
 
 
 @dataclass

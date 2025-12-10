@@ -19,18 +19,18 @@ class Evaluator:
     Runs evaluation on a dataset and computes multiple metrics.
     """
 
-    def __init__(self, agent: RAGAgent, dataset: QADataset, metrics: List[Metric], **kwargs: Any):
+    def __init__(self, agent: RAGAgent, dataset: QADataset, metrics: Optional[List[Metric]] = None, **kwargs: Any):
         """Initialize evaluator.
 
         Args:
             agent: The RAG agent to evaluate
             dataset: Evaluation dataset
-            metrics: List of metrics to compute
+            metrics: List of metrics to compute (optional for generate-only mode)
             **kwargs: Additional configuration
         """
         self.agent = agent
         self.dataset = dataset
-        self.metrics = metrics
+        self.metrics = metrics or []
         self.config = kwargs
 
     def evaluate(
@@ -41,6 +41,7 @@ class Evaluator:
         batch_size: Optional[int] = None,
         checkpoint_every: Optional[int] = None,
         resume_from_checkpoint: bool = False,
+        retry_failures: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Evaluate the agent on the dataset.
@@ -52,6 +53,7 @@ class Evaluator:
             batch_size: Number of examples to process in parallel (None = sequential)
             checkpoint_every: Save checkpoint every N examples (None = no checkpointing)
             resume_from_checkpoint: Try to resume from existing checkpoint
+            retry_failures: If resuming, retry previously failed questions
             **kwargs: Additional evaluation parameters
 
         Returns:
@@ -67,6 +69,7 @@ class Evaluator:
         references = []
         questions = []
         responses = []
+        failures = []  # Track failures
         start_idx = 0
 
         # Try to resume from checkpoint
@@ -76,14 +79,32 @@ class Evaluator:
             
             if resume_from_checkpoint and Path(checkpoint_path).exists():
                 print(f"📂 Resuming from checkpoint: {checkpoint_path}")
-                with open(checkpoint_path, 'r') as f:
-                    checkpoint_data = json.load(f)
-                    predictions = checkpoint_data['predictions']
-                    references = checkpoint_data['references']
-                    questions = checkpoint_data['questions']
-                    responses = checkpoint_data.get('responses', [])
-                    start_idx = len(predictions)
-                    print(f"✓ Resumed from {start_idx}/{len(examples)} examples")
+                try:
+                    with open(checkpoint_path, 'r') as f:
+                        checkpoint_data = json.load(f)
+                        predictions = checkpoint_data['predictions']
+                        references = checkpoint_data['references']
+                        questions = checkpoint_data['questions']
+                        responses = checkpoint_data.get('responses', [])
+                        failures = checkpoint_data.get('failures', [])
+                        start_idx = len(predictions)
+                        print(f"✓ Resumed from {start_idx}/{len(examples)} examples")
+                        
+                        if failures:
+                            print(f"⚠️  {len(failures)} previous failures")
+                            if retry_failures:
+                                print(f"🔄 Will retry {len(failures)} failed questions")
+                                # Mark failed indices for retry by clearing them
+                                for fail in failures:
+                                    idx = fail['question_idx']
+                                    if idx < len(predictions):
+                                        predictions[idx] = None  # Mark for retry
+                            else:
+                                print(f"   (Use retry_failures=True to retry them)")
+                except Exception as e:
+                    print(f"⚠️  Failed to load checkpoint: {e}")
+                    print("   Starting from scratch...")
+                    start_idx = 0
 
         print(f"Evaluating on {len(examples)} examples (starting from {start_idx})...")
 
@@ -129,25 +150,73 @@ class Evaluator:
             from pathlib import Path
             
             start_time = time.time()
+            failures = []  # Track failed questions
             
             for i, example in enumerate(tqdm(examples[start_idx:], 
                                              desc="Generating answers",
                                              initial=start_idx,
                                              total=len(examples))):
-                # Generate answer
-                response = self.agent.answer(example.question)
+                actual_idx = start_idx + i
+                
+                # Skip if already completed (unless marked for retry)
+                if actual_idx < len(predictions) and predictions[actual_idx] is not None:
+                    continue
+                
+                try:
+                    # Generate answer
+                    response = self.agent.answer(example.question)
 
-                # Store
-                predictions.append(response.answer)
-                references.append(example.answers)
-                questions.append(example.question)
-                responses.append(response)
+                    # Store or update
+                    if actual_idx < len(predictions):
+                        # Retry: update existing slot
+                        predictions[actual_idx] = response.answer
+                        references[actual_idx] = example.answers
+                        questions[actual_idx] = example.question
+                        responses[actual_idx] = response
+                    else:
+                        # New: append
+                        predictions.append(response.answer)
+                        references.append(example.answers)
+                        questions.append(example.question)
+                        responses.append(response)
+                    
+                except Exception as e:
+                    # Log failure but continue
+                    error_msg = f"Question {actual_idx}: {str(e)[:100]}"
+                    
+                    # Check if this is a retry of a previous failure
+                    is_retry = any(f['question_idx'] == actual_idx for f in failures)
+                    
+                    if not is_retry:
+                        failures.append({
+                            'question_idx': actual_idx,
+                            'question': example.question,
+                            'error': str(e)
+                        })
+                    
+                    print(f"\n⚠️  {'Retry' if is_retry else 'Failed'}: {error_msg}")
+                    
+                    # Store placeholder so indices match
+                    error_placeholder = f"[ERROR: {str(e)[:50]}]"
+                    if actual_idx < len(predictions):
+                        # Update existing slot
+                        predictions[actual_idx] = error_placeholder
+                        references[actual_idx] = example.answers
+                        questions[actual_idx] = example.question
+                        responses[actual_idx] = None
+                    else:
+                        # Append new
+                        predictions.append(error_placeholder)
+                        references.append(example.answers)
+                        questions.append(example.question)
+                        responses.append(None)
                 
-                # Clear GPU cache after each generation to prevent accumulation
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                finally:
+                    # Clear GPU cache after each generation to prevent accumulation
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 
-                # Save checkpoint
+                # Save checkpoint (streaming to disk)
                 if checkpoint_path and checkpoint_every and (len(predictions) % checkpoint_every == 0):
                     checkpoint_data = {
                         'predictions': predictions,
@@ -155,10 +224,16 @@ class Evaluator:
                         'questions': questions,
                         'completed': len(predictions),
                         'total': len(examples),
+                        'failures': failures,  # Track failures
                     }
                     ensure_dir(checkpoint_path)
-                    with open(checkpoint_path, 'w') as f:
+                    
+                    # Stream to disk (atomic write with temp file)
+                    temp_path = str(checkpoint_path) + '.tmp'
+                    with open(temp_path, 'w') as f:
                         json.dump(checkpoint_data, f, indent=2)
+                    # Atomic rename (safe even if interrupted)
+                    Path(temp_path).replace(checkpoint_path)
                     
                     # Print progress stats
                     elapsed = time.time() - start_time
@@ -202,8 +277,18 @@ class Evaluator:
 
         # Add statistics
         results["num_examples"] = len(examples)
+        results["num_successful"] = len([p for p in predictions if not p.startswith("[ERROR:")])
+        results["num_failures"] = len(failures)
         results["agent_name"] = self.agent.name
         results["dataset_name"] = self.dataset.name
+        
+        # Report failures
+        if failures:
+            print(f"\n⚠️  {len(failures)} questions failed:")
+            for fail in failures[:5]:  # Show first 5
+                print(f"   Q{fail['question_idx']}: {fail['error'][:80]}")
+            if len(failures) > 5:
+                print(f"   ... and {len(failures) - 5} more")
 
         # Compute per-question metrics
         per_question_metrics = self._compute_per_question_metrics(
@@ -222,6 +307,215 @@ class Evaluator:
             )
 
         return results
+
+    def generate_predictions(
+        self,
+        output_path: str,
+        num_examples: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        checkpoint_every: Optional[int] = None,
+        resume_from_checkpoint: bool = False,
+        retry_failures: bool = False,
+        **kwargs: Any
+    ) -> str:
+        """Generate predictions only (Phase 1 of two-phase evaluation).
+        
+        This method generates predictions and saves them to disk WITHOUT computing metrics.
+        Use this for large evaluations where you want to separate generation from metrics.
+        
+        Args:
+            output_path: Path to save predictions
+            num_examples: Number of examples to evaluate
+            batch_size: Batch size for generation
+            checkpoint_every: Save checkpoint every N examples
+            resume_from_checkpoint: Resume from existing checkpoint
+            retry_failures: Retry previously failed questions
+            **kwargs: Additional generation parameters
+            
+        Returns:
+            Path to saved predictions file
+            
+        Example:
+            >>> evaluator = Evaluator(agent, dataset)
+            >>> pred_file = evaluator.generate_predictions("outputs/preds.json")
+            >>> # Later: compute metrics on pred_file
+        """
+        from datetime import datetime
+        from pathlib import Path
+        
+        # Prepare examples
+        examples = list(self.dataset)
+        if num_examples is not None:
+            examples = examples[:num_examples]
+        
+        predictions = []
+        references = []
+        questions = []
+        responses = []
+        failures = []
+        start_idx = 0
+        
+        # Try to resume from checkpoint
+        checkpoint_path = None
+        if checkpoint_every:
+            checkpoint_path = output_path.replace('.json', '_checkpoint.json')
+            
+            if resume_from_checkpoint and Path(checkpoint_path).exists():
+                print(f"📂 Resuming from checkpoint: {checkpoint_path}")
+                try:
+                    with open(checkpoint_path, 'r') as f:
+                        checkpoint_data = json.load(f)
+                        predictions = checkpoint_data['predictions']
+                        references = checkpoint_data['references']
+                        questions = checkpoint_data['questions']
+                        failures = checkpoint_data.get('failures', [])
+                        start_idx = len(predictions)
+                        print(f"✓ Resumed from {start_idx}/{len(examples)} examples")
+                        
+                        if failures and retry_failures:
+                            print(f"🔄 Retrying {len(failures)} failed questions")
+                            for fail in failures:
+                                idx = fail['question_idx']
+                                if idx < len(predictions):
+                                    predictions[idx] = None
+                except Exception as e:
+                    print(f"⚠️  Failed to load checkpoint: {e}")
+                    start_idx = 0
+        
+        print(f"Generating predictions for {len(examples)} examples (starting from {start_idx})...")
+        
+        # Generate predictions
+        import time
+        start_time = time.time()
+        
+        for i, example in enumerate(tqdm(examples[start_idx:], 
+                                         desc="Generating predictions",
+                                         initial=start_idx,
+                                         total=len(examples))):
+            actual_idx = start_idx + i
+            
+            # Skip if already completed (unless marked for retry)
+            if actual_idx < len(predictions) and predictions[actual_idx] is not None:
+                continue
+            
+            try:
+                response = self.agent.answer(example.question)
+                
+                # Store or update
+                if actual_idx < len(predictions):
+                    predictions[actual_idx] = response.answer
+                    references[actual_idx] = example.answers
+                    questions[actual_idx] = example.question
+                else:
+                    predictions.append(response.answer)
+                    references.append(example.answers)
+                    questions.append(example.question)
+                    
+            except Exception as e:
+                error_msg = f"Question {actual_idx}: {str(e)[:100]}"
+                is_retry = any(f['question_idx'] == actual_idx for f in failures)
+                
+                if not is_retry:
+                    failures.append({
+                        'question_idx': actual_idx,
+                        'question': example.question,
+                        'error': str(e)
+                    })
+                
+                print(f"\n⚠️  {'Retry' if is_retry else 'Failed'}: {error_msg}")
+                
+                error_placeholder = f"[ERROR: {str(e)[:50]}]"
+                if actual_idx < len(predictions):
+                    predictions[actual_idx] = error_placeholder
+                    references[actual_idx] = example.answers
+                    questions[actual_idx] = example.question
+                else:
+                    predictions.append(error_placeholder)
+                    references.append(example.answers)
+                    questions.append(example.question)
+            
+            finally:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            # Save checkpoint
+            if checkpoint_path and checkpoint_every and (len(predictions) % checkpoint_every == 0):
+                checkpoint_data = {
+                    'predictions': predictions,
+                    'references': references,
+                    'questions': questions,
+                    'completed': len(predictions),
+                    'total': len(examples),
+                    'failures': failures,
+                }
+                ensure_dir(checkpoint_path)
+                temp_path = str(checkpoint_path) + '.tmp'
+                with open(temp_path, 'w') as f:
+                    json.dump(checkpoint_data, f, indent=2)
+                Path(temp_path).replace(checkpoint_path)
+                
+                elapsed = time.time() - start_time
+                avg_time = elapsed / len(predictions)
+                remaining = len(examples) - len(predictions)
+                eta_minutes = (remaining * avg_time) / 60
+                
+                if torch.cuda.is_available():
+                    allocated = torch.cuda.memory_allocated() / 1024**3
+                    total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                    print(f"\n💾 Checkpoint | Progress: {len(predictions)}/{len(examples)} | "
+                          f"GPU: {allocated:.1f}/{total_mem:.1f} GiB | ETA: {eta_minutes:.0f}min\n")
+        
+        # Save final predictions with _raw suffix for two-phase workflow
+        ensure_dir(output_path)
+        raw_output_path = output_path.replace('.json', '_predictions_raw.json')
+        
+        predictions_data = {
+            "agent_name": self.agent.name,
+            "dataset_name": self.dataset.name,
+            "timestamp": datetime.now().isoformat(),
+            "num_examples": len(examples),
+            "num_successful": len([p for p in predictions if not p.startswith("[ERROR:")]),
+            "num_failures": len(failures),
+            "status": "predictions_only",  # Indicates Phase 1 complete
+            "predictions": [
+                {
+                    "question_id": ex.id,
+                    "question": q,
+                    "prediction": p,
+                    "expected_answers": r,
+                }
+                for ex, q, p, r in zip(examples, questions, predictions, references)
+            ],
+            "failures": failures,
+        }
+        
+        with open(raw_output_path, 'w') as f:
+            json.dump(predictions_data, f, indent=2)
+        
+        print(f"\n✓ Predictions saved to: {raw_output_path}")
+        if failures:
+            print(f"⚠️  {len(failures)} questions failed")
+        
+        # Also save questions file
+        questions_path = Path(output_path).parent / f"{self.dataset.name}_questions.json"
+        questions_data = {
+            "dataset_name": self.dataset.name,
+            "num_questions": len(examples),
+            "questions": [
+                {
+                    "id": ex.id,
+                    "question": ex.question,
+                    "expected_answer": ex.answers[0] if ex.answers else None,
+                    "all_acceptable_answers": ex.answers,
+                }
+                for ex in examples
+            ],
+        }
+        with open(questions_path, 'w') as f:
+            json.dump(questions_data, f, indent=2)
+        print(f"✓ Questions saved to: {questions_path}")
+        
+        return raw_output_path  # Return the _raw path for two-phase workflow
 
     def _compute_per_question_metrics(
         self, predictions: List[str], references: List[Any], questions: List[str]

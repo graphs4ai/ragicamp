@@ -28,9 +28,8 @@ Advanced Usage:
     result = orchestrator.run(inputs)
 """
 
-from ragicamp.pipeline.resource_manager import (
+from ragicamp.utils.resource_manager import (
     ResourceManager,
-    clear_gpu_memory,
     gpu_memory_scope,
     managed_model,
 )
@@ -49,7 +48,6 @@ from ragicamp.pipeline.orchestrator import (
 __all__ = [
     # Resource management
     "ResourceManager",
-    "clear_gpu_memory",
     "gpu_memory_scope", 
     "managed_model",
     # Phases

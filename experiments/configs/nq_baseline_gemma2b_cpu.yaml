@@ -23,6 +23,9 @@ dataset:
 evaluation:
   mode: both      # generate (predictions only), evaluate (metrics only), or both
   batch_size: 2   # Small batch for CPU
+  checkpoint_every: 10        # Save checkpoint every 10 questions (CPU slower)
+  resume_from_checkpoint: true  # Resume from checkpoint if exists
+  retry_failures: true        # Retry failed questions on resume
 
 metrics:
   - exact_match

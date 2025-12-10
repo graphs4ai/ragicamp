@@ -42,6 +42,9 @@ dataset:
 evaluation:
   mode: both                  # Generate predictions AND compute metrics
   batch_size: 1               # Process 1 question at a time (sequential to avoid OOM)
+  checkpoint_every: 10        # Save checkpoint every 10 questions (enables resume)
+  resume_from_checkpoint: true  # Auto-resume from last checkpoint if it exists
+  retry_failures: true        # Retry previously failed questions on resume
   # Alternative modes:
   #   generate: Only generate predictions (safe for large evaluations)
   #   evaluate: Only compute metrics on existing predictions

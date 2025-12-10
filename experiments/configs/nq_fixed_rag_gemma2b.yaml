@@ -41,6 +41,9 @@ dataset:
 evaluation:
   mode: both
   batch_size: 1               # Sequential processing to avoid OOM
+  checkpoint_every: 10        # Save checkpoint every 10 questions
+  resume_from_checkpoint: true  # Resume from checkpoint if exists
+  retry_failures: true        # Retry failed questions on resume
 
 # LLM Judge Model Configuration
 judge_model:

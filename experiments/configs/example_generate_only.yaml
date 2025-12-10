@@ -22,6 +22,9 @@ dataset:
 evaluation:
   mode: generate  # Only generate predictions, don't compute metrics
   batch_size: 8   # Process 8 questions at once for speed
+  checkpoint_every: 20        # Save checkpoint every 20 questions
+  resume_from_checkpoint: true  # Resume from checkpoint if exists
+  retry_failures: true        # Retry failed questions on resume
 
 metrics:
   # These will be computed later using compute_metrics.py

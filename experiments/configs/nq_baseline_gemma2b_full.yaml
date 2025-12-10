@@ -23,6 +23,9 @@ dataset:
 evaluation:
   mode: both      # generate (predictions only), evaluate (metrics only), or both
   batch_size: 8   # Process 8 questions at once
+  checkpoint_every: 50        # Save checkpoint every 50 questions (full run)
+  resume_from_checkpoint: true  # Resume from checkpoint if exists
+  retry_failures: true        # Retry failed questions on resume
 
 # LLM Judge Model Configuration
 judge_model:

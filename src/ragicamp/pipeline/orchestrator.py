@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ragicamp.pipeline.phases import Phase, PhaseResult
-from ragicamp.pipeline.resource_manager import ResourceManager
+from ragicamp.utils.resource_manager import ResourceManager
 
 
 @dataclass
