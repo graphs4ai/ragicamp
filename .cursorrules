@@ -1,332 +1,202 @@
-# RAGiCamp - Cursor AI Rules
+# RAGiCamp - AI Coding Guidelines
 
 ## Project Overview
 
-RAGiCamp is a modular, production-ready framework for Retrieval-Augmented Generation (RAG) experimentation. It supports multiple RAG strategies from simple baselines to complex RL-based adaptive agents.
+RAGiCamp is a modular framework for RAG (Retrieval-Augmented Generation) experimentation. It uses **Hydra** for composable configuration and **MLflow** for experiment tracking.
 
-**Tech Stack:** Python 3.9+, PyTorch, HuggingFace Transformers, FAISS, Sentence Transformers
+**Tech Stack:** Python 3.9+, PyTorch, HuggingFace, FAISS, Hydra, MLflow, Ragas
 
-**Key Goal:** Clean abstractions, reusable components, easy experimentation
+---
+
+## Quick Reference
+
+### Running Experiments
+
+```bash
+# New Hydra CLI (preferred)
+python -m ragicamp.cli.run model=gemma_2b dataset=nq
+
+# With overrides
+python -m ragicamp.cli.run model=phi3 dataset=triviaqa evaluation.num_examples=50
+
+# Multi-run sweeps
+python -m ragicamp.cli.run -m model=gemma_2b,phi3 dataset=nq,triviaqa
+```
+
+### Key Directories
+
+```
+conf/                   # Hydra configs (NEW - use this!)
+├── config.yaml         # Main defaults
+├── model/              # Model configs
+├── dataset/            # Dataset configs
+├── agent/              # Agent configs
+├── metrics/            # Metric presets
+├── evaluation/         # Eval settings
+└── experiment/         # Complete presets
+
+src/ragicamp/
+├── core/               # Logging, exceptions, constants (NEW)
+├── cli/                # Hydra CLI runner (NEW)
+├── agents/             # RAG agents
+├── models/             # LLM wrappers
+├── metrics/            # Evaluation metrics
+├── datasets/           # Dataset loaders
+└── retrievers/         # Document retrievers
+
+scripts/                # Utility scripts
+docs/                   # Documentation
+tests/                  # Test suite
+```
 
 ---
 
 ## Architecture Principles
 
-### 1. Clean Abstractions (SOLID)
+### 1. Hydra Configuration (NEW)
+
+**Always use Hydra configs** for experiments:
+
+```yaml
+# conf/config.yaml composes from subdirectories
+defaults:
+  - model: gemma_2b
+  - dataset: nq
+  - agent: direct_llm
+  - metrics: standard
+  - evaluation: quick
+```
+
+**Override via CLI:**
+```bash
+python -m ragicamp.cli.run model=phi3 evaluation.num_examples=100
+```
+
+**DON'T** create standalone YAML files in `experiments/configs/` - use `conf/` structure.
+
+### 2. Core Infrastructure (NEW)
+
+**Use structured logging:**
+```python
+from ragicamp.core.logging import get_logger, LogContext
+
+logger = get_logger(__name__)
+logger.info("Processing dataset")
+
+with LogContext(logger, "evaluation"):
+    # Logs: [evaluation] Starting...
+    results = evaluate()
+    # Logs: [evaluation] Completed in 5.2s
+```
+
+**Use custom exceptions:**
+```python
+from ragicamp.core.exceptions import ConfigurationError, ModelError
+
+if not config.model:
+    raise ConfigurationError("Model configuration required", field="model")
+```
+
+**Use constants (not magic strings):**
+```python
+from ragicamp.core.constants import AgentType, MetricType
+
+if agent_type == AgentType.DIRECT_LLM:
+    ...
+```
+
+### 3. Clean Abstractions
 
 - **Base classes** define interfaces via ABC
-- **Implementations** are fully substitutable (LSP)
-- **Single responsibility** - each component does one thing well
-- **Dependency injection** - agents receive models/retrievers, not create them
-
-### 2. Type Safety
-
-- **Always use type hints**
-- **Proper dataclasses** - Use `Document`, not `Dict[str, Any]`
-- **List[Document]** not `List[dict]` for retrieved docs
-- **Dict[str, float]** for all metric returns (standardized)
-
-### 3. Separation of Concerns
-
-```
-agents/      - Decision logic (answer questions)
-models/      - LLM interfaces (generate text)
-retrievers/  - Document retrieval (find relevant docs)
-corpus/      - Document sources (NO answers! prevents data leakage)
-datasets/    - QA datasets (questions + answers for evaluation)
-policies/    - Action selection (for adaptive agents)
-metrics/     - Evaluation (compute scores)
-training/    - Training loops
-evaluation/  - Evaluation orchestration
-config/      - Experiment configuration (dataclasses + YAML)
-output/      - Output management (organized results)
-utils/       - Shared utilities
-```
-
-**Critical Distinction:**
-- `corpus/` = Documents for retrieval (Wikipedia, PubMed) - NO ANSWER INFORMATION
-- `datasets/` = QA pairs for evaluation (Natural Questions, TriviaQA) - WITH ANSWERS
+- **Dependency injection** - agents receive models/retrievers
+- **Type safety** - Use dataclasses, not Dict[str, Any]
+- **Protocols** for runtime type checking
 
 ---
 
 ## Code Patterns
 
-### DocumentCorpus Pattern (NEW)
-
-**Purpose:** Provide documents for retrieval WITHOUT answer information (prevents data leakage)
-
-```python
-from ragicamp.corpus import DocumentCorpus, CorpusConfig
-
-# Always use configuration
-config = CorpusConfig(
-    name="wikipedia_simple",
-    source="wikimedia/wikipedia",
-    version="20231101.simple",
-    max_docs=10000  # Optional limit
-)
-
-# Load corpus
-corpus = WikipediaCorpus(config)
-
-# Iterate documents - NO ANSWERS!
-for doc in corpus.load():
-    # doc.text contains article text
-    # doc.metadata may have title, url, etc
-    # doc.metadata MUST NOT have answers
-    pass
-```
-
-**Rules:**
-- ❌ NEVER include answer information in corpus documents
-- ✅ Use for indexing retrievers
-- ✅ Separate from QA datasets
-- ✅ One corpus can serve multiple datasets
-
-### ExperimentConfig Pattern (NEW)
-
-**Purpose:** Single source of truth for experiment configuration
-
-```python
-from ragicamp.config import ExperimentConfig
-
-# Load from YAML
-config = ExperimentConfig.from_yaml("configs/my_experiment.yaml")
-
-# Access typed configuration
-print(config.corpus.name)
-print(config.retriever.top_k)
-print(config.model.load_in_8bit)
-
-# Save configuration
-config.to_yaml("outputs/experiment_v1/config.yaml")
-
-# Or create programmatically
-from ragicamp.config import create_fixed_rag_config
-config = create_fixed_rag_config(dataset="natural_questions")
-```
-
-**Rules:**
-- ✅ Use dataclasses, not dictionaries
-- ✅ All experiments have a config file
-- ✅ Config saved with results for reproducibility
-- ❌ Don't hard-code values in scripts
-
-### OutputManager Pattern (NEW)
-
-**Purpose:** Organize experiment results cleanly
-
-```python
-from ragicamp.output import OutputManager
-
-mgr = OutputManager()
-
-# Create experiment directory
-exp_dir = mgr.create_experiment_dir("my_experiment_v1")
-
-# Save experiment
-mgr.save_experiment(config, results, exp_dir)
-
-# List experiments
-experiments = mgr.list_experiments(dataset="natural_questions")
-
-# Compare experiments
-mgr.compare_experiments(["exp1", "exp2", "exp3"])
-mgr.print_comparison(["exp1", "exp2"], metrics=["exact_match", "f1"])
-```
-
-**Directory Structure:**
-```
-outputs/
-├── experiments/
-│   ├── experiment_name/
-│   │   ├── config.yaml        # Full config
-│   │   ├── metadata.json      # Timestamp, git hash, etc
-│   │   ├── contexts.json      # Retrieved contexts (if RAG)
-│   │   ├── predictions.json   # All predictions
-│   │   └── results.json       # Metrics summary
-└── comparisons/
-    └── nq_comparison.json
-```
-
 ### Agent Pattern
 
-**For complete agent documentation, see [AGENTS.md](AGENTS.md)**
-
 ```python
+from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+
 class MyAgent(RAGAgent):
-    def __init__(self, name: str, model: LanguageModel, **kwargs):
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.prompt_builder = PromptBuilder.create_default()
-    
-    def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-        # 1. Create context
+    def answer(self, query: str, **kwargs) -> RAGResponse:
         context = RAGContext(query=query)
-        
-        # 2. Do work (retrieve, format, generate)
         answer = self.model.generate(query)
-        
-        # 3. Return proper response
         return RAGResponse(answer=answer, context=context)
-```
-
-**Key principles:**
-- Always return `RAGResponse` with `RAGContext`
-- Use `PromptBuilder` and `ContextFormatter` utilities
-- Implement `save()` and `load()` for artifacts
-- Type hints on all methods
-
-### Retriever Pattern
-
-```python
-class MyRetriever(Retriever):
-    def retrieve(self, query: str, top_k: int = 5, **kwargs) -> List[Document]:
-        # Return List[Document], not List[dict]
-        return [Document(id=..., text=..., metadata={}, score=...)]
-    
-    def index_documents(self, documents: List[Document]) -> None:
-        # Build index
-        pass
 ```
 
 ### Metric Pattern
 
 ```python
+from ragicamp.metrics.base import Metric
+
 class MyMetric(Metric):
-    def compute(
-        self, 
-        predictions: List[str], 
-        references: Union[List[str], List[List[str]]]
-    ) -> Dict[str, float]:  # Always return Dict[str, float]
-        # Compute score
-        score = ...
-        return {"my_metric": score}  # Not just `score`
+    def compute(self, predictions, references) -> Dict[str, float]:
+        return {"my_metric": score}  # Always return Dict[str, float]
+```
+
+### Hydra Config Usage
+
+```python
+import hydra
+from omegaconf import DictConfig
+
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
+def main(cfg: DictConfig):
+    # Access config values
+    model_name = cfg.model.model_name
+    num_examples = cfg.evaluation.num_examples
 ```
 
 ---
 
 ## DO's and DON'Ts
 
-### ✅ DO
+### Configuration
 
-**Use utilities instead of duplicating:**
 ```python
-from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
-from ragicamp.utils.paths import ensure_dir, safe_write_json
+# ✅ DO - Use Hydra overrides
+python -m ragicamp.cli.run model=phi3 dataset=triviaqa
 
-context_text = ContextFormatter.format_numbered(docs)
-prompt = PromptBuilder.create_default().build_prompt(query, context_text)
-
-# Ensure directories exist before writing
-ensure_dir("outputs/results.json")
-# Or use safe_write_json to do both
-safe_write_json(data, "outputs/results.json", indent=2)
+# ❌ DON'T - Create new YAML files for each experiment
+experiments/configs/nq_phi3_100_examples.yaml  # Bad!
 ```
 
-**Use proper types:**
+### Logging
+
 ```python
-def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-    docs: List[Document] = self.retriever.retrieve(query)
-    context = RAGContext(query=query, retrieved_docs=docs)
-    return RAGResponse(answer=answer, context=context)
+# ✅ DO - Use structured logging
+from ragicamp.core.logging import get_logger
+logger = get_logger(__name__)
+logger.info("Loaded %d examples", count)
+
+# ❌ DON'T - Use print statements
+print(f"Loaded {count} examples")  # Bad!
 ```
 
-**Use dataclasses:**
+### Error Handling
+
 ```python
+# ✅ DO - Use custom exceptions
+from ragicamp.core.exceptions import ModelError
+raise ModelError("Failed to load model", model_name=name)
+
+# ❌ DON'T - Use bare exceptions
+raise Exception("Something went wrong")  # Bad!
+```
+
+### Types
+
+```python
+# ✅ DO - Use proper types
 from ragicamp.retrievers.base import Document
+docs: List[Document] = retriever.retrieve(query)
 
-doc = Document(id="1", text="...", metadata={}, score=0.9)
-print(doc.text)  # Clean access
-```
-
-**Provide save/load for artifacts:**
-```python
-def save(self, artifact_name: str) -> str:
-    manager = get_artifact_manager()
-    path = manager.get_agent_path(artifact_name)
-    manager.save_json(config, path / "config.json")
-    return str(path)
-
-@classmethod
-def load(cls, artifact_name: str, model) -> 'MyClass':
-    manager = get_artifact_manager()
-    config = manager.load_json(...)
-    return cls(...)
-```
-
-### ❌ DON'T
-
-**Don't duplicate formatting logic:**
-```python
-# ❌ BAD - This is in utils now
-formatted = []
-for i, doc in enumerate(docs, 1):
-    formatted.append(f"[{i}] {doc.text}")
-context_text = "\n\n".join(formatted)
-
-# ✅ GOOD
-context_text = ContextFormatter.format_numbered(docs)
-```
-
-**Don't use dict for documents:**
-```python
-# ❌ BAD
-def retrieve(self, query: str) -> List[Dict[str, Any]]:
-    return [{"text": "...", "score": 0.9}]
-
-# ✅ GOOD
-def retrieve(self, query: str) -> List[Document]:
-    return [Document(id="1", text="...", metadata={}, score=0.9)]
-```
-
-**Don't return inconsistent types:**
-```python
-# ❌ BAD - Sometimes float, sometimes dict
-def compute(self, preds, refs) -> Union[float, Dict[str, float]]:
-    if self.name == "f1":
-        return 0.85
-    else:
-        return {"precision": 0.9, "recall": 0.8}
-
-# ✅ GOOD - Always dict
-def compute(self, preds, refs) -> Dict[str, float]:
-    return {"f1": 0.85}
-```
-
-**Don't check for internal methods:**
-```python
-# ❌ BAD
-if hasattr(self.agent, "update_policy"):
-    self.agent.update_policy(...)
-
-# ✅ GOOD - Define proper interface
-from abc import ABC, abstractmethod
-
-class TrainableAgent(RAGAgent):
-    @abstractmethod
-    def update_policy(self, ...):
-        pass
-```
-
-**Don't save models in artifacts:**
-```python
-# ❌ BAD - Models are huge
-artifact = {
-    "model": self.model,  # Don't save this!
-    "config": {...}
-}
-
-# ✅ GOOD - Save config, provide model at load time
-artifact = {
-    "model_name": self.model.model_name,  # Just the name
-    "config": {...}
-}
-
-@classmethod
-def load(cls, artifact_name, model: LanguageModel):  # Model provided
-    ...
+# ❌ DON'T - Use dicts
+docs: List[Dict[str, Any]] = [{"text": "..."}]  # Bad!
 ```
 
 ---
@@ -335,420 +205,133 @@ def load(cls, artifact_name, model: LanguageModel):  # Model provided
 
 ### Adding New Components
 
-**New agent:**
-```
-src/ragicamp/agents/
-└── my_agent.py          # Inherit from RAGAgent
-```
+**New agent:** `src/ragicamp/agents/my_agent.py`
+**New metric:** `src/ragicamp/metrics/my_metric.py`
+**New config:** `conf/model/my_model.yaml` (in appropriate subdir)
+**New script:** `scripts/utils/my_script.py`
 
-**New retriever:**
-```
-src/ragicamp/retrievers/
-└── my_retriever.py      # Inherit from Retriever
-```
+### Documentation
 
-**New metric:**
-```
-src/ragicamp/metrics/
-└── my_metric.py         # Inherit from Metric
-```
+**✅ Proper locations:**
+- Feature guides → `docs/guides/`
+- Quick reference → `CHEATSHEET.md`
+- Contributing → `CONTRIBUTING.md`
 
-**New script:**
-```
-experiments/scripts/
-└── my_script.py         # Use argparse, add to Makefile
-```
-
-**New guide:**
-```
-docs/guides/
-└── my_guide.md
-```
-
-**Important:** Do NOT create standalone `.md` files in the root directory. Always place documentation in the appropriate location:
-- New feature guides → `docs/guides/`
-- Architecture changes → Update `docs/ARCHITECTURE.md`
-- Implementation details → Add to relevant guide
-- Quick references → Update `QUICK_REFERENCE.md`
-- Temporary summaries → Integrate into existing docs, then delete
-
-### Import Structure
-
-```python
-# Standard library
-import argparse
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-# Third party
-import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
-
-# Local - absolute imports from src/ragicamp
-from ragicamp.agents.base import RAGAgent
-from ragicamp.models.base import LanguageModel
-from ragicamp.utils.formatting import ContextFormatter
-```
+**❌ DON'T create:**
+- Standalone `.md` files in root
+- Scattered README files
+- Temporary "IMPROVEMENTS.md" files
 
 ---
 
 ## Common Tasks
 
-### Adding a New Agent
+### Add a New Model Config
 
-**See [AGENTS.md](AGENTS.md) for detailed guide on creating agents.**
-
-Quick checklist:
-1. Create `src/ragicamp/agents/my_agent.py` inheriting from `RAGAgent`
-2. Implement `answer()` returning `RAGResponse`
-3. Add `save()` and `load()` if needed
-4. Add tests in `tests/test_agents.py`
-5. Update `AGENTS.md` with example
-
-### Adding a New Metric
-
-1. Create `src/ragicamp/metrics/my_metric.py`
-2. Inherit from `Metric`
-3. Implement `compute()` returning `Dict[str, float]`
-4. Add to `__init__.py`
-5. Test with example predictions/references
-6. Update `docs/guides/METRICS_GUIDE.md`
-
-### Adding a New Retriever
-
-1. Create `src/ragicamp/retrievers/my_retriever.py`
-2. Inherit from `Retriever`
-3. Implement `retrieve()` returning `List[Document]`
-4. Implement `index_documents()`
-5. Add `save_index()` and `load_index()` class method
-6. Add to `__init__.py`
-
-### Adding Training Support
-
-1. Ensure agent has `update_policy()` or similar
-2. Create trainer that calls it with rewards
-3. Save trained policy/params with `save()`
-4. Document training process
-5. Add Makefile shortcut
-
----
-
-## Testing Approach
-
-### Unit Tests
-
-```python
-# tests/test_agents.py
-def test_direct_llm_agent():
-    mock_model = MockLanguageModel()
-    agent = DirectLLMAgent("test", mock_model)
-    response = agent.answer("test query")
-    assert isinstance(response, RAGResponse)
-    assert response.answer is not None
+```yaml
+# conf/model/my_model.yaml
+model_name: "my-org/my-model"
+type: huggingface
+device: cuda
+load_in_8bit: true
 ```
 
-### Integration Tests
+### Add a New Experiment Preset
 
-```python
-# Test full pipeline
-def test_fixed_rag_pipeline():
-    # Create all components
-    model = MockModel()
-    retriever = MockRetriever()
-    agent = FixedRAGAgent("test", model, retriever)
-    
-    # Test answer generation
-    response = agent.answer("query")
-    assert len(response.context.retrieved_docs) > 0
+```yaml
+# conf/experiment/my_experiment.yaml
+defaults:
+  - /model: my_model
+  - /dataset: nq
+  - /agent: fixed_rag
+  - /metrics: full
+  - /evaluation: standard
 ```
 
-### Run Tests
+### Run with the Preset
 
 ```bash
-make test           # Run all tests
-pytest tests/       # Direct pytest
+python -m ragicamp.cli.run +experiment=my_experiment
 ```
 
 ---
 
-## Documentation Standards
+## Testing
 
-### Location Guidelines
-
-**✅ DO:**
-- Place feature docs in `docs/guides/`
-- Update existing docs when adding features
-- Keep root directory clean (only README, CHANGELOG, etc.)
-- Integrate implementation details into relevant guides
-- Create examples in `examples/` directory
-
-**❌ DON'T:**
-- Create standalone `.md` files in root (except standard ones)
-- Scatter documentation across the repo
-- Create "improvements" or "changes" docs (use CHANGELOG or integrate)
-- Leave temporary documentation files
-
-### Documentation Structure
-
-```
-docs/
-├── README.md                    # Project overview
-├── ARCHITECTURE.md              # System design
-├── GETTING_STARTED.md           # Quick start
-├── USAGE.md                     # General usage
-├── TROUBLESHOOTING.md           # Common issues
-└── guides/
-    ├── METRICS.md               # Metrics system
-    ├── DATASET_MANAGEMENT.md    # Dataset handling
-    ├── CONFIG_BASED_EVALUATION.md
-    └── ...
-
-examples/                        # Working code examples
-├── dataset_download_example.py
-└── ...
+```bash
+make test              # All tests
+make test-coverage     # With coverage
+uv run pytest tests/test_metrics.py -v  # Specific file
 ```
 
-### Docstrings
-
+Use fixtures from `tests/conftest.py`:
 ```python
-def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-    """Generate an answer for the given query.
-    
-    Args:
-        query: The input question
-        **kwargs: Additional generation parameters (temperature, max_tokens, etc.)
-        
-    Returns:
-        RAGResponse containing the answer, context, and metadata
-        
-    Example:
-        >>> agent = DirectLLMAgent("test", model)
-        >>> response = agent.answer("What is Python?")
-        >>> print(response.answer)
-    """
-```
-
-### Comments
-
-```python
-# Good comments explain WHY, not WHAT
-# ✅ GOOD
-# Use normalized format for fair comparison across metrics
-text = normalize_answer(text)
-
-# ❌ BAD
-# Normalize the text
-text = normalize_answer(text)
-```
-
-### When Adding New Features
-
-1. **Code first** - Implement with proper docstrings
-2. **Update existing guide** - Add to relevant `docs/guides/` file
-3. **Add example** - Create working example in `examples/`
-4. **Update main docs** - Add links in `docs/README.md` if major feature
-5. **Makefile** - Add commands for common operations
-6. **No loose docs** - Don't leave `.md` files scattered in root
-
----
-
-## Artifact Management
-
-### Structure
-
-```
-artifacts/
-├── retrievers/
-│   └── name_v1/
-│       ├── index.faiss      # FAISS index
-│       ├── documents.pkl    # Documents
-│       └── config.json      # Metadata
-└── agents/
-    └── name_v1/
-        └── config.json      # Config (references retriever)
-```
-
-### Naming Convention
-
-- Use descriptive names: `wikipedia_nq_v1`, not `index1`
-- Include version: `_v1`, `_v2`, etc.
-- Be specific: `fixed_rag_nq_v1`, not `agent1`
-
-### What to Save
-
-✅ **DO save:**
-- Configurations (JSON)
-- FAISS indices
-- Document stores (pickle)
-- Trained policies (JSON/pickle)
-- Metadata
-
-❌ **DON'T save:**
-- Language models (too large, provide at runtime)
-- Entire datasets (reference by name)
-- Temporary computations
-
----
-
-## Performance Considerations
-
-### Indexing
-
-- Use `flat` index for < 1M documents
-- Use `ivf` index for larger datasets
-- Batch document encoding when possible
-- Show progress bars for long operations (tqdm)
-
-### Generation
-
-- Use batching when available: `model.batch_generate()`
-- Cache retrieval results if queries repeat
-- Use 8-bit quantization for memory: `load_in_8bit=True`
-
-### Memory
-
-- Don't load entire dataset if not needed
-- Use generators for large datasets
-- Clean up indices after use if RAM-constrained
-
----
-
-## Error Handling
-
-### Graceful Failures
-
-```python
-try:
-    retriever = DenseRetriever.load_index("artifact_name")
-except FileNotFoundError:
-    print("❌ Artifact not found. Run 'make train-fixed-rag' first.")
-    sys.exit(1)
-```
-
-### User-Friendly Messages
-
-```python
-# ✅ GOOD
-print("✓ Model loaded successfully")
-print(f"  - {len(documents)} documents indexed")
-print(f"  - Artifact saved to: {path}")
-
-# ❌ BAD
-print("done")
+def test_agent(mock_model, sample_dataset):
+    agent = DirectLLMAgent(model=mock_model)
+    ...
 ```
 
 ---
 
-## Makefile Integration
+## Makefile Commands
 
-When adding new scripts, add to Makefile:
+```bash
+make help              # Show all commands
+make test              # Run tests
+make format            # Format code
+make validate-all-configs  # Validate Hydra configs
 
-```makefile
-my-command:
-	@echo "🚀 Running my command..."
-	uv run python experiments/scripts/my_script.py \
-		--arg1 value1 \
-		--arg2 value2
-```
+# Experiments
+make quick-test        # Quick smoke test
+make baseline-direct   # DirectLLM baseline
+make baseline-rag      # FixedRAG baseline
 
-And update `make help`:
-
-```makefile
-help:
-	@echo "🆕 MY SECTION"
-	@echo "  make my-command           - Description here"
-```
-
----
-
-## Commit Messages
-
-Use conventional commits:
-
-```
-feat: Add BanditRAGAgent with epsilon-greedy policy
-fix: Correct Document type in retriever return
-refactor: Extract formatting logic to utils
-docs: Update AGENTS.md with save/load examples
-test: Add tests for FixedRAGAgent
-chore: Update dependencies in pyproject.toml
+# Data
+make download-nq       # Download Natural Questions
+make index-small       # Create small index
 ```
 
 ---
 
 ## When Helping Users
 
-1. **Check existing patterns first** - Look at similar components
-2. **Use utilities** - Don't duplicate formatting/prompt logic
-3. **Follow type system** - Use Document, not dict
-4. **Keep it simple** - Don't over-engineer
-5. **Add documentation properly** - Update relevant files in `docs/guides/`, don't scatter `.md` files
-6. **Test your changes** - At least smoke test
-7. **Update Makefile** - If adding scripts
-8. **Follow LSP** - New implementations should be substitutable
-9. **Clean up** - Remove temporary files, integrate docs into proper locations
-10. **Examples over docs** - Prefer working code examples when possible
+1. **Check conf/ first** - New config system
+2. **Use core module** - Logging, exceptions, constants
+3. **Follow Hydra patterns** - Overrides, not new files
+4. **Update proper docs** - `docs/guides/`, not root
+5. **Use Makefile** - Add commands for new scripts
+6. **Test changes** - At least `make test`
+7. **Keep it simple** - Minimal changes needed
 
 ---
 
-## Quick Reference
+## Key Files
 
-```python
-# Agent
-from ragicamp.agents.fixed_rag import FixedRAGAgent
-agent = FixedRAGAgent.load("fixed_rag_v1", model)
-response = agent.answer("query")
-
-# Retriever
-from ragicamp.retrievers.dense import DenseRetriever
-retriever = DenseRetriever.load_index("wikipedia_v1")
-docs = retriever.retrieve("query", top_k=5)
-
-# Formatting
-from ragicamp.utils.formatting import ContextFormatter
-text = ContextFormatter.format_numbered(docs)
-
-# Prompts
-from ragicamp.utils.prompts import PromptBuilder
-builder = PromptBuilder.create_default()
-prompt = builder.build_prompt(query, context)
-
-# Artifacts
-from ragicamp.utils.artifacts import get_artifact_manager
-manager = get_artifact_manager()
-path = manager.get_agent_path("agent_v1")
-```
+| File | Purpose |
+|------|---------|
+| `conf/config.yaml` | Main Hydra config |
+| `src/ragicamp/cli/run.py` | Hydra CLI entry point |
+| `src/ragicamp/core/` | Logging, exceptions, constants |
+| `CHEATSHEET.md` | Quick reference |
+| `CONTRIBUTING.md` | How to contribute |
+| `docs/guides/HYDRA_CONFIG.md` | Config system docs |
+| `Makefile` | All commands |
 
 ---
 
 ## Project Status
 
-**Current State:**
-- ✅ Clean type-safe abstractions
-- ✅ DirectLLM, FixedRAG, BanditRAG, MDPRAG agents
-- ✅ Dense & Sparse retrievers with save/load
-- ✅ EM, F1, BERTScore, BLEURT, LLM-judge metrics
-- ✅ Training infrastructure for adaptive agents
-- ✅ Artifact management system
-- ✅ Comprehensive documentation
+**v0.2.0 Features:**
+- ✅ Hydra composable configs
+- ✅ MLflow experiment tracking
+- ✅ Ragas metric integration
+- ✅ Structured logging & exceptions
+- ✅ Consolidated documentation
+- ✅ Robust CI/CD workflows
 
-**Next Priorities:**
-- Advanced RL policies (PPO, A2C)
-- ResultStore abstraction for better viz
-- Multi-objective reward shaping
-- More comprehensive tests
+**Key Agents:** DirectLLM, FixedRAG, BanditRAG, MDPRAG
+**Key Metrics:** EM, F1, BERTScore, BLEURT, Ragas (faithfulness, relevancy)
 
 ---
 
-## Resources
-
-- **Agent guide:** [AGENTS.md](AGENTS.md) - Complete agent documentation
-- **Architecture:** `docs/ARCHITECTURE.md`
-- **Quick start:** `docs/GETTING_STARTED.md`
-- **Guides:** `docs/guides/` - Feature-specific guides
-- **API patterns:** Look at existing implementations
-
-**Remember:** Keep it simple, type-safe, and reusable! 🚀
-
+**Remember:** Hydra configs, structured logging, proper types! 🚀

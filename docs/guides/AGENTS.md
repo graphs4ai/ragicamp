@@ -610,53 +610,51 @@ print(response.answer)
 
 ## 📊 Evaluating Agents
 
-### Modern Approach: Config-Based Evaluation ⭐ **RECOMMENDED**
+### Modern Approach: Hydra Configs ⭐ **RECOMMENDED**
 
-The easiest and most robust way to evaluate agents is using YAML configs:
+The easiest way to evaluate agents is with the Hydra configuration system:
 
-```yaml
-# experiments/configs/my_evaluation.yaml
-agent:
-  type: direct_llm
-  name: "my_agent"
-  system_prompt: "You are a helpful assistant."
+```bash
+# Quick evaluation with defaults
+python -m ragicamp.cli.run
 
-model:
-  type: huggingface
-  model_name: "google/gemma-2-2b-it"
-  device: "cuda"
-  load_in_8bit: true
+# Override components
+python -m ragicamp.cli.run model=phi3 dataset=triviaqa evaluation.num_examples=100
 
-dataset:
-  name: natural_questions
-  split: validation
-  num_examples: 100
-
-evaluation:
-  mode: both  # generate → evaluate (most robust!)
-  batch_size: 8
-
-metrics:
-  - exact_match
-  - f1
-  - bertscore
-  
-output:
-  save_predictions: true
-  output_path: "outputs/my_agent_results.json"
+# Use experiment presets
+python -m ragicamp.cli.run +experiment=baseline
 ```
 
-**Run it:**
-```bash
-uv run python experiments/scripts/run_experiment.py \
-  --config experiments/configs/my_evaluation.yaml
+**Available configs in `conf/`:**
+
+```
+conf/
+├── model/          # gemma_2b, phi3, llama3_8b, openai_gpt4
+├── dataset/        # nq, triviaqa, hotpotqa
+├── agent/          # direct_llm, fixed_rag, bandit_rag
+├── metrics/        # fast, standard, full, rag
+├── evaluation/     # quick, standard, full
+└── experiment/     # baseline, rag, quick_test
 ```
 
 **Benefits:**
-- ✅ **Two-phase evaluation** - Never lose progress to failures
-- ✅ **Automatic checkpointing** - Resume from where you left off
-- ✅ **Type validation** - Catches errors before running
-- ✅ **Reproducible** - Config files track all settings
+- ✅ **Composable** - Mix and match components
+- ✅ **CLI overrides** - Change any parameter without editing files
+- ✅ **Multi-run sweeps** - Test multiple configs at once
+- ✅ **Reproducible** - Hydra saves full config with each run
+
+### Parameter Sweeps
+
+```bash
+# Test multiple models
+python -m ragicamp.cli.run -m model=gemma_2b,phi3
+
+# Sweep datasets and models
+python -m ragicamp.cli.run -m model=gemma_2b,phi3 dataset=nq,triviaqa
+
+# Sweep top_k values
+python -m ragicamp.cli.run -m agent=fixed_rag agent.top_k=3,5,10
+```
 
 ### Programmatic API (Advanced)
 
@@ -664,7 +662,8 @@ For custom workflows, use the evaluator directly:
 
 ```python
 from ragicamp.evaluation.evaluator import Evaluator
-from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
+from ragicamp.metrics.exact_match import ExactMatchMetric
+from ragicamp.metrics.f1_metric import F1Metric
 
 # Phase 1: Generate predictions
 evaluator = Evaluator(agent, dataset)
@@ -685,57 +684,25 @@ print(f"Exact Match: {results['exact_match']:.4f}")
 print(f"F1 Score: {results['f1']:.4f}")
 ```
 
-### Advanced: LLM-as-a-Judge
+### LLM-as-a-Judge
 
-For high-quality correctness judgments with automatic checkpointing:
-
-```yaml
-# In your config:
-judge_model:
-  type: openai
-  model_name: "gpt-4o-mini"  # Budget-friendly
-  temperature: 0.0
-
-metrics:
-  - exact_match
-  - f1
-  - name: llm_judge_qa
-    params:
-      judgment_type: "binary"  # correct/incorrect
-      batch_size: 16           # Process 16 judgments at once
-      # Checkpoint auto-configured by system!
+```bash
+# Use with judge model
+python -m ragicamp.cli.run +judge=gpt4_mini metrics=full
 ```
 
-**Features:**
+Features:
 - ✅ **Saves progress every 5 batches** automatically
 - ✅ **Resumes from checkpoint** if API fails
-- ✅ **Batch processing** for speed (16 judgments at once)
-- ✅ **Budget-friendly** using gpt-4o-mini
-
-**Example:**
-```bash
-# Run with LLM judge
-make eval-baseline-llm-judge
-
-# If it fails at batch 35/57? Just run again!
-# It automatically resumes from checkpoint
-```
-
-**See:** 
-- [Two-Phase Evaluation Guide](guides/TWO_PHASE_EVALUATION.md) - Robust evaluation workflow
-- [Metrics Guide](guides/METRICS.md) - Choosing evaluation metrics
-- [LLM Judge Guide](guides/LLM_JUDGE.md) - Using GPT-4 for evaluation
-- [Config Guide](guides/CONFIG_BASED_EVALUATION.md) - Config-driven experiments
+- ✅ **Batch processing** for speed
 
 ---
 
 ## Next Steps
 
-- **[Metrics Guide](guides/METRICS.md)** - Choosing evaluation metrics
-- **[LLM Judge Guide](guides/LLM_JUDGE.md)** - Using GPT-4 for evaluation
-- **[Config Guide](guides/CONFIG_BASED_EVALUATION.md)** - Config-driven experiments
-- **[Architecture](ARCHITECTURE.md)** - System design
-- **[Usage Guide](USAGE.md)** - Detailed examples
+- **[Hydra Config Guide](HYDRA_CONFIG.md)** - Full configuration system docs
+- **[CHEATSHEET](../../CHEATSHEET.md)** - Quick reference for common commands
+- **[CONTRIBUTING](../../CONTRIBUTING.md)** - How to add new agents
 
 **Ready to build?** Start with FixedRAGAgent for production, then explore adaptive agents for optimization! 🚀
 
