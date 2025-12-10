@@ -45,6 +45,14 @@ try:
 except ImportError:
     _has_hallucination = False
 
+# Import Ragas adapter
+try:
+    from ragicamp.metrics.ragas_adapter import RagasMetricAdapter, create_ragas_metric
+
+    _has_ragas = True
+except ImportError:
+    _has_ragas = False
+
 __all__ = ["Metric"]
 
 # Add available metrics to __all__
@@ -60,3 +68,5 @@ if _has_faithfulness:
     __all__.append("FaithfulnessMetric")
 if _has_hallucination:
     __all__.append("HallucinationMetric")
+if _has_ragas:
+    __all__.extend(["RagasMetricAdapter", "create_ragas_metric"])

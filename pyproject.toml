@@ -30,6 +30,10 @@ dependencies = [
     "bert-score>=0.3.13",
     "bleurt",
     "keras<3",
+    # Experiment tracking and optimization
+    "mlflow>=2.8.0",  # Experiment tracking and model registry
+    "ragas>=0.1.0",  # RAG-specific evaluation metrics
+    "optuna>=3.0.0",  # Hyperparameter optimization
 ]
 
 [project.optional-dependencies]

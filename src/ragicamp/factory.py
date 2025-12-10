@@ -281,6 +281,25 @@ class ComponentFactory:
                     continue
                 metrics.append(HallucinationMetric(**metric_params))
 
+            # Try Ragas metrics (with ragas_ prefix or direct name)
+            elif metric_name.startswith("ragas_") or metric_name in [
+                "answer_relevancy", "context_precision", "context_recall",
+                "context_relevancy", "answer_similarity", "answer_correctness"
+            ]:
+                try:
+                    from ragicamp.metrics.ragas_adapter import create_ragas_metric
+                    
+                    # Remove ragas_ prefix if present
+                    ragas_name = metric_name.replace("ragas_", "")
+                    print(f"🔄 Using Ragas metric: {ragas_name}")
+                    metrics.append(create_ragas_metric(ragas_name, **metric_params))
+                except ImportError:
+                    print(f"⚠️  Ragas not installed, skipping {metric_name}")
+                    continue
+                except Exception as e:
+                    print(f"⚠️  Failed to create Ragas metric {metric_name}: {e}")
+                    continue
+
             else:
                 print(f"⚠️  Unknown metric: {metric_name}, skipping")
 
