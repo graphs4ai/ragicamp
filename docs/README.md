@@ -2,8 +2,8 @@
 
 Complete documentation for the RAGiCamp framework.
 
-> **🆕 New in v0.2:** MLflow tracking, Ragas metrics, and state management!  
-> [Quick Start →](guides/QUICKSTART_V02.md) | [Release Notes →](V02_RELEASE_NOTES.md)
+> **🆕 New in v0.2:** Hydra configs, MLflow tracking, Ragas metrics!  
+> [Cheatsheet →](../CHEATSHEET.md) | [Release Notes →](V02_RELEASE_NOTES.md)
 
 ---
 
@@ -11,15 +11,16 @@ Complete documentation for the RAGiCamp framework.
 
 | Document | Description |
 |----------|-------------|
-| **[Quick Start v0.2](guides/QUICKSTART_V02.md)** ⭐ | 5-minute guide to new features |
+| **[Cheatsheet](../CHEATSHEET.md)** ⭐ | Quick reference for all commands |
 | **[Getting Started](GETTING_STARTED.md)** | Installation and first steps |
-| **[Quick Reference](../QUICK_REFERENCE.md)** | Command cheat sheet |
+| **[Contributing](../CONTRIBUTING.md)** | How to contribute |
 
 ## 🆕 v0.2 Features
 
 | Guide | Description |
 |-------|-------------|
-| **[MLflow & Ragas Guide](guides/MLFLOW_RAGAS_GUIDE.md)** | Experiment tracking, Ragas metrics, state management |
+| **[Hydra Config Guide](guides/HYDRA_CONFIG.md)** ⭐ | Composable configuration system |
+| **[MLflow & Ragas Guide](guides/MLFLOW_RAGAS_GUIDE.md)** | Experiment tracking, Ragas metrics |
 | **[Release Notes](V02_RELEASE_NOTES.md)** | What's new in v0.2 |
 
 ## 🏗️ Core Documentation
@@ -27,7 +28,7 @@ Complete documentation for the RAGiCamp framework.
 | Document | Description |
 |----------|-------------|
 | **[Architecture](ARCHITECTURE.md)** | System design and components |
-| **[Agents Guide](AGENTS.md)** | Understanding different agent types |
+| **[Agents Guide](guides/AGENTS.md)** | Understanding different agent types |
 | **[Usage Guide](USAGE.md)** | Detailed usage patterns |
 | **[Troubleshooting](TROUBLESHOOTING.md)** | Common issues and solutions |
 
@@ -63,15 +64,15 @@ Complete documentation for the RAGiCamp framework.
 
 ### New Users
 
-- **[Quick Start v0.2](guides/QUICKSTART_V02.md)** - Try new features in 5 minutes
+- **[Cheatsheet](../CHEATSHEET.md)** - Quick reference for all commands
 - **[Getting Started](GETTING_STARTED.md)** - Full installation guide
-- **[Quick Reference](../QUICK_REFERENCE.md)** - Command cheat sheet
+- **[Hydra Configs](guides/HYDRA_CONFIG.md)** - Learn the config system
 
 ### Common Tasks
 
+- **Running experiments?** → [Hydra Config Guide](guides/HYDRA_CONFIG.md)
 - **Tracking experiments?** → [MLflow Guide](guides/MLFLOW_RAGAS_GUIDE.md#mlflow-tracking)
 - **Better RAG metrics?** → [Ragas Metrics](guides/MLFLOW_RAGAS_GUIDE.md#ragas-metrics)
-- **Resume from failure?** → [State Management](guides/MLFLOW_RAGAS_GUIDE.md#state-management)
 - **Using configs?** → [Config Guide](guides/CONFIG_BASED_EVALUATION.md)
 - **Want LLM judge?** → [LLM Judge](guides/LLM_JUDGE.md)
 - **Choosing metrics?** → [Metrics Guide](guides/METRICS.md)
@@ -79,7 +80,7 @@ Complete documentation for the RAGiCamp framework.
 ### Understanding the System
 
 - **How it works?** → [Architecture](ARCHITECTURE.md)
-- **Agent types?** → [Agents Guide](AGENTS.md)
+- **Agent types?** → [Agents Guide](guides/AGENTS.md)
 - **Having issues?** → [Troubleshooting](TROUBLESHOOTING.md)
 
 ## 💡 Documentation Structure
@@ -94,8 +95,9 @@ docs/
 ├── TROUBLESHOOTING.md            # Common issues
 │
 └── guides/                       # Feature guides
-    ├── QUICKSTART_V02.md         # ⭐ v0.2 quick start
-    ├── MLFLOW_RAGAS_GUIDE.md     # ⭐ MLflow, Ragas, State
+    ├── HYDRA_CONFIG.md           # ⭐ Hydra configuration system
+    ├── AGENTS.md                 # Agent types and usage
+    ├── MLFLOW_RAGAS_GUIDE.md     # MLflow, Ragas, State
     ├── CONFIG_BASED_EVALUATION.md
     ├── TWO_PHASE_EVALUATION.md
     ├── METRICS.md
@@ -105,8 +107,8 @@ docs/
 
 ## 🤝 Contributing
 
-Found an issue or want to improve documentation? Contributions welcome!
+See **[CONTRIBUTING.md](../CONTRIBUTING.md)** for how to contribute.
 
 ---
 
-**Ready to start?** → [Quick Start v0.2](guides/QUICKSTART_V02.md) | **Full install?** → [Getting Started](GETTING_STARTED.md)
+**Ready to start?** → [Cheatsheet](../CHEATSHEET.md) | **Full install?** → [Getting Started](GETTING_STARTED.md)
