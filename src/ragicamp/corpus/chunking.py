@@ -124,7 +124,7 @@ class SentenceChunker(ChunkingStrategy):
     """
 
     # Sentence boundary pattern
-    SENTENCE_PATTERN = re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
+    SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
     def chunk(self, text: str) -> List[str]:
         """Split text into sentence-based chunks."""
@@ -162,7 +162,7 @@ class ParagraphChunker(ChunkingStrategy):
     def chunk(self, text: str) -> List[str]:
         """Split text into paragraph-based chunks."""
         # Split by double newlines
-        paragraphs = re.split(r'\n\s*\n', text)
+        paragraphs = re.split(r"\n\s*\n", text)
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
         if not paragraphs:
@@ -206,12 +206,14 @@ class ParagraphChunker(ChunkingStrategy):
 
     def _split_large_paragraph(self, text: str) -> List[str]:
         """Split a large paragraph using sentence boundaries."""
-        sentence_chunker = SentenceChunker(ChunkConfig(
-            strategy="sentence",
-            chunk_size=5,  # sentences per chunk
-            chunk_overlap=1,
-            min_chunk_size=self.config.min_chunk_size,
-        ))
+        sentence_chunker = SentenceChunker(
+            ChunkConfig(
+                strategy="sentence",
+                chunk_size=5,  # sentences per chunk
+                chunk_overlap=1,
+                min_chunk_size=self.config.min_chunk_size,
+            )
+        )
         return sentence_chunker.chunk(text)
 
 
@@ -266,7 +268,9 @@ class RecursiveChunker(ChunkingStrategy):
 
                         # If this split alone is too big, recurse with next separator
                         if len(split) > self.config.chunk_size:
-                            remaining_seps = separators[i + 1:] if i + 1 < len(separators) else [" "]
+                            remaining_seps = (
+                                separators[i + 1 :] if i + 1 < len(separators) else [" "]
+                            )
                             sub_chunks = self._recursive_split(split, remaining_seps)
                             chunks.extend(sub_chunks)
                             current_chunk = ""
@@ -294,14 +298,18 @@ class RecursiveChunker(ChunkingStrategy):
             curr_chunk = chunks[i]
 
             # Get overlap from end of previous chunk
-            overlap = prev_chunk[-self.config.chunk_overlap:] if len(prev_chunk) > self.config.chunk_overlap else prev_chunk
+            overlap = (
+                prev_chunk[-self.config.chunk_overlap :]
+                if len(prev_chunk) > self.config.chunk_overlap
+                else prev_chunk
+            )
 
             # Prepend overlap to current chunk (if it doesn't already contain it)
             if not curr_chunk.startswith(overlap):
                 # Find a word boundary in overlap
                 space_idx = overlap.find(" ")
                 if space_idx > 0:
-                    overlap = overlap[space_idx + 1:]
+                    overlap = overlap[space_idx + 1 :]
                 result.append(overlap + " " + curr_chunk)
             else:
                 result.append(curr_chunk)
@@ -407,4 +415,3 @@ class DocumentChunker:
             "chunk_overlap": self.config.chunk_overlap,
             "min_chunk_size": self.config.min_chunk_size,
         }
-

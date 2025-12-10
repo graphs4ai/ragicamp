@@ -59,7 +59,7 @@ class HuggingFaceModel(LanguageModel):
             self.model = self.model.to(self.device)
 
         # Enable gradient checkpointing to save memory (trades compute for memory)
-        if hasattr(self.model, 'gradient_checkpointing_enable'):
+        if hasattr(self.model, "gradient_checkpointing_enable"):
             self.model.gradient_checkpointing_enable()
 
         self.model.eval()

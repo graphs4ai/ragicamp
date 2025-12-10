@@ -7,7 +7,7 @@ This module provides clean abstractions for running experiments:
 
 Quick Start:
     from ragicamp.pipeline import create_rag_pipeline, ResourceManager
-    
+
     # Simple one-liner
     result = create_rag_pipeline(
         model_factory=lambda: HuggingFaceModel("google/gemma-2-2b-it", load_in_4bit=True),
@@ -17,10 +17,10 @@ Quick Start:
         metrics=[ExactMatchMetric(), F1Metric()],
         output_path="outputs/predictions.json",
     )
-    
+
 Advanced Usage:
     from ragicamp.pipeline import ExperimentOrchestrator, GenerationPhase, MetricsPhase
-    
+
     # Build custom pipeline
     orchestrator = ExperimentOrchestrator("my_experiment")
     orchestrator.add_phase(GenerationPhase(...))
@@ -28,27 +28,27 @@ Advanced Usage:
     result = orchestrator.run(inputs)
 """
 
-from ragicamp.utils.resource_manager import (
-    ResourceManager,
-    gpu_memory_scope,
-    managed_model,
-)
-from ragicamp.pipeline.phases import (
-    Phase,
-    PhaseResult,
-    GenerationPhase,
-    MetricsPhase,
-)
 from ragicamp.pipeline.orchestrator import (
     ExperimentOrchestrator,
     PipelineResult,
     create_rag_pipeline,
 )
+from ragicamp.pipeline.phases import (
+    GenerationPhase,
+    MetricsPhase,
+    Phase,
+    PhaseResult,
+)
+from ragicamp.utils.resource_manager import (
+    ResourceManager,
+    gpu_memory_scope,
+    managed_model,
+)
 
 __all__ = [
     # Resource management
     "ResourceManager",
-    "gpu_memory_scope", 
+    "gpu_memory_scope",
     "managed_model",
     # Phases
     "Phase",
@@ -60,4 +60,3 @@ __all__ = [
     "PipelineResult",
     "create_rag_pipeline",
 ]
-
