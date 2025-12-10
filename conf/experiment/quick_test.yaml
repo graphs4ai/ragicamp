@@ -1,0 +1,19 @@
+# @package _global_
+# Quick Test Experiment
+# Usage: python -m ragicamp.cli.run experiment=quick_test
+
+defaults:
+  - /model: gemma_2b_4bit
+  - /dataset: nq
+  - /agent: direct_llm
+  - /metrics: fast
+  - /evaluation: quick
+  - /mlflow: disabled
+
+# Experiment metadata
+experiment:
+  name: quick_test
+  description: "Quick smoke test"
+  tags:
+    - test
+    - quick

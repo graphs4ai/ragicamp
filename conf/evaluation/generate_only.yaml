@@ -1,0 +1,9 @@
+# Generate Only Mode
+# Only generate predictions, no metrics
+# Useful for two-phase evaluation
+
+mode: generate
+batch_size: 8
+checkpoint_every: 20
+resume_from_checkpoint: true
+retry_failures: true

@@ -1,0 +1,11 @@
+# Standard Metrics
+# Fast metrics + LLM judge
+# Requires OPENAI_API_KEY for llm_judge
+
+metrics:
+  - exact_match
+  - f1
+  - name: llm_judge_qa
+    params:
+      judgment_type: binary
+      batch_size: 16

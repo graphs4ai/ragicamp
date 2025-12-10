@@ -1,0 +1,9 @@
+# HotpotQA Dataset
+# Multi-hop reasoning questions
+
+name: hotpotqa
+split: validation
+num_examples: 100
+filter_no_answer: true
+use_distractors: false
+cache_dir: data/datasets

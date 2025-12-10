@@ -1,0 +1,11 @@
+# Gemma 2B Model (4-bit Quantized)
+# Memory-efficient version, fits in ~3GB VRAM
+
+type: huggingface
+model_name: "google/gemma-2-2b-it"
+device: cuda
+load_in_8bit: false
+load_in_4bit: true
+max_tokens: 256
+temperature: 0.7
+trust_remote_code: true

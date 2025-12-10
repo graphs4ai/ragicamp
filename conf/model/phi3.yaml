@@ -1,0 +1,11 @@
+# Microsoft Phi-3 Mini (4-bit)
+# Excellent reasoning for its size
+
+type: huggingface
+model_name: "microsoft/Phi-3-mini-4k-instruct"
+device: cuda
+load_in_8bit: false
+load_in_4bit: true
+max_tokens: 256
+temperature: 0.7
+trust_remote_code: true

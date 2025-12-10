@@ -1,0 +1,7 @@
+# GPT-4o Mini Judge
+# Budget-friendly LLM judge (~$0.05-0.10 per 100 questions)
+# Requires OPENAI_API_KEY
+
+type: openai
+model_name: "gpt-4o-mini"
+temperature: 0.0

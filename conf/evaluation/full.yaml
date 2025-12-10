@@ -1,0 +1,13 @@
+# Full Evaluation
+# Complete dataset evaluation
+# Can take hours depending on dataset size
+
+mode: both
+batch_size: 8
+checkpoint_every: 50
+resume_from_checkpoint: true
+retry_failures: true
+
+# Override to use full dataset
+dataset_override:
+  num_examples: null  # Use all examples

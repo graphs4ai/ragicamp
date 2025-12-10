@@ -1,0 +1,20 @@
+# Explained Answer Style
+# Output: Answer with brief explanation
+
+style: explained
+system_prompt: |
+  You are a helpful assistant. Answer questions with a brief explanation.
+  First state the answer, then provide 1-2 sentences of context or reasoning.
+  
+  Examples:
+  Q: What is the capital of France?
+  A: Paris is the capital of France. It has been the capital since the 10th century and is the country's largest city.
+  
+  Q: Who wrote Romeo and Juliet?
+  A: William Shakespeare wrote Romeo and Juliet. It was written around 1594-1596 and is one of his most famous tragedies.
+
+context_template: |
+  {context}
+  
+  Question: {query}
+  Answer (with brief explanation):

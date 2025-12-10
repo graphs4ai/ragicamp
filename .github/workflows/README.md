@@ -1,110 +1,214 @@
-# GitHub Actions CI/CD
+# GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows for continuous integration and deployment.
+This directory contains CI/CD workflows for RAGiCamp.
 
-## Workflows
+## Workflows Overview
 
-### `ci.yml` - Continuous Integration
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | Push/PR to main/develop | Main CI pipeline |
+| `pr-check.yml` | Pull requests | Quick PR validation |
+| `release.yml` | Tags (v*) | Create releases |
 
-Runs on every push and pull request to `main` or `develop` branches.
+---
 
-**Jobs:**
+## `ci.yml` - Continuous Integration
 
-1. **Tests** - Run test suite on Python 3.12
-   - Runs all unit tests with pytest
-   - Continues on test failures to see all results
-   - Uploads test results as artifacts
+**Runs on:** Every push and PR to `main` or `develop`
 
-2. **Lint** - Code quality checks
-   - Black formatting check
-   - isort import sorting check
-   
-3. **Coverage** - Test coverage reporting
-   - Generates coverage reports (XML, HTML, terminal)
-   - Uploads coverage to Codecov (optional)
-   - Uploads HTML report as artifact
+### Jobs
 
-4. **Config Validation** - Validate all YAML configs
-   - Tests all config files in `experiments/configs/`
-   - Ensures configs are valid before merge
+| Job | Duration | What it does |
+|-----|----------|--------------|
+| **lint** | ~2 min | Black, isort, mypy checks |
+| **test** | ~5 min | Full test suite with coverage |
+| **validate-configs** | ~1 min | Validate YAML configs |
+| **import-check** | ~1 min | Verify package imports |
+| **ci-success** | - | Final status check |
 
-5. **Summary** - Overall CI status
-   - Aggregates all job results
-   - Fails if any check fails
+### Features
+
+- ✅ **Dependency caching** - Fast subsequent runs
+- ✅ **Concurrency control** - Cancels in-progress runs on new push
+- ✅ **Coverage reports** - Uploaded to Codecov
+- ✅ **Test artifacts** - JUnit XML for GitHub integration
+- ✅ **Hydra config validation** - Tests new config system
+
+### Fail Conditions
+
+The CI **fails** if:
+- Formatting is wrong (black/isort)
+- Tests fail
+- Configs are invalid
+- Package won't import
+
+---
+
+## `pr-check.yml` - Pull Request Checks
+
+**Runs on:** All pull requests
+
+### Jobs
+
+| Job | Purpose |
+|-----|---------|
+| **pr-size** | Warns on large PRs |
+| **changes** | Detects what changed |
+| **smoke-test** | Quick import test (if src changed) |
+| **docs-check** | Link validation (if docs changed) |
+
+### Smart Detection
+
+Only runs relevant checks based on what changed:
+- `src/` changed → Run smoke tests
+- `docs/` changed → Check markdown links
+- `conf/` changed → Validate configs
+
+---
+
+## `release.yml` - Releases
+
+**Runs on:** Git tags matching `v*` (e.g., `v0.2.0`)
+
+### Steps
+
+1. **Build** - Creates wheel and sdist
+2. **Test Install** - Tests on Python 3.9-3.12
+3. **Release** - Creates GitHub release with artifacts
+
+### Creating a Release
+
+```bash
+# Tag and push
+git tag v0.2.0
+git push origin v0.2.0
+
+# Or manually trigger in GitHub Actions
+```
+
+---
 
 ## Local Testing
 
 Before pushing, run these locally:
 
 ```bash
-# Run all tests
-make test
-
-# Check formatting
+# Formatting (auto-fix)
 make format
 
-# Run with coverage
-make test-coverage
+# Tests
+make test
 
 # Validate configs
-for config in experiments/configs/*.yaml; do
-  python scripts/validate_config.py "$config"
-done
+make validate-all-configs
+
+# Full CI-like check
+make lint && make test && make validate-all-configs
 ```
 
-## CI Status Badge
+---
 
-Add this to your README.md:
+## Configuration
+
+### Required Secrets
+
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `CODECOV_TOKEN` | Optional | Coverage uploads |
+| `PYPI_API_TOKEN` | Optional | PyPI publishing |
+
+### Adding Secrets
+
+1. Go to Repository → Settings → Secrets
+2. Add new repository secret
+
+---
+
+## Badges
+
+Add to README.md:
 
 ```markdown
-![CI Status](https://github.com/YOUR_USERNAME/ragicamp/workflows/CI/badge.svg)
+[![CI](https://github.com/YOUR_USER/ragicamp/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USER/ragicamp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/YOUR_USER/ragicamp/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USER/ragicamp)
 ```
 
-## Secrets Configuration
-
-For Codecov integration (optional), add these secrets to your GitHub repository:
-
-- `CODECOV_TOKEN` - Your Codecov upload token
+---
 
 ## Troubleshooting
 
-### Tests fail locally but pass in CI
+### Tests pass locally but fail in CI
 
-- Check Python version (CI runs 3.12)
-- Ensure all dependencies are installed: `uv sync --extra dev`
-- Make sure you're using the same Python version: `python --version`
+1. Check Python version matches (3.12)
+2. Ensure `uv.lock` is committed
+3. Check for OS-specific issues
 
-### Formatting fails
+### Lint fails
 
 ```bash
 # Auto-fix formatting
 make format
+
+# Commit the changes
+git add -A && git commit -m "fix: formatting"
 ```
 
-### Coverage is too low
-
-Run locally to see what's not covered:
+### Config validation fails
 
 ```bash
-make test-coverage
-# Open htmlcov/index.html in browser
+# Check specific config
+uv run python scripts/utils/validate_config.py experiments/configs/my_config.yaml
+
+# Check Hydra configs
+uv run python -m ragicamp.cli.run --cfg job
 ```
 
-## Customization
+### Coverage is low
 
-To modify CI behavior:
+```bash
+# See what's not covered
+make test-coverage
+open htmlcov/index.html
+```
 
-1. **Change Python version**: Edit `python-version` in each job
-2. **Change test command**: Edit the `Run tests` step
-3. **Add new checks**: Add a new job following existing patterns
-4. **Skip CI**: Add `[skip ci]` to commit message
+---
 
 ## Performance
 
-Current CI run time: ~8-12 minutes
+Typical CI run times:
 
-- Tests: ~5-7 minutes
-- Lint: ~1-2 minutes
-- Coverage: ~2-3 minutes
-- Config validation: ~1 minute
+| Job | Duration |
+|-----|----------|
+| Lint | ~2 min |
+| Tests | ~5-7 min |
+| Config Validation | ~1 min |
+| Import Check | ~1 min |
+| **Total** | **~8-10 min** |
 
+With caching, subsequent runs are faster.
+
+---
+
+## Customization
+
+### Skip CI
+
+Add `[skip ci]` to commit message:
+
+```bash
+git commit -m "docs: update readme [skip ci]"
+```
+
+### Run specific job
+
+Use workflow_dispatch:
+
+```bash
+gh workflow run ci.yml
+```
+
+### Add new checks
+
+1. Add job to `ci.yml`
+2. Add to `needs` in `ci-success`
+3. Update this README

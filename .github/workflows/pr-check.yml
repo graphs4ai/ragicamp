@@ -1,0 +1,137 @@
+name: PR Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ============================================================================
+  # PR SIZE CHECK
+  # ============================================================================
+  
+  pr-size:
+    name: PR Size
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          # Get changed files
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          ADDED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $4}')
+          DELETED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $6}')
+          
+          echo "📊 PR Statistics:"
+          echo "  Files changed: $CHANGED"
+          echo "  Lines added: $ADDED"
+          echo "  Lines deleted: $DELETED"
+          
+          # Warn if PR is too large
+          if [ "$CHANGED" -gt 50 ]; then
+            echo ""
+            echo "⚠️  Large PR detected! Consider breaking into smaller PRs."
+          fi
+          
+          if [ "$ADDED" -gt 1000 ]; then
+            echo ""
+            echo "⚠️  Many lines added. Make sure this is intentional."
+          fi
+
+  # ============================================================================
+  # CHANGE DETECTION
+  # ============================================================================
+  
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.changes.outputs.src }}
+      tests: ${{ steps.changes.outputs.tests }}
+      configs: ${{ steps.changes.outputs.configs }}
+      docs: ${{ steps.changes.outputs.docs }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            src:
+              - 'src/**'
+            tests:
+              - 'tests/**'
+            configs:
+              - 'conf/**'
+              - 'experiments/configs/**'
+            docs:
+              - 'docs/**'
+              - '*.md'
+
+  # ============================================================================
+  # QUICK SMOKE TEST (only if src changed)
+  # ============================================================================
+  
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install package
+        run: uv sync
+
+      - name: Quick import test
+        run: |
+          uv run python -c "
+          from ragicamp import ComponentFactory
+          from ragicamp.core import get_logger, RAGiCampError
+          print('✅ Core imports work')
+          "
+
+  # ============================================================================
+  # DOCS CHECK (only if docs changed)
+  # ============================================================================
+  
+  docs-check:
+    name: Docs Check
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/markdown-link-check.json'
+        continue-on-error: true  # Don't fail on broken links, just warn
+
+      - name: Check for large files
+        run: |
+          # Find any docs over 500KB
+          find docs/ -type f -size +500k 2>/dev/null && \
+            echo "⚠️  Large documentation files found" || \
+            echo "✓ No large doc files"

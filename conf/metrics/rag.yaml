@@ -1,0 +1,10 @@
+# RAG-Specific Metrics (Ragas)
+# Evaluates retrieval quality and faithfulness
+# Requires context from retriever
+
+metrics:
+  - exact_match
+  - f1
+  - faithfulness
+  - answer_relevancy
+  - context_precision

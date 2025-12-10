@@ -1,0 +1,7 @@
+# Fast Metrics
+# Quick evaluation with deterministic metrics only
+# ~1-2 seconds per 100 examples
+
+metrics:
+  - exact_match
+  - f1

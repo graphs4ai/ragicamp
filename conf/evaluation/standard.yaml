@@ -1,0 +1,9 @@
+# Standard Evaluation
+# Balanced speed and thoroughness
+# ~10-20 minutes for 100 examples
+
+mode: both
+batch_size: 4
+checkpoint_every: 20
+resume_from_checkpoint: true
+retry_failures: true

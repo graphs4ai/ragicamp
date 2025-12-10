@@ -1,0 +1,40 @@
+# @package _global_
+# Baseline Study: DirectLLM across datasets
+# 
+# Usage (single run):
+#   python -m ragicamp.cli.run experiment=baseline_study_direct
+#
+# Usage (full sweep):
+#   python -m ragicamp.cli.run --multirun \
+#     experiment=baseline_study_direct \
+#     model=gemma_2b_4bit,phi3,llama3_8b \
+#     dataset=nq,triviaqa,hotpotqa \
+#     prompt=concise,sentence,explained
+
+defaults:
+  - /model: gemma_2b_4bit
+  - /dataset: nq
+  - /agent: direct_llm
+  - /metrics: standard
+  - /evaluation: standard
+  - /prompt: concise
+  - /judge: gpt4_mini
+  - /mlflow: default
+
+# Apply prompt to agent
+agent:
+  system_prompt: ${prompt.system_prompt}
+
+# Experiment metadata
+experiment:
+  name: baseline_study_direct
+  description: "DirectLLM baseline across datasets"
+  tags:
+    - baseline_study
+    - direct_llm
+    - ${dataset.name}
+    - ${model.model_name}
+    - ${prompt.style}
+
+# Reproducibility
+seed: 42

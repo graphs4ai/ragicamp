@@ -1,0 +1,7 @@
+# GPT-4o Judge
+# High-quality LLM judge
+# Requires OPENAI_API_KEY
+
+type: openai
+model_name: "gpt-4o"
+temperature: 0.0

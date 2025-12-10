@@ -1,0 +1,20 @@
+# @package _global_
+# Model Comparison Experiment
+# Usage: python -m ragicamp.cli.run --multirun experiment=model_comparison model=gemma_2b,phi3,llama3_8b
+
+defaults:
+  - /model: gemma_2b_4bit
+  - /dataset: nq
+  - /agent: direct_llm
+  - /metrics: standard
+  - /evaluation: standard
+  - /judge: gpt4_mini
+  - /mlflow: default
+
+# Experiment metadata
+experiment:
+  name: model_comparison
+  description: "Compare different LLMs on the same task"
+  tags:
+    - comparison
+    - multirun

@@ -1,0 +1,12 @@
+# Full Metrics Suite
+# All available metrics (slow, GPU-intensive)
+# Consider using two-phase evaluation for heavy metrics
+
+metrics:
+  - exact_match
+  - f1
+  - bertscore
+  - name: llm_judge_qa
+    params:
+      judgment_type: binary
+      batch_size: 16

@@ -1,0 +1,20 @@
+# @package _global_
+# Baseline Experiment - Direct LLM (no retrieval)
+# Usage: python -m ragicamp.cli.run experiment=baseline
+
+defaults:
+  - /model: gemma_2b_4bit
+  - /dataset: nq
+  - /agent: direct_llm
+  - /metrics: standard
+  - /evaluation: standard
+  - /judge: gpt4_mini
+  - /mlflow: default
+
+# Experiment metadata
+experiment:
+  name: baseline_directllm
+  description: "Baseline: Direct LLM without retrieval"
+  tags:
+    - baseline
+    - directllm
