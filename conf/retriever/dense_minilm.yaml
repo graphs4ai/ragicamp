@@ -1,0 +1,14 @@
+# Dense Retriever with MiniLM (default, fast)
+# all-MiniLM-L6-v2: 384 dims, 22M params, very fast
+
+type: dense
+name: dense_minilm
+embedding_model: "all-MiniLM-L6-v2"
+index_type: flat
+artifact_path: wikipedia_small_chunked
+
+# Chunking configuration (for indexing)
+chunking:
+  strategy: recursive
+  chunk_size: 512
+  chunk_overlap: 50

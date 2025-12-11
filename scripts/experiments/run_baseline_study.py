@@ -8,6 +8,9 @@ This script orchestrates the full baseline comparison:
 - Prompt variations
 - RAG parameter sweeps
 
+**IMPORTANT**: Each experiment runs in a SEPARATE subprocess to ensure
+GPU memory is fully released between runs. This prevents OOM errors.
+
 Usage:
     # Quick test (1 model, 1 dataset, 10 examples)
     python scripts/experiments/run_baseline_study.py --quick
@@ -28,21 +31,34 @@ Usage:
 import argparse
 import subprocess
 import sys
+import os
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterator, Tuple
 import json
+import itertools
 
 
 # Experiment configurations
-MODELS = ["gemma_2b_4bit", "phi3"]  # Add "llama3_8b" for full study
+# Note: phi3 has compatibility issues with transformers cache, use `make clean-phi3-cache` first
+MODELS = ["gemma_2b_4bit", "llama3_8b"]  # Gemma 2B vs Llama 3 8B (both 4-bit)
 DATASETS = ["nq", "triviaqa", "hotpotqa"]
 PROMPTS = ["concise", "sentence", "explained"]
 TOP_K_VALUES = [1, 3, 5, 10]
 
+# Time to wait between runs for GPU memory cleanup (seconds)
+CLEANUP_DELAY = 5
 
-def run_command(cmd: List[str], dry_run: bool = False) -> bool:
-    """Run a command and return success status."""
+
+def run_command(cmd: List[str], dry_run: bool = False, timeout: int = 1800) -> bool:
+    """Run a command in a fresh subprocess and return success status.
+    
+    Args:
+        cmd: Command to run
+        dry_run: If True, only print the command
+        timeout: Timeout in seconds (default 30 minutes)
+    """
     cmd_str = " ".join(cmd)
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Running: {cmd_str}")
     
@@ -50,37 +66,78 @@ def run_command(cmd: List[str], dry_run: bool = False) -> bool:
         return True
     
     try:
-        result = subprocess.run(cmd, check=True)
+        # Run in a completely fresh subprocess with clean environment
+        env = os.environ.copy()
+        # Ensure CUDA memory is freed aggressively
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        
+        result = subprocess.run(
+            cmd, 
+            check=True, 
+            timeout=timeout,
+            env=env,
+        )
         return result.returncode == 0
     except subprocess.CalledProcessError as e:
-        print(f"Error: Command failed with code {e.returncode}")
+        print(f"❌ Error: Command failed with code {e.returncode}")
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"❌ Error: Command timed out after {timeout}s")
         return False
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        print("\n⚠️ Interrupted by user")
         return False
 
 
-def run_hydra_experiment(
+def run_single_experiment(
     experiment: str,
     overrides: Dict[str, Any],
     dry_run: bool = False,
-    multirun: bool = False,
 ) -> bool:
-    """Run a Hydra experiment with overrides."""
+    """Run a single Hydra experiment in its own subprocess."""
     cmd = ["uv", "run", "python", "-m", "ragicamp.cli.run"]
-    
-    if multirun:
-        cmd.append("--multirun")
-    
     cmd.append(f"experiment={experiment}")
     
     for key, value in overrides.items():
-        if isinstance(value, list):
-            cmd.append(f"{key}={','.join(str(v) for v in value)}")
-        else:
-            cmd.append(f"{key}={value}")
+        cmd.append(f"{key}={value}")
     
     return run_command(cmd, dry_run)
+
+
+def generate_experiment_configs(
+    experiment: str,
+    models: List[str],
+    datasets: List[str],
+    prompts: List[str] = None,
+    top_k_values: List[int] = None,
+    evaluation: str = "standard",
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Generate individual experiment configurations.
+    
+    Yields (description, overrides) tuples for each experiment.
+    """
+    if prompts:
+        # DirectLLM: iterate over models x datasets x prompts
+        for model, dataset, prompt in itertools.product(models, datasets, prompts):
+            desc = f"{model}/{dataset}/{prompt}"
+            overrides = {
+                "model": model,
+                "dataset": dataset,
+                "prompt": prompt,
+                "evaluation": evaluation,
+            }
+            yield desc, overrides
+    elif top_k_values:
+        # RAG: iterate over models x datasets x top_k
+        for model, dataset, top_k in itertools.product(models, datasets, top_k_values):
+            desc = f"{model}/{dataset}/top_k={top_k}"
+            overrides = {
+                "model": model,
+                "dataset": dataset,
+                "agent.top_k": top_k,
+                "evaluation": evaluation,
+            }
+            yield desc, overrides
 
 
 def run_quick_test(dry_run: bool = False) -> Dict[str, Any]:
@@ -92,7 +149,7 @@ def run_quick_test(dry_run: bool = False) -> Dict[str, Any]:
     results = {"passed": 0, "failed": 0, "runs": []}
     
     # Single DirectLLM run
-    success = run_hydra_experiment(
+    success = run_single_experiment(
         "baseline_study_direct",
         {"evaluation": "quick", "model": "gemma_2b_4bit", "dataset": "nq"},
         dry_run=dry_run,
@@ -116,38 +173,60 @@ def run_direct_llm_study(
     evaluation: str = "standard",
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Run DirectLLM baseline study."""
+    """Run DirectLLM baseline study.
+    
+    Each experiment runs in a SEPARATE subprocess to ensure GPU memory
+    is fully released between runs.
+    """
     models = models or MODELS
     datasets = datasets or DATASETS
     prompts = prompts or PROMPTS
     
+    total_runs = len(models) * len(datasets) * len(prompts)
+    
     print("\n" + "="*60)
-    print("PHASE 1: DirectLLM Baselines")
+    print("PHASE 1: DirectLLM Baselines (SEQUENTIAL - separate processes)")
     print(f"  Models: {models}")
     print(f"  Datasets: {datasets}")
     print(f"  Prompts: {prompts}")
-    print(f"  Total runs: {len(models) * len(datasets) * len(prompts)}")
+    print(f"  Total runs: {total_runs}")
     print("="*60)
     
     results = {"passed": 0, "failed": 0, "runs": []}
     
-    # Use multirun for efficiency
-    success = run_hydra_experiment(
+    # Generate all experiment configs
+    configs = list(generate_experiment_configs(
         "baseline_study_direct",
-        {
-            "model": models,
-            "dataset": datasets,
-            "prompt": prompts,
-            "evaluation": evaluation,
-        },
-        dry_run=dry_run,
-        multirun=True,
-    )
+        models=models,
+        datasets=datasets,
+        prompts=prompts,
+        evaluation=evaluation,
+    ))
     
-    if success:
-        results["passed"] = len(models) * len(datasets) * len(prompts)
-    else:
-        results["failed"] = 1
+    # Run each experiment in a separate subprocess
+    for i, (desc, overrides) in enumerate(configs, 1):
+        print(f"\n{'='*60}")
+        print(f"Run {i}/{total_runs}: {desc}")
+        print(f"{'='*60}")
+        
+        success = run_single_experiment(
+            "baseline_study_direct",
+            overrides,
+            dry_run=dry_run,
+        )
+        
+        results["runs"].append({"desc": desc, "success": success, **overrides})
+        if success:
+            results["passed"] += 1
+            print(f"✅ {desc}: PASSED")
+        else:
+            results["failed"] += 1
+            print(f"❌ {desc}: FAILED")
+        
+        # Wait between runs to allow GPU memory cleanup
+        if not dry_run and i < total_runs:
+            print(f"\n⏳ Waiting {CLEANUP_DELAY}s for GPU memory cleanup...")
+            time.sleep(CLEANUP_DELAY)
     
     return results
 
@@ -159,38 +238,60 @@ def run_rag_study(
     evaluation: str = "standard",
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Run FixedRAG baseline study."""
+    """Run FixedRAG baseline study.
+    
+    Each experiment runs in a SEPARATE subprocess to ensure GPU memory
+    is fully released between runs.
+    """
     models = models or MODELS
     datasets = datasets or DATASETS
     top_k_values = top_k_values or TOP_K_VALUES
     
+    total_runs = len(models) * len(datasets) * len(top_k_values)
+    
     print("\n" + "="*60)
-    print("PHASE 2: FixedRAG Baselines")
+    print("PHASE 2: FixedRAG Baselines (SEQUENTIAL - separate processes)")
     print(f"  Models: {models}")
     print(f"  Datasets: {datasets}")
     print(f"  top_k values: {top_k_values}")
-    print(f"  Total runs: {len(models) * len(datasets) * len(top_k_values)}")
+    print(f"  Total runs: {total_runs}")
     print("="*60)
     
     results = {"passed": 0, "failed": 0, "runs": []}
     
-    # Use multirun for efficiency
-    success = run_hydra_experiment(
+    # Generate all experiment configs
+    configs = list(generate_experiment_configs(
         "baseline_study_rag",
-        {
-            "model": models,
-            "dataset": datasets,
-            "agent.top_k": top_k_values,
-            "evaluation": evaluation,
-        },
-        dry_run=dry_run,
-        multirun=True,
-    )
+        models=models,
+        datasets=datasets,
+        top_k_values=top_k_values,
+        evaluation=evaluation,
+    ))
     
-    if success:
-        results["passed"] = len(models) * len(datasets) * len(top_k_values)
-    else:
-        results["failed"] = 1
+    # Run each experiment in a separate subprocess
+    for i, (desc, overrides) in enumerate(configs, 1):
+        print(f"\n{'='*60}")
+        print(f"Run {i}/{total_runs}: {desc}")
+        print(f"{'='*60}")
+        
+        success = run_single_experiment(
+            "baseline_study_rag",
+            overrides,
+            dry_run=dry_run,
+        )
+        
+        results["runs"].append({"desc": desc, "success": success, **overrides})
+        if success:
+            results["passed"] += 1
+            print(f"✅ {desc}: PASSED")
+        else:
+            results["failed"] += 1
+            print(f"❌ {desc}: FAILED")
+        
+        # Wait between runs to allow GPU memory cleanup
+        if not dry_run and i < total_runs:
+            print(f"\n⏳ Waiting {CLEANUP_DELAY}s for GPU memory cleanup...")
+            time.sleep(CLEANUP_DELAY)
     
     return results
 
@@ -332,16 +433,36 @@ Examples:
     total_failed = sum(r.get("failed", 0) for r in all_results.values())
     
     print(f"Total runs: {total_passed + total_failed}")
-    print(f"  Passed: {total_passed}")
-    print(f"  Failed: {total_failed}")
+    print(f"  ✅ Passed: {total_passed}")
+    print(f"  ❌ Failed: {total_failed}")
     
+    # Save summary to JSON
     if not args.dry_run:
+        summary = {
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "duration_seconds": duration.total_seconds(),
+            "total_passed": total_passed,
+            "total_failed": total_failed,
+            "results": all_results,
+        }
+        
+        # Create outputs directory and save
+        output_dir = Path("outputs")
+        output_dir.mkdir(exist_ok=True)
+        summary_path = output_dir / f"baseline_study_summary_{start_time.strftime('%Y%m%d_%H%M%S')}.json"
+        
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+        
+        print(f"\nSummary saved to: {summary_path}")
         print("\nResults saved to: outputs/")
         print("Compare with: make compare")
         print("Generate report: make report")
     
     print("="*60)
     
+    # Exit with error code if any failed
     sys.exit(0 if total_failed == 0 else 1)
 
 

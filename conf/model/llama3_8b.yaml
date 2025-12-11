@@ -1,8 +1,8 @@
-# Meta Llama 3 8B (4-bit)
+# Meta Llama 3.1 8B Instruct (4-bit)
 # Strong general purpose model
 
 type: huggingface
-model_name: "meta-llama/Meta-Llama-3-8B-Instruct"
+model_name: "meta-llama/Llama-3.1-8B-Instruct"
 device: cuda
 load_in_8bit: false
 load_in_4bit: true

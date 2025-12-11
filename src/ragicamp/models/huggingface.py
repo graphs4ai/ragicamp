@@ -52,6 +52,13 @@ class HuggingFaceModel(LanguageModel):
 
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Set padding token if not defined (required for batch processing)
+        # Many models like Llama don't have a pad token by default
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto" if self._use_quantization else None,
