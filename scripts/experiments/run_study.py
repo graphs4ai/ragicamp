@@ -38,10 +38,17 @@ def run_direct_experiment(
 ) -> Dict:
     """Run a single DirectLLM experiment."""
     from ragicamp.agents import DirectLLMAgent
-    from ragicamp.datasets import QADataset
+    from ragicamp.datasets import NaturalQuestionsDataset, TriviaQADataset, HotpotQADataset
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.models import OpenAIModel
     from ragicamp.pipeline import GenerationPhase, MetricsPhase
+    
+    # Map dataset names to classes
+    DATASET_MAP = {
+        "nq": NaturalQuestionsDataset,
+        "triviaqa": TriviaQADataset,
+        "hotpotqa": HotpotQADataset,
+    }
 
     exp_name = f"direct_{model_name.replace('-', '')}_{prompt_key}_{dataset}"
     exp_dir = output_dir / exp_name
@@ -54,8 +61,12 @@ def run_direct_experiment(
     start = time.time()
 
     # Load dataset
-    qa_dataset = QADataset(dataset)
-    examples = qa_dataset.load(limit=num_questions)
+    dataset_cls = DATASET_MAP.get(dataset)
+    if not dataset_cls:
+        raise ValueError(f"Unknown dataset: {dataset}. Available: {list(DATASET_MAP.keys())}")
+    qa_dataset = dataset_cls(split="validation")
+    qa_dataset.load()
+    examples = qa_dataset.examples[:num_questions] if num_questions else qa_dataset.examples
 
     # Create agent
     model = OpenAIModel(name=model_name, temperature=0.0)
@@ -115,11 +126,17 @@ def run_rag_experiment(
 ) -> Dict:
     """Run a single RAG experiment."""
     from ragicamp.agents import FixedRAGAgent
-    from ragicamp.datasets import QADataset
+    from ragicamp.datasets import NaturalQuestionsDataset, TriviaQADataset, HotpotQADataset
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.models import OpenAIModel
     from ragicamp.pipeline import GenerationPhase, MetricsPhase
     from ragicamp.retrievers import DenseRetriever
+
+    DATASET_MAP = {
+        "nq": NaturalQuestionsDataset,
+        "triviaqa": TriviaQADataset,
+        "hotpotqa": HotpotQADataset,
+    }
 
     exp_name = f"rag_{retriever_name}_k{top_k}_{dataset}"
     exp_dir = output_dir / exp_name
@@ -132,8 +149,12 @@ def run_rag_experiment(
     start = time.time()
 
     # Load dataset
-    qa_dataset = QADataset(dataset)
-    examples = qa_dataset.load(limit=num_questions)
+    dataset_cls = DATASET_MAP.get(dataset)
+    if not dataset_cls:
+        raise ValueError(f"Unknown dataset: {dataset}. Available: {list(DATASET_MAP.keys())}")
+    qa_dataset = dataset_cls(split="validation")
+    qa_dataset.load()
+    examples = qa_dataset.examples[:num_questions] if num_questions else qa_dataset.examples
 
     # Create agent
     model = OpenAIModel(name=model_name, temperature=0.0)
