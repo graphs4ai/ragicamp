@@ -42,17 +42,19 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
         results = []
         for exp in data["experiments"]:
             metrics = exp.get("results", {})
-            results.append({
-                "path": str(path),
-                "name": exp.get("name", "?"),
-                "metrics": metrics,
-                "num_examples": exp.get("num_questions", "?"),
-                "dataset": exp.get("dataset", "?"),
-                "model": exp.get("model", "?").replace("openai:", "").replace("hf:", ""),
-                "prompt": exp.get("prompt", "?"),
-                "agent": exp.get("type", "?"),
-                "timestamp": exp.get("timestamp", "?"),
-            })
+            results.append(
+                {
+                    "path": str(path),
+                    "name": exp.get("name", "?"),
+                    "metrics": metrics,
+                    "num_examples": exp.get("num_questions", "?"),
+                    "dataset": exp.get("dataset", "?"),
+                    "model": exp.get("model", "?").replace("openai:", "").replace("hf:", ""),
+                    "prompt": exp.get("prompt", "?"),
+                    "agent": exp.get("type", "?"),
+                    "timestamp": exp.get("timestamp", "?"),
+                }
+            )
         return results
 
     # Skip orchestration logs
@@ -66,7 +68,15 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
             if isinstance(value, (int, float)) and key not in ["num_successful", "num_failures"]:
                 metrics[key] = value
 
-    for key in ["exact_match", "f1", "bertscore_f1", "bertscore_precision", "bertscore_recall", "bleurt", "llm_judge_qa"]:
+    for key in [
+        "exact_match",
+        "f1",
+        "bertscore_f1",
+        "bertscore_precision",
+        "bertscore_recall",
+        "bleurt",
+        "llm_judge_qa",
+    ]:
         if key in data and key not in metrics:
             metrics[key] = data[key]
 
@@ -107,7 +117,7 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
             # Fallback: try to parse from directory name or agent_name
             dir_name = path.parent.name
             agent_name = data.get("agent_name", dir_name)
-            
+
             if "gemma" in agent_name.lower():
                 model_name = "gemma-2b-it"
             elif "llama" in agent_name.lower():
@@ -116,7 +126,7 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
                 model_name = "phi3"
             elif "gpt4o" in agent_name.lower() or "gpt-4o" in agent_name.lower():
                 model_name = "gpt-4o-mini"
-            
+
             if "rag" in agent_name.lower():
                 prompt_style = "rag"
             elif "default" in agent_name.lower():
@@ -125,7 +135,7 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
                 prompt_style = "concise"
             elif "detailed" in agent_name.lower():
                 prompt_style = "detailed"
-            
+
             # Parse dataset from dir name
             for ds in ["nq", "triviaqa", "hotpotqa"]:
                 if ds in agent_name.lower():
@@ -137,17 +147,19 @@ def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
 
     name = f"{dataset[:8]}/{model_name[:12]}/{prompt_style}"
 
-    return [{
-        "path": str(path),
-        "name": name,
-        "metrics": metrics,
-        "num_examples": data.get("num_examples", "?"),
-        "dataset": dataset,
-        "model": model_name,
-        "prompt": prompt_style,
-        "agent": data.get("agent_name", "?"),
-        "timestamp": path.parent.name,
-    }]
+    return [
+        {
+            "path": str(path),
+            "name": name,
+            "metrics": metrics,
+            "num_examples": data.get("num_examples", "?"),
+            "dataset": dataset,
+            "model": model_name,
+            "prompt": prompt_style,
+            "agent": data.get("agent_name", "?"),
+            "timestamp": path.parent.name,
+        }
+    ]
 
 
 def find_result_files(base_path: Path, pattern: str = "*summary*.json") -> List[Path]:
@@ -156,16 +168,16 @@ def find_result_files(base_path: Path, pattern: str = "*summary*.json") -> List[
         return [base_path]
 
     files = []
-    
+
     # First check for comparison.json (preferred - aggregated results)
     comparison_file = base_path / "comparison.json"
     if comparison_file.exists():
         return [comparison_file]
-    
+
     # Then look for results.json files (new format from run_study.py)
     for f in base_path.rglob("results.json"):
         files.append(f)
-    
+
     # Also look for legacy summary files
     for f in base_path.rglob(pattern):
         if "baseline_study_summary" in f.name or "rag_baseline_study" in f.name:
@@ -200,7 +212,7 @@ def compare_results(results: List[Dict[str, Any]], sort_by: str = None, group_by
         "llm_qa": "llm_judge_qa",
         "judge": "llm_judge_qa",
     }
-    
+
     # Resolve sort_by alias
     if sort_by:
         sort_by = metric_aliases.get(sort_by, sort_by)

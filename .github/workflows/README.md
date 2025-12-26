@@ -7,7 +7,7 @@ This directory contains CI/CD workflows for RAGiCamp.
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | Push/PR to main/develop | Main CI pipeline |
-| `pr-check.yml` | Pull requests | Quick PR validation |
+| `pr-check.yml` | Pull requests | Quick PR validation (conditional) |
 | `release.yml` | Tags (v*) | Create releases |
 
 ---
@@ -16,23 +16,47 @@ This directory contains CI/CD workflows for RAGiCamp.
 
 **Runs on:** Every push and PR to `main` or `develop`
 
+### Job Flow
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   PARALLEL (fast)                   │
+│  ┌─────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │  lint   │  │ import-check │  │validate-configs│  │
+│  └────┬────┘  └──────┬───────┘  └───────┬────────┘  │
+│       │              │                  │           │
+└───────┼──────────────┼──────────────────┼───────────┘
+        │              │                  │
+        └──────────────┼──────────────────┘
+                       │
+                       ▼
+              ┌────────────────┐
+              │     test       │
+              └────────┬───────┘
+                       │
+                       ▼
+              ┌────────────────┐
+              │   ci-success   │
+              └────────────────┘
+```
+
 ### Jobs
 
 | Job | Duration | What it does |
 |-----|----------|--------------|
-| **lint** | ~2 min | Black, isort, mypy checks |
-| **test** | ~5 min | Full test suite with coverage |
-| **validate-configs** | ~1 min | Validate YAML configs |
+| **lint** | ~1 min | Black, isort, mypy checks |
 | **import-check** | ~1 min | Verify package imports |
+| **validate-configs** | ~1 min | Validate YAML configs |
+| **test** | ~3-5 min | Full test suite with coverage |
 | **ci-success** | - | Final status check |
 
 ### Features
 
-- ✅ **Dependency caching** - Fast subsequent runs
+- ✅ **UV caching** - Uses `enable-cache: true` for fast installs
+- ✅ **Parallel fast checks** - lint, import-check, validate-configs run in parallel
 - ✅ **Concurrency control** - Cancels in-progress runs on new push
-- ✅ **Coverage reports** - Uploaded to Codecov
+- ✅ **Coverage reports** - Uploaded to Codecov on main
 - ✅ **Test artifacts** - JUnit XML for GitHub integration
-- ✅ **Hydra config validation** - Tests new config system
 
 ### Fail Conditions
 
@@ -48,21 +72,27 @@ The CI **fails** if:
 
 **Runs on:** All pull requests
 
+### Smart Detection
+
+Only runs relevant checks based on what changed:
+
+| Changed Path | Triggered Job |
+|--------------|---------------|
+| `src/**` | smoke-test |
+| `tests/**` | smoke-test |
+| `pyproject.toml`, `uv.lock` | smoke-test |
+| `docs/**`, `*.md` | docs-check |
+| `conf/**`, `experiments/configs/**` | config-check |
+
 ### Jobs
 
 | Job | Purpose |
 |-----|---------|
+| **changes** | Detect what files changed |
 | **pr-size** | Warns on large PRs |
-| **changes** | Detects what changed |
-| **smoke-test** | Quick import test (if src changed) |
-| **docs-check** | Link validation (if docs changed) |
-
-### Smart Detection
-
-Only runs relevant checks based on what changed:
-- `src/` changed → Run smoke tests
-- `docs/` changed → Check markdown links
-- `conf/` changed → Validate configs
+| **smoke-test** | Quick import test (conditional) |
+| **docs-check** | Link validation (conditional) |
+| **config-check** | Config validation (conditional) |
 
 ---
 
@@ -93,17 +123,23 @@ git push origin v0.2.0
 Before pushing, run these locally:
 
 ```bash
-# Formatting (auto-fix)
+# Auto-fix formatting
 make format
 
-# Tests
+# Check linting (without fixing)
+make lint
+
+# Run tests
 make test
+
+# Run tests with coverage
+make test-cov
 
 # Validate configs
 make validate-all-configs
 
-# Full CI-like check
-make lint && make test && make validate-all-configs
+# Full pre-push check (recommended!)
+make pre-push
 ```
 
 ---
@@ -124,24 +160,13 @@ make lint && make test && make validate-all-configs
 
 ---
 
-## Badges
-
-Add to README.md:
-
-```markdown
-[![CI](https://github.com/YOUR_USER/ragicamp/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USER/ragicamp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/YOUR_USER/ragicamp/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USER/ragicamp)
-```
-
----
-
 ## Troubleshooting
 
 ### Tests pass locally but fail in CI
 
 1. Check Python version matches (3.12)
 2. Ensure `uv.lock` is committed
-3. Check for OS-specific issues
+3. Run `make format` before pushing
 
 ### Lint fails
 
@@ -160,15 +185,7 @@ git add -A && git commit -m "fix: formatting"
 uv run python scripts/utils/validate_config.py experiments/configs/my_config.yaml
 
 # Check Hydra configs
-uv run python -m ragicamp.cli.run --cfg job
-```
-
-### Coverage is low
-
-```bash
-# See what's not covered
-make test-coverage
-open htmlcov/index.html
+uv run python -c "from hydra import compose, initialize_config_dir; ..."
 ```
 
 ---
@@ -179,36 +196,20 @@ Typical CI run times:
 
 | Job | Duration |
 |-----|----------|
-| Lint | ~2 min |
-| Tests | ~5-7 min |
-| Config Validation | ~1 min |
+| Lint | ~1 min |
 | Import Check | ~1 min |
-| **Total** | **~8-10 min** |
+| Config Validation | ~1 min |
+| Tests | ~3-5 min |
+| **Total** | **~5-7 min** |
 
-With caching, subsequent runs are faster.
+With UV caching, subsequent runs are significantly faster.
 
 ---
 
-## Customization
-
-### Skip CI
+## Skip CI
 
 Add `[skip ci]` to commit message:
 
 ```bash
 git commit -m "docs: update readme [skip ci]"
 ```
-
-### Run specific job
-
-Use workflow_dispatch:
-
-```bash
-gh workflow run ci.yml
-```
-
-### Add new checks
-
-1. Add job to `ci.yml`
-2. Add to `needs` in `ci-success`
-3. Update this README
