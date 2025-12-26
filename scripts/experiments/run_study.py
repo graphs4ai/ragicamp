@@ -68,14 +68,20 @@ def get_model(model_spec: str):
 
 
 def clear_gpu_memory():
-    """Clear GPU memory before loading new models."""
+    """Aggressively clear GPU memory before loading new models."""
     import gc
-    gc.collect()
+    
+    # Multiple GC passes
+    for _ in range(3):
+        gc.collect()
+    
     try:
         import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+            # Reset peak memory stats
+            torch.cuda.reset_peak_memory_stats()
     except ImportError:
         pass
 
@@ -155,6 +161,9 @@ def run_direct_experiment(
     print(f"\n{'='*60}")
     print(f"DirectLLM: {exp_name}")
     print(f"{'='*60}")
+
+    # Clear GPU before starting
+    clear_gpu_memory()
 
     start = time.time()
 
@@ -255,6 +264,9 @@ def run_rag_experiment(
     print(f"\n{'='*60}")
     print(f"RAG: {exp_name}")
     print(f"{'='*60}")
+
+    # Clear GPU before starting
+    clear_gpu_memory()
 
     start = time.time()
 

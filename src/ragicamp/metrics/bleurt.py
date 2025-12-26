@@ -90,16 +90,31 @@ class BLEURTMetric(Metric):
         """Unload the BLEURT model to free GPU memory."""
         if self._scorer is None:
             return
-            
-        import torch
         
         # Delete the scorer
         del self._scorer
         self._scorer = None
         
-        # Force GPU memory cleanup
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # Clear TensorFlow session/memory
+        try:
+            import tensorflow as tf
+            tf.keras.backend.clear_session()
+            # Reset GPU memory
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                for gpu in gpus:
+                    tf.config.experimental.reset_memory_stats(gpu)
+        except Exception:
+            pass
+        
+        # Also clear PyTorch if available
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        
         gc.collect()
         print(f"  🗑️  BLEURT model unloaded")
 
