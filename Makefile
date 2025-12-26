@@ -24,9 +24,9 @@ help:
 	@echo "  make run-baseline-full    Run full baseline (100+ questions)"
 	@echo ""
 	@echo "Re-evaluate and compare:"
-	@echo "  make evaluate PATH=outputs/simple METRICS=bertscore,bleurt"
-	@echo "  make compare PATH=outputs/simple              # Show comparison table"
-	@echo "  make compare PATH=outputs/simple --filter rag # Filter by type"
+	@echo "  make evaluate DIR=outputs/simple METRICS=bertscore,bleurt"
+	@echo "  make compare DIR=outputs/simple              # Show comparison table"
+	@echo "  make compare DIR=outputs/simple SORT=f1      # Sort by metric"
 	@echo ""
 	@echo "Other:"
 	@echo "  make download             Download datasets"
@@ -79,11 +79,11 @@ run-baseline-full:
 # Re-evaluate with specific metrics: make evaluate PATH=outputs/simple METRICS=bertscore,bleurt
 evaluate:
 	@echo "📊 Re-evaluating predictions..."
-	uv run python scripts/experiments/evaluate_predictions.py $(PATH) --metrics $(or $(METRICS),all)
+	uv run python scripts/experiments/evaluate_predictions.py $(DIR) --metrics $(or $(METRICS),all)
 
-# Compare results in a table: make compare PATH=outputs/simple
+# Compare results in a table: make compare DIR=outputs/simple
 compare:
-	@python scripts/eval/compare.py $(or $(PATH),outputs/simple)
+	uv run python scripts/eval/compare.py $(or $(DIR),outputs/simple) $(if $(SORT),--sort $(SORT),)
 
 # Examples:
 #   make evaluate PATH=outputs/simple_hf METRICS=bertscore
