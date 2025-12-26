@@ -1,7 +1,31 @@
-"""Output management for organizing experiment results."""
+"""Output management for organizing experiment results.
+
+.. deprecated::
+    This module is deprecated. Use `ragicamp.checkpointing.ExperimentState`
+    for experiment state management and checkpointing instead.
+    
+    The ExperimentState class provides:
+    - Phase-level checkpointing
+    - Question-level checkpointing within phases
+    - Per-metric checkpointing
+    - Resume from any point
+    - Config change detection
+    
+    Example migration:
+        # Old way
+        manager = OutputManager()
+        manager.save_experiment(config, results, exp_dir)
+        
+        # New way
+        from ragicamp.checkpointing import ExperimentState
+        state = ExperimentState.load_or_create(path, name, phases, config)
+        state.complete_phase("generation", output_path="predictions.json")
+        state.save()
+"""
 
 import json
 import subprocess
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -38,7 +62,16 @@ class OutputManager:
 
         Args:
             base_dir: Base directory for all outputs
+        
+        .. deprecated::
+            Use `ragicamp.checkpointing.ExperimentState` instead.
         """
+        warnings.warn(
+            "OutputManager is deprecated. Use ragicamp.checkpointing.ExperimentState "
+            "for experiment state management and checkpointing.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.base_dir = Path(base_dir)
         self.experiments_dir = self.base_dir / "experiments"
         self.comparisons_dir = self.base_dir / "comparisons"

@@ -260,12 +260,16 @@ class ComponentFactory:
                     print(f"⚠️  Skipping LLM Judge (judge_model not configured)")
                     continue
                 judgment_type = metric_params.get("judgment_type", "binary")
-                batch_size = metric_params.get("batch_size", 8)
+                # Support both batch_size (legacy) and max_concurrent (new)
+                max_concurrent = metric_params.get(
+                    "max_concurrent", 
+                    metric_params.get("batch_size", 20)
+                )
                 metrics.append(
                     LLMJudgeQAMetric(
                         judge_model=judge_model,
                         judgment_type=judgment_type,
-                        batch_size=batch_size,
+                        max_concurrent=max_concurrent,
                     )
                 )
 

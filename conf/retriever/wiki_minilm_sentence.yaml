@@ -1,0 +1,13 @@
+# Dense Retriever: MiniLM + Sentence Chunking
+# Fast embedding with sentence-based chunks
+
+type: dense
+name: wiki_minilm_sentence
+embedding_model: "all-MiniLM-L6-v2"
+index_type: flat
+artifact_path: wiki_minilm_sentence
+
+chunking:
+  strategy: sentence
+  chunk_size: 5  # sentences per chunk
+  chunk_overlap: 1

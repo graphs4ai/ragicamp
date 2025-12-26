@@ -1,40 +1,65 @@
-"""Enhanced LLM-as-a-judge for QA evaluation with categorical judgments."""
+"""Enhanced LLM-as-a-judge for QA evaluation with categorical judgments.
+
+This module provides async-capable LLM-as-a-judge metrics for evaluating
+QA systems. Uses parallel async API calls for efficient batch evaluation.
+
+Example:
+    >>> from ragicamp.models import OpenAIModel
+    >>> from ragicamp.metrics import LLMJudgeQAMetric
+    >>> 
+    >>> judge = OpenAIModel("gpt-4o-mini")
+    >>> metric = LLMJudgeQAMetric(judge_model=judge, judgment_type="binary")
+    >>> 
+    >>> # Sync usage (internally uses async)
+    >>> scores = metric.compute(predictions, references, questions)
+    >>> 
+    >>> # Async usage (for integration with async pipelines)
+    >>> scores = await metric.acompute(predictions, references, questions)
+"""
 
 import re
 from typing import Any, Dict, List, Optional, Union
 
-from ragicamp.metrics.base import Metric
+from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.models.base import LanguageModel
 
 
-class LLMJudgeQAMetric(Metric):
+class LLMJudgeQAMetric(AsyncAPIMetric):
     """LLM-as-a-judge for QA with categorical evaluation (correct/partial/incorrect).
 
     Uses GPT-4 or similar to evaluate answer quality with clear categorical judgments.
     Particularly useful when standard metrics don't capture semantic correctness.
+    
+    Inherits from AsyncAPIMetric for efficient parallel async API calls.
     """
 
     def __init__(
         self,
         judge_model: LanguageModel,
         judgment_type: str = "binary",  # "binary" or "ternary"
-        batch_size: int = 8,  # Number of judgments to process in parallel
+        max_concurrent: int = 20,  # Number of concurrent API calls
+        show_progress: bool = True,
         **kwargs: Any,
     ):
         """Initialize LLM judge for QA evaluation.
 
         Args:
-            judge_model: The LLM to use as judge (e.g., GPT-4)
+            judge_model: The LLM to use as judge (e.g., GPT-4, must have agenerate_single)
             judgment_type: Type of judgment
                 - "binary": correct (1.0) or incorrect (0.0)
                 - "ternary": correct (1.0), partial (0.5), or incorrect (0.0)
-            batch_size: Number of judgments to process in parallel (default: 8)
+            max_concurrent: Maximum concurrent API calls (default: 20)
+            show_progress: Show progress bar during computation
             **kwargs: Additional configuration
         """
-        super().__init__(name="llm_judge_qa", **kwargs)
+        super().__init__(
+            name="llm_judge_qa",
+            max_concurrent=max_concurrent,
+            show_progress=show_progress,
+            **kwargs,
+        )
         self.judge_model = judge_model
         self.judgment_type = judgment_type
-        self.batch_size = batch_size
 
         # Define categories
         if judgment_type == "binary":
@@ -42,116 +67,93 @@ class LLMJudgeQAMetric(Metric):
         else:  # ternary
             self.categories = ["correct", "partially_correct", "incorrect"]
 
-        # Cache for judgments to avoid redundant API calls
-        # Key: f"{prediction}:::{reference}:::{question}", Value: (category, score)
-        self._judgment_cache: Dict[str, tuple] = {}
-
-    def compute(
+    async def acompute_single(
         self,
-        predictions: List[str],
-        references: Union[List[str], List[List[str]]],
-        questions: List[str] = None,
+        prediction: str,
+        reference: Union[str, List[str]],
+        question: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
-        """Compute LLM judge scores with batch processing.
-
+        """Compute judgment for a single prediction-reference pair (async).
+        
         Args:
-            predictions: Predicted answers
-            references: Reference answers
-            questions: Questions for context (highly recommended)
+            prediction: Predicted answer
+            reference: Reference answer(s)
+            question: Question for context (highly recommended)
             **kwargs: Additional parameters
-
+            
         Returns:
-            Dict with:
-            - llm_judge_qa: Average score (0.0-1.0)
-            - llm_judge_qa_correct: Proportion marked as correct
-            - llm_judge_qa_partial: Proportion marked as partially correct (ternary only)
-            - llm_judge_qa_incorrect: Proportion marked as incorrect
+            Dict with score and category info
         """
-        from tqdm import tqdm
-
-        scores = []
-        categories_count = {cat: 0 for cat in self.categories}
-
-        # Clear cache for new evaluation
-        self._judgment_cache.clear()
-
-        # Prepare all prompts and cache keys
-        all_prompts = []
-        cache_keys = []
-        for i, (pred, ref) in enumerate(zip(predictions, references)):
-            # Handle multiple references
-            refs = [ref] if isinstance(ref, str) else ref
-            question = questions[i] if questions and i < len(questions) else None
-
-            # Create cache key (unique identifier for this prediction-reference-question tuple)
-            ref_str = str(refs)
-            cache_key = f"{pred}:::{ref_str}:::{question}"
-            cache_keys.append(cache_key)
-
-            # Create judgment prompt
-            prompt = self._create_judgment_prompt(
-                question=question, prediction=pred, references=refs
+        # Handle multiple references
+        refs = [reference] if isinstance(reference, str) else reference
+        
+        # Create judgment prompt
+        prompt = self._create_judgment_prompt(
+            question=question,
+            prediction=prediction,
+            references=refs,
+        )
+        
+        # Call LLM asynchronously
+        if hasattr(self.judge_model, 'agenerate_single'):
+            judgment = await self.judge_model.agenerate_single(
+                prompt,
+                temperature=0.0,
+                max_tokens=200,
             )
-            all_prompts.append(prompt)
-
-        # Process in batches
-        print(f"⚖️  Processing {len(all_prompts)} judgments in batches of {self.batch_size}...")
-
-        for batch_start in tqdm(
-            range(0, len(all_prompts), self.batch_size), desc="LLM Judge batches"
-        ):
-            batch_end = min(batch_start + self.batch_size, len(all_prompts))
-            batch_prompts = all_prompts[batch_start:batch_end]
-            batch_keys = cache_keys[batch_start:batch_end]
-
-            # Get judgments with temperature=0 for consistency
-            batch_judgments = self.judge_model.generate(
-                batch_prompts, temperature=0.0, max_tokens=200
+        else:
+            # Fallback to sync if async not available
+            import asyncio
+            loop = asyncio.get_event_loop()
+            judgment = await loop.run_in_executor(
+                None,
+                lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
             )
-
-            # Process each judgment in the batch
-            for cache_key, judgment in zip(batch_keys, batch_judgments):
-                # Extract categorical judgment
-                category, score = self._extract_judgment(judgment)
-
-                # Store in cache for later compute_single() calls
-                self._judgment_cache[cache_key] = (category, score)
-
-                scores.append(score)
-
-                # Safely increment category count (handle unexpected categories from LLM)
-                if category in categories_count:
-                    categories_count[category] += 1
-                else:
-                    # LLM returned unexpected category - treat as incorrect
-                    print(
-                        f"Warning: LLM returned unexpected category '{category}' (expected {self.categories}). Treating as 'incorrect'."
-                    )
-                    categories_count["incorrect"] += 1
-                    scores[-1] = 0.0  # Override score to 0.0 for safety
-
-        # Compute metrics
-        total = len(scores)
-        avg_score = sum(scores) / total if total > 0 else 0.0
-
-        results = {
-            "llm_judge_qa": avg_score,
-            "llm_judge_qa_correct": (
-                categories_count.get("correct", 0) / total if total > 0 else 0.0
-            ),
-            "llm_judge_qa_incorrect": (
-                categories_count.get("incorrect", 0) / total if total > 0 else 0.0
-            ),
+        
+        # Extract categorical judgment
+        category, score = self._extract_judgment(judgment)
+        
+        return {
+            "llm_judge_qa": score,
+            f"llm_judge_qa_{category}": 1.0,  # For category counting
         }
-
+    
+    def _aggregate_results(self, results: List[Dict[str, float]]) -> Dict[str, float]:
+        """Aggregate individual results with category statistics.
+        
+        Args:
+            results: List of per-item result dictionaries
+            
+        Returns:
+            Aggregated metrics including category proportions
+        """
+        if not results:
+            return {"llm_judge_qa": 0.0}
+        
+        total = len(results)
+        
+        # Sum scores
+        avg_score = sum(r.get("llm_judge_qa", 0.0) for r in results) / total
+        
+        # Count categories
+        correct_count = sum(1 for r in results if r.get("llm_judge_qa_correct", 0) > 0)
+        incorrect_count = sum(1 for r in results if r.get("llm_judge_qa_incorrect", 0) > 0)
+        
+        aggregated = {
+            "llm_judge_qa": avg_score,
+            "llm_judge_qa_correct": correct_count / total,
+            "llm_judge_qa_incorrect": incorrect_count / total,
+        }
+        
         # Add partial category for ternary
         if self.judgment_type == "ternary":
-            results["llm_judge_qa_partial"] = (
-                categories_count.get("partially_correct", 0) / total if total > 0 else 0.0
+            partial_count = sum(
+                1 for r in results if r.get("llm_judge_qa_partially_correct", 0) > 0
             )
-
-        return results
+            aggregated["llm_judge_qa_partial"] = partial_count / total
+        
+        return aggregated
 
     def _create_judgment_prompt(
         self, question: str, prediction: str, references: List[str]
@@ -203,7 +205,7 @@ Your evaluation:"""
 
         return prompt
 
-    def _extract_judgment(self, judgment_text: str) -> tuple[str, float]:
+    def _extract_judgment(self, judgment_text: str) -> tuple:
         """Extract categorical judgment and convert to score.
 
         Returns:
@@ -242,71 +244,47 @@ Your evaluation:"""
             return ("incorrect", 0.0)
 
         # Default to incorrect if can't parse (conservative)
-        print(f"⚠️ Warning: Could not parse LLM judgment: '{judgment_text[:100]}...'")
         return ("incorrect", 0.0)
-
-    def compute_single(
-        self,
-        prediction: str,
-        reference: Union[str, List[str]],
-        question: str = None,
-        **kwargs: Any,
-    ) -> float:
-        """Compute metric for a single prediction-reference pair.
-
-        Uses cache from previous batch compute() call if available to avoid redundant API calls.
-
-        Args:
-            prediction: Predicted answer
-            reference: Reference answer(s)
-            question: Question for context
-            **kwargs: Additional parameters
-
-        Returns:
-            Score (0.0-1.0)
-        """
-        # Create cache key (must match the one in compute())
-        refs = [reference] if isinstance(reference, str) else reference
-        ref_str = str(refs)
-        cache_key = f"{prediction}:::{ref_str}:::{question}"
-
-        # Check cache first
-        if cache_key in self._judgment_cache:
-            category, score = self._judgment_cache[cache_key]
-            return score
-
-        # If not in cache, compute it (fallback for standalone calls)
-        # This should rarely happen if compute() was called first
-        predictions = [prediction]
-        references = [reference] if isinstance(reference, str) else [reference]
-        questions = [question] if question else None
-
-        result = self.compute(predictions, references, questions, **kwargs)
-        return result["llm_judge_qa"]
 
 
 # Convenience functions for creating pre-configured judges
 
 
-def create_binary_judge(judge_model: LanguageModel) -> LLMJudgeQAMetric:
+def create_binary_judge(
+    judge_model: LanguageModel,
+    max_concurrent: int = 20,
+) -> LLMJudgeQAMetric:
     """Create a binary LLM judge (correct/incorrect).
 
     Args:
         judge_model: GPT-4 or similar model
+        max_concurrent: Maximum concurrent API calls
 
     Returns:
         Configured LLMJudgeQAMetric
     """
-    return LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
+    return LLMJudgeQAMetric(
+        judge_model=judge_model,
+        judgment_type="binary",
+        max_concurrent=max_concurrent,
+    )
 
 
-def create_ternary_judge(judge_model: LanguageModel) -> LLMJudgeQAMetric:
+def create_ternary_judge(
+    judge_model: LanguageModel,
+    max_concurrent: int = 20,
+) -> LLMJudgeQAMetric:
     """Create a ternary LLM judge (correct/partial/incorrect).
 
     Args:
         judge_model: GPT-4 or similar model
+        max_concurrent: Maximum concurrent API calls
 
     Returns:
         Configured LLMJudgeQAMetric
     """
-    return LLMJudgeQAMetric(judge_model=judge_model, judgment_type="ternary")
+    return LLMJudgeQAMetric(
+        judge_model=judge_model,
+        judgment_type="ternary",
+        max_concurrent=max_concurrent,
+    )

@@ -1,7 +1,7 @@
 # RAGiCamp Makefile
 # Run `make help` for available commands
 
-.PHONY: help install setup test lint format clean
+.PHONY: help env install setup test lint format clean
 
 # ============================================================================
 # HELP
@@ -13,6 +13,7 @@ help:
 	@echo "╚═══════════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "📦 SETUP"
+	@echo "  make env              Show how to load env vars (HF_TOKEN, OPENAI_API_KEY)"
 	@echo "  make setup            Full setup (install + verify)"
 	@echo "  make install          Install dependencies only"
 	@echo ""
@@ -21,7 +22,15 @@ help:
 	@echo "  make baseline         DirectLLM evaluation"
 	@echo "  make rag              RAG evaluation (needs index)"
 	@echo ""
-	@echo "📊 BASELINE STUDIES"
+	@echo "📊 COMPREHENSIVE STUDY (100 examples, MLflow, JSON)"
+	@echo "  make study-quick             Quick verification"
+	@echo "  make study-direct            DirectLLM: 2 models × 3 datasets × 3 prompts"
+	@echo "  make study-rag               FixedRAG: varies top_k, retrievers, models"
+	@echo "  make study-full              Full study (Direct + RAG)"
+	@echo "  make study-full-production   Full study, no example cap"
+	@echo "  make study-preview           Preview commands (dry-run)"
+	@echo ""
+	@echo "📊 BASELINE STUDIES (legacy)"
 	@echo "  make baseline-study-direct   DirectLLM study (2 models × 3 datasets)"
 	@echo "  make baseline-study-full     Full study (DirectLLM + RAG)"
 	@echo "  make baseline-study-preview  Preview commands (dry-run)"
@@ -31,9 +40,13 @@ help:
 	@echo "  make rag-study-topk      Sweep top_k values"
 	@echo "  make rag-study-prompts   Compare prompts"
 	@echo ""
-	@echo "📚 DATA"
+	@echo "📚 DATA & INDEXING"
 	@echo "  make download-all     Download datasets"
-	@echo "  make index            Build retriever index"
+	@echo "  make index            Build single index (minilm + recursive)"
+	@echo "  make index-minimal    Build 1 index (for quick testing)"
+	@echo "  make index-standard   Build 4 indexes (2 embeddings × 2 strategies)"
+	@echo "  make index-all        Build 9 indexes (3 embeddings × 3 strategies)"
+	@echo "  make index-preview    Preview index builds (dry-run)"
 	@echo "  make info             Show data info"
 	@echo ""
 	@echo "🧪 DEV"
@@ -46,6 +59,13 @@ help:
 # ============================================================================
 # SETUP
 # ============================================================================
+
+env:
+	@echo "🔑 Loading environment variables..."
+	@echo "Run: source ~/setup_env.sh"
+	@echo ""
+	@echo "Or copy-paste:"
+	@echo "  source ~/setup_env.sh && make quick-test"
 
 install:
 	@echo "📦 Installing dependencies..."
@@ -91,7 +111,35 @@ run:
 	uv run python -m ragicamp.cli.run $(ARGS)
 
 # ============================================================================
-# BASELINE STUDY (DirectLLM)
+# COMPREHENSIVE STUDY (NEW - 100 examples, MLflow, structured JSON)
+# ============================================================================
+
+study-quick:
+	@echo "🧪 Quick study test..."
+	uv run python scripts/experiments/run_comprehensive_study.py --quick
+
+study-direct:
+	@echo "📊 DirectLLM study (100 examples × 3 datasets × 2 models × 3 prompts)..."
+	uv run python scripts/experiments/run_comprehensive_study.py --direct-only
+
+study-rag:
+	@echo "📊 FixedRAG study (100 examples, varies top_k, retrievers, models)..."
+	uv run python scripts/experiments/run_comprehensive_study.py --rag-only
+
+study-full:
+	@echo "📊 Full comprehensive study (Direct + RAG)..."
+	uv run python scripts/experiments/run_comprehensive_study.py --full
+
+study-full-production:
+	@echo "📊 Full study WITHOUT 100-example cap (production run)..."
+	uv run python scripts/experiments/run_comprehensive_study.py --full --no-limit
+
+study-preview:
+	@echo "📋 Preview commands (dry-run):"
+	uv run python scripts/experiments/run_comprehensive_study.py --full --dry-run
+
+# ============================================================================
+# BASELINE STUDY (DirectLLM) - Legacy
 # ============================================================================
 
 baseline-study-test:
@@ -156,16 +204,39 @@ download-all:
 	@echo "📚 Downloading datasets..."
 	uv run python scripts/data/download.py --all
 
+# Single index (legacy)
 index:
-	@echo "📚 Building index..."
-	uv run python scripts/data/index.py --preset small
+	@echo "📚 Building single index (minilm + recursive)..."
+	uv run python experiments/scripts/index_corpus.py \
+		--corpus-name wikipedia_simple \
+		--corpus-source wikimedia/wikipedia \
+		--corpus-version 20231101.simple \
+		--embedding-model all-MiniLM-L6-v2 \
+		--artifact-name wiki_minilm_recursive \
+		--chunk-strategy recursive \
+		--chunk-size 512 \
+		--chunk-overlap 50
 
-index-full:
-	@echo "📚 Building full index..."
-	uv run python scripts/data/index.py --preset full
+# Build multiple indexes for comprehensive RAG study
+index-minimal:
+	@echo "📚 Building minimal indexes (1 embedding × 1 strategy)..."
+	uv run python scripts/data/build_all_indexes.py --minimal
+
+index-standard:
+	@echo "📚 Building standard indexes (2 embeddings × 2 strategies)..."
+	uv run python scripts/data/build_all_indexes.py --standard
+
+index-all:
+	@echo "📚 Building ALL indexes (3 embeddings × 3 strategies)..."
+	uv run python scripts/data/build_all_indexes.py --all
 
 index-test:
-	uv run python scripts/data/index.py --preset test
+	@echo "📚 Test index (100 docs only)..."
+	uv run python scripts/data/build_all_indexes.py --minimal --max-docs 100
+
+index-preview:
+	@echo "📋 Preview index builds (dry-run):"
+	uv run python scripts/data/build_all_indexes.py --all --dry-run
 
 info:
 	@uv run python scripts/data/info.py

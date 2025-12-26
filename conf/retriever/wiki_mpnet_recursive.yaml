@@ -1,0 +1,13 @@
+# Dense Retriever: MPNet + Recursive Chunking
+# High-quality embedding with smart chunking
+
+type: dense
+name: wiki_mpnet_recursive
+embedding_model: "all-mpnet-base-v2"
+index_type: flat
+artifact_path: wiki_mpnet_recursive
+
+chunking:
+  strategy: recursive
+  chunk_size: 512
+  chunk_overlap: 50

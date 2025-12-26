@@ -4,11 +4,12 @@ This module provides clean abstractions for running experiments:
 - ResourceManager: GPU/RAM lifecycle management
 - Phases: Modular building blocks (Generation, Metrics, etc.)
 - Orchestrator: Coordinates phases with automatic cleanup
+- Checkpointing: Resume from any point via ExperimentState integration
 
 Quick Start:
     from ragicamp.pipeline import create_rag_pipeline, ResourceManager
 
-    # Simple one-liner
+    # Simple one-liner with automatic checkpointing
     result = create_rag_pipeline(
         model_factory=lambda: HuggingFaceModel("google/gemma-2-2b-it", load_in_4bit=True),
         agent_factory=lambda m, r: FixedRAGAgent("rag", m, r, top_k=5),
@@ -16,15 +17,21 @@ Quick Start:
         dataset=dataset,
         metrics=[ExactMatchMetric(), F1Metric()],
         output_path="outputs/predictions.json",
+        checkpoint_every=10,  # Save every 10 questions
     )
 
-Advanced Usage:
+Advanced Usage with Checkpointing:
     from ragicamp.pipeline import ExperimentOrchestrator, GenerationPhase, MetricsPhase
 
-    # Build custom pipeline
-    orchestrator = ExperimentOrchestrator("my_experiment")
-    orchestrator.add_phase(GenerationPhase(...))
+    # Build pipeline with state management
+    orchestrator = ExperimentOrchestrator(
+        name="my_experiment",
+        state_path="outputs/my_experiment_state.json",  # Enables checkpointing
+    )
+    orchestrator.add_phase(GenerationPhase(..., checkpoint_every=10))
     orchestrator.add_phase(MetricsPhase(...))
+    
+    # Run - if interrupted, re-running will resume from checkpoint
     result = orchestrator.run(inputs)
 """
 

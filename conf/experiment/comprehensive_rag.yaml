@@ -1,0 +1,51 @@
+# @package _global_
+# Comprehensive FixedRAG Study
+# 
+# Tests FixedRAG across:
+# - Multiple generator models (Gemma 2B, Llama 3 8B)
+# - Multiple retrievers (MiniLM, MPNet, E5)
+# - Multiple top_k values (1, 3, 5, 10)
+# - Multiple prompts (rag_concise, rag_extractive, rag_sentence)
+# - All datasets (NQ, TriviaQA, HotpotQA)
+#
+# Usage:
+#   python -m ragicamp.cli.run experiment=comprehensive_rag
+#
+# Full sweep:
+#   python scripts/experiments/run_comprehensive_study.py --rag-only
+
+defaults:
+  - override /model: gemma_2b_4bit
+  - override /dataset: nq
+  - override /agent: fixed_rag
+  - override /retriever: wiki_minilm_recursive
+  - override /metrics: study_core
+  - override /evaluation: study_100
+  - override /prompt: rag_concise
+  - override /judge: gpt4_mini
+  - override /mlflow: default
+
+# Limit to 100 examples
+dataset:
+  num_examples: 100
+
+# RAG-specific configuration
+agent:
+  system_prompt: ${prompt.system_prompt}
+  top_k: 5  # Override with agent.top_k=X
+
+# Experiment metadata for MLflow
+experiment:
+  name: comprehensive_rag_${model.model_name}_${dataset.name}_k${agent.top_k}
+  description: "FixedRAG: ${model.model_name}, ${retriever.embedding_model}, top_k=${agent.top_k}"
+  tags:
+    - comprehensive_study
+    - fixed_rag
+    - ${dataset.name}
+    - ${model.model_name}
+    - ${retriever.embedding_model}
+    - top_k_${agent.top_k}
+    - ${prompt.style}
+
+# Reproducibility
+seed: 42

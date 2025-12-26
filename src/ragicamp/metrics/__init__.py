@@ -1,6 +1,7 @@
 """Evaluation metrics for RAG systems."""
 
 from ragicamp.metrics.base import Metric
+from ragicamp.metrics.async_base import AsyncAPIMetric
 
 # Import specific metrics (but handle import errors gracefully)
 try:
@@ -53,7 +54,7 @@ try:
 except ImportError:
     _has_ragas = False
 
-__all__ = ["Metric"]
+__all__ = ["Metric", "AsyncAPIMetric"]
 
 # Add available metrics to __all__
 if _has_exact_match:
