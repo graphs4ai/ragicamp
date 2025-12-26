@@ -35,4 +35,4 @@ metrics:
   - exact_match
 
 # Output
-output_dir: outputs/validation
+output_dir: outputs/simple

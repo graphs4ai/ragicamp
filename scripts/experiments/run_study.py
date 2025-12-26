@@ -4,8 +4,8 @@
 Simple config-driven experiment runner.
 
 Usage:
-    python scripts/experiments/run_study.py conf/study/validation.yaml
-    python scripts/experiments/run_study.py conf/study/baseline.yaml --dry-run
+    python scripts/experiments/run_study.py conf/study/simple.yaml
+    python scripts/experiments/run_study.py conf/study/full.yaml --dry-run
 """
 
 import argparse
@@ -28,29 +28,60 @@ def load_config(config_path: Path) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def run_direct_experiment(
-    model_name: str,
-    prompt_key: str,
-    dataset: str,
-    num_questions: Optional[int],
-    metrics: List[str],
-    output_dir: Path,
-) -> Dict:
-    """Run a single DirectLLM experiment."""
-    from ragicamp.agents import DirectLLMAgent
+def get_dataset(name: str, num_questions: Optional[int]):
+    """Load dataset by name."""
     from ragicamp.datasets import NaturalQuestionsDataset, TriviaQADataset, HotpotQADataset
-    from ragicamp.metrics import ExactMatchMetric, F1Metric
-    from ragicamp.models import OpenAIModel
-    from ragicamp.pipeline import GenerationPhase, MetricsPhase
     
-    # Map dataset names to classes
     DATASET_MAP = {
         "nq": NaturalQuestionsDataset,
         "triviaqa": TriviaQADataset,
         "hotpotqa": HotpotQADataset,
     }
+    
+    dataset_cls = DATASET_MAP.get(name)
+    if not dataset_cls:
+        raise ValueError(f"Unknown dataset: {name}")
+    
+    dataset = dataset_cls(split="validation")
+    dataset.load()
+    
+    examples = dataset.examples[:num_questions] if num_questions else dataset.examples
+    return examples, dataset
 
-    exp_name = f"direct_{model_name.replace('-', '')}_{prompt_key}_{dataset}"
+
+def compute_metrics(predictions: List[Dict], metric_names: List[str]) -> Dict[str, float]:
+    """Compute metrics on predictions."""
+    from ragicamp.metrics import ExactMatchMetric, F1Metric
+    
+    results = {}
+    
+    preds = [p["prediction"] for p in predictions]
+    refs = [p["expected_answers"] for p in predictions]
+    
+    for m in metric_names:
+        if m == "f1":
+            metric = F1Metric()
+            results.update(metric.compute(preds, refs))
+        elif m == "exact_match":
+            metric = ExactMatchMetric()
+            results.update(metric.compute(preds, refs))
+    
+    return results
+
+
+def run_direct_experiment(
+    model_name: str,
+    prompt_key: str,
+    dataset_name: str,
+    num_questions: Optional[int],
+    metric_names: List[str],
+    output_dir: Path,
+) -> Dict:
+    """Run a single DirectLLM experiment."""
+    from ragicamp.agents import DirectLLMAgent
+    from ragicamp.models import OpenAIModel
+
+    exp_name = f"direct_{model_name.replace('-', '')}_{prompt_key}_{dataset_name}"
     exp_dir = output_dir / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,17 +92,12 @@ def run_direct_experiment(
     start = time.time()
 
     # Load dataset
-    dataset_cls = DATASET_MAP.get(dataset)
-    if not dataset_cls:
-        raise ValueError(f"Unknown dataset: {dataset}. Available: {list(DATASET_MAP.keys())}")
-    qa_dataset = dataset_cls(split="validation")
-    qa_dataset.load()
-    examples = qa_dataset.examples[:num_questions] if num_questions else qa_dataset.examples
+    examples, dataset = get_dataset(dataset_name, num_questions)
+    print(f"Loaded {len(examples)} questions from {dataset_name}")
 
-    # Create agent
+    # Create model and agent
     model = OpenAIModel(name=model_name, temperature=0.0)
     
-    # Get prompt template
     prompt = None
     if prompt_key == "concise":
         prompt = "Answer briefly.\n\nQ: {question}\nA:"
@@ -80,29 +106,48 @@ def run_direct_experiment(
     
     agent = DirectLLMAgent(name=exp_name, model=model, prompt_template=prompt)
 
-    # Run
-    gen = GenerationPhase(agent=agent, output_path=exp_dir / "predictions.json")
-    pred_path = gen.run(examples, qa_dataset)
+    # Generate predictions
+    predictions = []
+    for i, example in enumerate(examples):
+        try:
+            response = agent.answer(example.question)
+            predictions.append({
+                "question_id": example.id,
+                "question": example.question,
+                "prediction": response.answer,
+                "expected_answers": example.answers,
+            })
+            if (i + 1) % 5 == 0:
+                print(f"  {i+1}/{len(examples)} done")
+        except Exception as e:
+            print(f"  Error on {i}: {e}")
+            predictions.append({
+                "question_id": example.id,
+                "question": example.question,
+                "prediction": f"[ERROR: {e}]",
+                "expected_answers": example.answers,
+            })
 
-    metric_objs = []
-    for m in metrics:
-        if m == "f1":
-            metric_objs.append(F1Metric())
-        elif m == "exact_match":
-            metric_objs.append(ExactMatchMetric())
+    # Save predictions
+    with open(exp_dir / "predictions.json", "w") as f:
+        json.dump({"predictions": predictions}, f, indent=2)
 
-    metrics_phase = MetricsPhase(metrics=metric_objs, output_path=exp_dir / "results.json")
-    results = metrics_phase.run(pred_path)
+    # Compute metrics
+    results = compute_metrics(predictions, metric_names)
+
+    # Save results
+    with open(exp_dir / "results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
     duration = time.time() - start
-    
+
     # Save metadata
     metadata = {
         "name": exp_name,
         "type": "direct",
         "model": model_name,
         "prompt": prompt_key,
-        "dataset": dataset,
+        "dataset": dataset_name,
         "num_questions": len(examples),
         "results": results,
         "duration": duration,
@@ -111,7 +156,7 @@ def run_direct_experiment(
     with open(exp_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% ({duration:.1f}s)")
+    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)")
     return metadata
 
 
@@ -119,26 +164,17 @@ def run_rag_experiment(
     model_name: str,
     retriever_name: str,
     top_k: int,
-    dataset: str,
+    dataset_name: str,
     num_questions: Optional[int],
-    metrics: List[str],
+    metric_names: List[str],
     output_dir: Path,
 ) -> Dict:
     """Run a single RAG experiment."""
     from ragicamp.agents import FixedRAGAgent
-    from ragicamp.datasets import NaturalQuestionsDataset, TriviaQADataset, HotpotQADataset
-    from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.models import OpenAIModel
-    from ragicamp.pipeline import GenerationPhase, MetricsPhase
     from ragicamp.retrievers import DenseRetriever
 
-    DATASET_MAP = {
-        "nq": NaturalQuestionsDataset,
-        "triviaqa": TriviaQADataset,
-        "hotpotqa": HotpotQADataset,
-    }
-
-    exp_name = f"rag_{retriever_name}_k{top_k}_{dataset}"
+    exp_name = f"rag_{retriever_name}_k{top_k}_{dataset_name}"
     exp_dir = output_dir / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -149,31 +185,48 @@ def run_rag_experiment(
     start = time.time()
 
     # Load dataset
-    dataset_cls = DATASET_MAP.get(dataset)
-    if not dataset_cls:
-        raise ValueError(f"Unknown dataset: {dataset}. Available: {list(DATASET_MAP.keys())}")
-    qa_dataset = dataset_cls(split="validation")
-    qa_dataset.load()
-    examples = qa_dataset.examples[:num_questions] if num_questions else qa_dataset.examples
+    examples, dataset = get_dataset(dataset_name, num_questions)
+    print(f"Loaded {len(examples)} questions from {dataset_name}")
 
-    # Create agent
-    model = OpenAIModel(name=model_name, temperature=0.0)
+    # Load retriever
     retriever = DenseRetriever.load_index(retriever_name)
+
+    # Create model and agent
+    model = OpenAIModel(name=model_name, temperature=0.0)
     agent = FixedRAGAgent(name=exp_name, model=model, retriever=retriever, top_k=top_k)
 
-    # Run
-    gen = GenerationPhase(agent=agent, output_path=exp_dir / "predictions.json")
-    pred_path = gen.run(examples, qa_dataset)
+    # Generate predictions
+    predictions = []
+    for i, example in enumerate(examples):
+        try:
+            response = agent.answer(example.question)
+            predictions.append({
+                "question_id": example.id,
+                "question": example.question,
+                "prediction": response.answer,
+                "expected_answers": example.answers,
+            })
+            if (i + 1) % 5 == 0:
+                print(f"  {i+1}/{len(examples)} done")
+        except Exception as e:
+            print(f"  Error on {i}: {e}")
+            predictions.append({
+                "question_id": example.id,
+                "question": example.question,
+                "prediction": f"[ERROR: {e}]",
+                "expected_answers": example.answers,
+            })
 
-    metric_objs = []
-    for m in metrics:
-        if m == "f1":
-            metric_objs.append(F1Metric())
-        elif m == "exact_match":
-            metric_objs.append(ExactMatchMetric())
+    # Save predictions
+    with open(exp_dir / "predictions.json", "w") as f:
+        json.dump({"predictions": predictions}, f, indent=2)
 
-    metrics_phase = MetricsPhase(metrics=metric_objs, output_path=exp_dir / "results.json")
-    results = metrics_phase.run(pred_path)
+    # Compute metrics
+    results = compute_metrics(predictions, metric_names)
+
+    # Save results
+    with open(exp_dir / "results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
     duration = time.time() - start
 
@@ -184,7 +237,7 @@ def run_rag_experiment(
         "model": model_name,
         "retriever": retriever_name,
         "top_k": top_k,
-        "dataset": dataset,
+        "dataset": dataset_name,
         "num_questions": len(examples),
         "results": results,
         "duration": duration,
@@ -193,7 +246,7 @@ def run_rag_experiment(
     with open(exp_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% ({duration:.1f}s)")
+    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)")
     return metadata
 
 
@@ -310,9 +363,9 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                         result = run_direct_experiment(
                             model_name=model,
                             prompt_key=prompt,
-                            dataset=ds,
+                            dataset_name=ds,
                             num_questions=num_questions,
-                            metrics=metrics,
+                            metric_names=metrics,
                             output_dir=output_dir,
                         )
                         all_results.append(result)
@@ -334,15 +387,15 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                                 model_name=model,
                                 retriever_name=retr,
                                 top_k=k,
-                                dataset=ds,
+                                dataset_name=ds,
                                 num_questions=num_questions,
-                                metrics=metrics,
+                                metric_names=metrics,
                                 output_dir=output_dir,
                             )
                             all_results.append(result)
                         except FileNotFoundError:
                             print(f"⚠️  Index not found: {retr}")
-                            print("   Run: make index-test")
+                            print("   Run: make index-simple")
                         except Exception as e:
                             print(f"❌ Failed: {e}")
     
