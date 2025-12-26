@@ -83,7 +83,7 @@ evaluate:
 
 # Compare results in a table: make compare PATH=outputs/simple
 compare:
-	@uv run python scripts/eval/compare.py $(or $(PATH),outputs/simple)
+	@python scripts/eval/compare.py $(or $(PATH),outputs/simple)
 
 # Examples:
 #   make evaluate PATH=outputs/simple_hf METRICS=bertscore
