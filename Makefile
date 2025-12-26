@@ -206,20 +206,24 @@ download-all:
 
 # Single index (quick setup)
 index:
-	@echo "📚 Building single index (Simple Wiki + MiniLM + 512)..."
+	@echo "📚 Building single index (Simple Wiki + MiniLM + recursive_512)..."
 	uv run python scripts/data/build_all_indexes.py --minimal
 
 # Build multiple indexes for RAG study
 index-standard:
-	@echo "📚 Building standard indexes (2: MiniLM + MPNet)..."
+	@echo "📚 Building standard indexes (4: 2 embeddings × 2 strategies)..."
+	@echo "   - MiniLM/MPNet × recursive/paragraph @ 512 chars"
 	uv run python scripts/data/build_all_indexes.py --standard
 
 index-extended:
-	@echo "📚 Building extended indexes (6: all embeddings × 2 chunk sizes)..."
+	@echo "📚 Building extended indexes (12: 2 embeddings × 6 chunk configs)..."
+	@echo "   - MiniLM/MPNet × recursive/paragraph/fixed @ 256-1024 chars"
 	uv run python scripts/data/build_all_indexes.py --extended
 
 index-all:
-	@echo "📚 Building ALL indexes (including full Wikipedia)..."
+	@echo "📚 Building ALL indexes (36: 3 embeddings × 6 configs × 2 corpora)..."
+	@echo "   - MiniLM/MPNet/E5 × recursive/paragraph/fixed @ various sizes"
+	@echo "   - Simple Wikipedia + Full English Wikipedia"
 	uv run python scripts/data/build_all_indexes.py --all
 
 index-test:
@@ -229,6 +233,11 @@ index-test:
 index-preview:
 	@echo "📋 Preview index builds (dry-run):"
 	uv run python scripts/data/build_all_indexes.py --all --dry-run
+
+# Custom index builds
+index-custom:
+	@echo "📚 Custom index build example:"
+	@echo "   uv run python scripts/data/build_all_indexes.py --embeddings minilm mpnet --chunk-configs recursive_512 paragraph_1024"
 
 info:
 	@uv run python scripts/data/info.py
