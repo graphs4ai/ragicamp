@@ -191,6 +191,20 @@ def compare_results(results: List[Dict[str, Any]], sort_by: str = None, group_by
     priority = ["exact_match", "f1", "bertscore_f1", "bleurt", "llm_judge_qa"]
     display_metrics = [m for m in priority if m in all_metrics][:5]
 
+    # Map short names to full metric names
+    metric_aliases = {
+        "em": "exact_match",
+        "bert": "bertscore_f1",
+        "bs_f1": "bertscore_f1",
+        "llm": "llm_judge_qa",
+        "llm_qa": "llm_judge_qa",
+        "judge": "llm_judge_qa",
+    }
+    
+    # Resolve sort_by alias
+    if sort_by:
+        sort_by = metric_aliases.get(sort_by, sort_by)
+
     # Sort results
     if sort_by and sort_by in all_metrics:
         results = sorted(results, key=lambda r: r["metrics"].get(sort_by, 0), reverse=True)
