@@ -1,0 +1,49 @@
+# Baseline Study - Full comprehensive baseline experiments
+# Run: make run-study STUDY=baseline
+
+name: baseline
+description: "Full baseline study for publication (100+ questions, all variations)"
+
+# Full dataset or capped for initial runs
+num_questions: 100  # Set to null for full dataset
+
+# All datasets
+datasets:
+  - nq
+  - triviaqa
+  - hotpotqa
+
+# DirectLLM experiments
+direct:
+  enabled: true
+  models:
+    - gpt-4o-mini
+    - gpt-4o
+  prompts:
+    - default
+    - concise
+    - detailed
+
+# RAG experiments
+rag:
+  enabled: true
+  models:
+    - gpt-4o-mini
+  retrievers:
+    - simple_minilm_recursive_512
+    - simple_minilm_recursive_1024
+    - simple_mpnet_recursive_512
+    - simple_mpnet_recursive_1024
+  top_k_values:
+    - 3
+    - 5
+    - 10
+
+# Metrics to compute
+metrics:
+  - f1
+  - exact_match
+  - llm_judge_qa
+
+# Output
+output_dir: outputs/baseline

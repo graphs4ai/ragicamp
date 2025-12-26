@@ -1,0 +1,38 @@
+# Validation Study - Quick end-to-end pipeline test
+# Run: make run-study STUDY=validation
+
+name: validation
+description: "Quick pipeline validation (10 questions, minimal variations)"
+
+# Limit questions for speed
+num_questions: 10
+
+# Dataset to test
+datasets:
+  - nq
+
+# DirectLLM experiments
+direct:
+  enabled: true
+  models:
+    - gpt-4o-mini
+  prompts:
+    - default
+
+# RAG experiments  
+rag:
+  enabled: true
+  models:
+    - gpt-4o-mini
+  retrievers:
+    - simple_minilm_recursive_512
+  top_k_values:
+    - 5
+
+# Metrics to compute
+metrics:
+  - f1
+  - exact_match
+
+# Output
+output_dir: outputs/validation
