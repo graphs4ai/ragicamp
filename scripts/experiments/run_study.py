@@ -38,7 +38,7 @@ def run_direct_experiment(
 ) -> Dict:
     """Run a single DirectLLM experiment."""
     from ragicamp.agents import DirectLLMAgent
-    from ragicamp.data import QADataset
+    from ragicamp.datasets import QADataset
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.models import OpenAIModel
     from ragicamp.pipeline import GenerationPhase, MetricsPhase
@@ -115,7 +115,7 @@ def run_rag_experiment(
 ) -> Dict:
     """Run a single RAG experiment."""
     from ragicamp.agents import FixedRAGAgent
-    from ragicamp.data import QADataset
+    from ragicamp.datasets import QADataset
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.models import OpenAIModel
     from ragicamp.pipeline import GenerationPhase, MetricsPhase

@@ -47,7 +47,7 @@ def run_single_experiment(
 ) -> Dict:
     """Run a single experiment and return results."""
     from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
-    from ragicamp.data import QADataset
+    from ragicamp.datasets import QADataset
     from ragicamp.factory import ComponentFactory
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     from ragicamp.pipeline import Orchestrator, GenerationPhase, MetricsPhase
