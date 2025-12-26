@@ -49,7 +49,25 @@ def get_dataset(name: str, num_questions: Optional[int]):
     return examples, dataset
 
 
-def compute_metrics(predictions: List[Dict], metric_names: List[str]) -> Dict[str, float]:
+def get_model(model_spec: str):
+    """Create model from spec like 'openai:gpt-4o-mini' or 'hf:google/gemma-2b-it'."""
+    from ragicamp.models import OpenAIModel, HuggingFaceModel
+    
+    if ":" in model_spec:
+        provider, model_name = model_spec.split(":", 1)
+    else:
+        # Default to openai
+        provider, model_name = "openai", model_spec
+    
+    if provider == "openai":
+        return OpenAIModel(name=model_name, temperature=0.0)
+    elif provider == "hf":
+        return HuggingFaceModel(model_name=model_name, load_in_4bit=True)
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Dict = None) -> Dict[str, float]:
     """Compute metrics on predictions."""
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     
@@ -57,31 +75,63 @@ def compute_metrics(predictions: List[Dict], metric_names: List[str]) -> Dict[st
     
     preds = [p["prediction"] for p in predictions]
     refs = [p["expected_answers"] for p in predictions]
+    questions = [p["question"] for p in predictions]
     
     for m in metric_names:
-        if m == "f1":
-            metric = F1Metric()
-            results.update(metric.compute(preds, refs))
-        elif m == "exact_match":
-            metric = ExactMatchMetric()
-            results.update(metric.compute(preds, refs))
+        try:
+            if m == "f1":
+                metric = F1Metric()
+                results.update(metric.compute(preds, refs))
+            elif m == "exact_match":
+                metric = ExactMatchMetric()
+                results.update(metric.compute(preds, refs))
+            elif m == "bertscore":
+                from ragicamp.metrics import BERTScoreMetric
+                metric = BERTScoreMetric()
+                results.update(metric.compute(preds, refs))
+            elif m == "bleurt":
+                from ragicamp.metrics import BLEURTMetric
+                metric = BLEURTMetric()
+                results.update(metric.compute(preds, refs))
+            elif m == "llm_judge":
+                from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
+                judge_cfg = config.get("llm_judge", {}) if config else {}
+                judge_model = get_model(judge_cfg.get("model", "openai:gpt-4o-mini"))
+                metric = LLMJudgeQAMetric(
+                    judge_model=judge_model,
+                    judgment_type=judge_cfg.get("type", "binary"),
+                )
+                # Run async
+                import asyncio
+                loop = asyncio.new_event_loop()
+                metric_results = loop.run_until_complete(
+                    metric.acompute(preds, refs, questions)
+                )
+                loop.close()
+                results.update(metric_results)
+        except ImportError as e:
+            print(f"  ⚠️ Skipping {m}: {e}")
+        except Exception as e:
+            print(f"  ⚠️ Error computing {m}: {e}")
     
     return results
 
 
 def run_direct_experiment(
-    model_name: str,
+    model_spec: str,
     prompt_key: str,
     dataset_name: str,
     num_questions: Optional[int],
     metric_names: List[str],
     output_dir: Path,
+    config: Dict = None,
 ) -> Dict:
     """Run a single DirectLLM experiment."""
     from ragicamp.agents import DirectLLMAgent
-    from ragicamp.models import OpenAIModel
 
-    exp_name = f"direct_{model_name.replace('-', '')}_{prompt_key}_{dataset_name}"
+    # Clean model name for path
+    model_short = model_spec.replace(":", "_").replace("/", "_").replace("-", "")
+    exp_name = f"direct_{model_short}_{prompt_key}_{dataset_name}"
     exp_dir = output_dir / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -96,7 +146,7 @@ def run_direct_experiment(
     print(f"Loaded {len(examples)} questions from {dataset_name}")
 
     # Create model and agent
-    model = OpenAIModel(name=model_name, temperature=0.0)
+    model = get_model(model_spec)
     
     prompt = None
     if prompt_key == "concise":
@@ -128,12 +178,16 @@ def run_direct_experiment(
                 "expected_answers": example.answers,
             })
 
+    # Cleanup model (important for HF models)
+    if hasattr(model, 'unload'):
+        model.unload()
+
     # Save predictions
     with open(exp_dir / "predictions.json", "w") as f:
         json.dump({"predictions": predictions}, f, indent=2)
 
     # Compute metrics
-    results = compute_metrics(predictions, metric_names)
+    results = compute_metrics(predictions, metric_names, config)
 
     # Save results
     with open(exp_dir / "results.json", "w") as f:
@@ -145,7 +199,7 @@ def run_direct_experiment(
     metadata = {
         "name": exp_name,
         "type": "direct",
-        "model": model_name,
+        "model": model_spec,
         "prompt": prompt_key,
         "dataset": dataset_name,
         "num_questions": len(examples),
@@ -161,17 +215,17 @@ def run_direct_experiment(
 
 
 def run_rag_experiment(
-    model_name: str,
+    model_spec: str,
     retriever_name: str,
     top_k: int,
     dataset_name: str,
     num_questions: Optional[int],
     metric_names: List[str],
     output_dir: Path,
+    config: Dict = None,
 ) -> Dict:
     """Run a single RAG experiment."""
     from ragicamp.agents import FixedRAGAgent
-    from ragicamp.models import OpenAIModel
     from ragicamp.retrievers import DenseRetriever
 
     exp_name = f"rag_{retriever_name}_k{top_k}_{dataset_name}"
@@ -192,7 +246,7 @@ def run_rag_experiment(
     retriever = DenseRetriever.load_index(retriever_name)
 
     # Create model and agent
-    model = OpenAIModel(name=model_name, temperature=0.0)
+    model = get_model(model_spec)
     agent = FixedRAGAgent(name=exp_name, model=model, retriever=retriever, top_k=top_k)
 
     # Generate predictions
@@ -217,12 +271,16 @@ def run_rag_experiment(
                 "expected_answers": example.answers,
             })
 
+    # Cleanup model
+    if hasattr(model, 'unload'):
+        model.unload()
+
     # Save predictions
     with open(exp_dir / "predictions.json", "w") as f:
         json.dump({"predictions": predictions}, f, indent=2)
 
     # Compute metrics
-    results = compute_metrics(predictions, metric_names)
+    results = compute_metrics(predictions, metric_names, config)
 
     # Save results
     with open(exp_dir / "results.json", "w") as f:
@@ -234,7 +292,7 @@ def run_rag_experiment(
     metadata = {
         "name": exp_name,
         "type": "rag",
-        "model": model_name,
+        "model": model_spec,
         "retriever": retriever_name,
         "top_k": top_k,
         "dataset": dataset_name,
@@ -361,12 +419,13 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                 for ds in datasets:
                     try:
                         result = run_direct_experiment(
-                            model_name=model,
+                            model_spec=model,
                             prompt_key=prompt,
                             dataset_name=ds,
                             num_questions=num_questions,
                             metric_names=metrics,
                             output_dir=output_dir,
+                            config=config,
                         )
                         all_results.append(result)
                     except Exception as e:
@@ -384,13 +443,14 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                     for ds in datasets:
                         try:
                             result = run_rag_experiment(
-                                model_name=model,
+                                model_spec=model,
                                 retriever_name=retr,
                                 top_k=k,
                                 dataset_name=ds,
                                 num_questions=num_questions,
                                 metric_names=metrics,
                                 output_dir=output_dir,
+                                config=config,
                             )
                             all_results.append(result)
                         except FileNotFoundError:

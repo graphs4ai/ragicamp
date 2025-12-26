@@ -17,8 +17,12 @@ datasets:
 direct:
   enabled: true
   models:
-    - gpt-4o-mini
-    - gpt-4o
+    # OpenAI models
+    - openai:gpt-4o-mini
+    - openai:gpt-4o
+    # HuggingFace models (local)
+    - hf:google/gemma-2b-it
+    - hf:microsoft/phi-2
   prompts:
     - default
     - concise
@@ -28,7 +32,7 @@ direct:
 rag:
   enabled: true
   models:
-    - gpt-4o-mini
+    - openai:gpt-4o-mini
   retrievers:
     - simple_minilm_recursive_512
     - simple_minilm_recursive_1024
@@ -39,11 +43,18 @@ rag:
     - 5
     - 10
 
-# Metrics to compute
+# All metrics
 metrics:
   - f1
   - exact_match
-  - llm_judge_qa
+  - bertscore
+  - bleurt
+  - llm_judge
+
+# LLM Judge config
+llm_judge:
+  model: openai:gpt-4o-mini
+  type: binary  # binary or ternary
 
 # Output
-output_dir: outputs/baseline
+output_dir: outputs/full

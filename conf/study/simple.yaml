@@ -15,7 +15,7 @@ datasets:
 direct:
   enabled: true
   models:
-    - gpt-4o-mini
+    - openai:gpt-4o-mini
   prompts:
     - default
 
@@ -23,13 +23,13 @@ direct:
 rag:
   enabled: true
   models:
-    - gpt-4o-mini
+    - openai:gpt-4o-mini
   retrievers:
     - simple_minilm_recursive_512
   top_k_values:
     - 5
 
-# Metrics to compute
+# Metrics to compute (fast ones for dev)
 metrics:
   - f1
   - exact_match
