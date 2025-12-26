@@ -14,11 +14,10 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  UV_CACHE_DIR: ~/.cache/uv
 
 jobs:
   # ============================================================================
-  # FAST CHECKS (run first, fail fast)
+  # FAST CHECKS (run in parallel, fail fast)
   # ============================================================================
   
   lint:
@@ -38,14 +37,8 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.UV_CACHE_DIR }}
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
         run: uv sync --extra dev
@@ -58,16 +51,11 @@ jobs:
 
       - name: Check types (mypy)
         run: uv run mypy src/ragicamp --ignore-missing-imports --no-error-summary || true
-        # Note: mypy is informational for now, doesn't fail CI
+        # Note: mypy is informational for now
 
-  # ============================================================================
-  # TESTS
-  # ============================================================================
-  
-  test:
-    name: Tests
+  import-check:
+    name: Import Check
     runs-on: ubuntu-latest
-    needs: lint  # Run after lint passes
     
     steps:
       - name: Checkout
@@ -82,52 +70,44 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.UV_CACHE_DIR }}
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - name: Install package
+        run: uv sync
 
-      - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Run tests with coverage
+      - name: Test imports
         run: |
-          uv run pytest tests/ \
-            -v \
-            --tb=short \
-            --cov=src/ragicamp \
-            --cov-report=xml \
-            --cov-report=html \
-            --cov-report=term-missing \
-            --junitxml=test-results.xml
+          uv run python -c "
+          print('Testing imports...')
+          
+          # Core
+          from ragicamp import ComponentFactory, ComponentRegistry
+          print('✓ ragicamp core')
+          
+          # Core infrastructure
+          from ragicamp.core import get_logger, RAGiCampError, AgentType
+          print('✓ ragicamp.core')
+          
+          # Agents
+          from ragicamp.agents import RAGAgent, DirectLLMAgent, FixedRAGAgent
+          print('✓ ragicamp.agents')
+          
+          # Metrics
+          from ragicamp.metrics import ExactMatchMetric, F1Metric
+          print('✓ ragicamp.metrics')
+          
+          # Datasets
+          from ragicamp.datasets import QADataset, QAExample
+          print('✓ ragicamp.datasets')
+          
+          # Config
+          from ragicamp.config import ConfigLoader, ExperimentConfig
+          print('✓ ragicamp.config')
+          
+          print('✅ All imports successful!')
+          "
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            test-results.xml
-            htmlcov/
-            coverage.xml
-
-      - name: Upload coverage to Codecov
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  # ============================================================================
-  # CONFIG VALIDATION
-  # ============================================================================
-  
   validate-configs:
     name: Validate Configs
     runs-on: ubuntu-latest
@@ -145,14 +125,8 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.UV_CACHE_DIR }}
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
         run: uv sync
@@ -206,12 +180,13 @@ jobs:
           "
 
   # ============================================================================
-  # IMPORT CHECK (ensures package is importable)
+  # TESTS (run after fast checks pass)
   # ============================================================================
   
-  import-check:
-    name: Import Check
+  test:
+    name: Tests
     runs-on: ubuntu-latest
+    needs: [lint, import-check]  # Only run if fast checks pass
     
     steps:
       - name: Checkout
@@ -226,58 +201,48 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
-      - name: Cache uv dependencies
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.UV_CACHE_DIR }}
-          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            uv-${{ runner.os }}-
+      - name: Install dependencies
+        run: uv sync --extra dev
 
-      - name: Install package
-        run: uv sync
-
-      - name: Test imports
+      - name: Run tests with coverage
         run: |
-          uv run python -c "
-          print('Testing imports...')
-          
-          # Core
-          from ragicamp import ComponentFactory, ComponentRegistry
-          print('✓ ragicamp core')
-          
-          # Core infrastructure
-          from ragicamp.core import get_logger, RAGiCampError, AgentType
-          print('✓ ragicamp.core')
-          
-          # Agents
-          from ragicamp.agents import RAGAgent, DirectLLMAgent, FixedRAGAgent
-          print('✓ ragicamp.agents')
-          
-          # Metrics
-          from ragicamp.metrics import ExactMatchMetric, F1Metric
-          print('✓ ragicamp.metrics')
-          
-          # Datasets
-          from ragicamp.datasets import QADataset, QAExample
-          print('✓ ragicamp.datasets')
-          
-          # Config
-          from ragicamp.config import ConfigLoader, ExperimentConfig
-          print('✓ ragicamp.config')
-          
-          print('✅ All imports successful!')
-          "
+          uv run pytest tests/ \
+            -v \
+            --tb=short \
+            --cov=src/ragicamp \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            coverage.xml
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================================
-  # SUMMARY
+  # FINAL STATUS CHECK
   # ============================================================================
   
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, test, validate-configs, import-check]
+    needs: [lint, import-check, validate-configs, test]
     if: always()
     
     steps:
@@ -285,9 +250,9 @@ jobs:
         run: |
           echo "Job Results:"
           echo "  Lint: ${{ needs.lint.result }}"
-          echo "  Test: ${{ needs.test.result }}"
-          echo "  Validate Configs: ${{ needs.validate-configs.result }}"
           echo "  Import Check: ${{ needs.import-check.result }}"
+          echo "  Validate Configs: ${{ needs.validate-configs.result }}"
+          echo "  Test: ${{ needs.test.result }}"
           echo ""
           
           # Fail if any required job failed
@@ -296,8 +261,8 @@ jobs:
             exit 1
           fi
           
-          if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "❌ Tests failed"
+          if [ "${{ needs.import-check.result }}" != "success" ]; then
+            echo "❌ Import check failed"
             exit 1
           fi
           
@@ -306,8 +271,8 @@ jobs:
             exit 1
           fi
           
-          if [ "${{ needs.import-check.result }}" != "success" ]; then
-            echo "❌ Import check failed"
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "❌ Tests failed"
             exit 1
           fi
           

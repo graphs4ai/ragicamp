@@ -12,12 +12,14 @@ try:
         PhaseState,
         PhaseStatus,
     )
+
     _has_state = True
 except ImportError:
     _has_state = False
 
 try:
     from ragicamp.utils.mlflow_utils import MLflowTracker, create_mlflow_tracker
+
     _has_mlflow_utils = True
 except ImportError:
     _has_mlflow_utils = False

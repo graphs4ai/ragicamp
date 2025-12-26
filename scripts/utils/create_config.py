@@ -126,8 +126,8 @@ def create_llm_judge_template():
                 "params": {
                     "judgment_type": "binary",
                     "batch_size": 16,
-                }
-            }
+                },
+            },
         ],
         "output": {
             "save_predictions": True,
@@ -141,21 +141,18 @@ def main():
         description="Create RAGiCamp configuration templates",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    
-    parser.add_argument(
-        "output",
-        help="Output path for configuration file"
-    )
-    
+
+    parser.add_argument("output", help="Output path for configuration file")
+
     parser.add_argument(
         "--type",
         choices=["baseline", "rag", "llm_judge"],
         default="baseline",
-        help="Template type (default: baseline)"
+        help="Template type (default: baseline)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Create appropriate template
     if args.type == "baseline":
         template = create_baseline_template()
@@ -163,14 +160,14 @@ def main():
         template = create_rag_template()
     elif args.type == "llm_judge":
         template = create_llm_judge_template()
-    
+
     # Save to file
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(output_path, 'w') as f:
+
+    with open(output_path, "w") as f:
         yaml.dump(template, f, default_flow_style=False, sort_keys=False)
-    
+
     print(f"✓ Created {args.type} template: {output_path}")
     print(f"\nNext steps:")
     print(f"  1. Edit the config: {output_path}")
@@ -180,4 +177,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

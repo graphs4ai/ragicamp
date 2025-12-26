@@ -262,8 +262,7 @@ class ComponentFactory:
                 judgment_type = metric_params.get("judgment_type", "binary")
                 # Support both batch_size (legacy) and max_concurrent (new)
                 max_concurrent = metric_params.get(
-                    "max_concurrent", 
-                    metric_params.get("batch_size", 20)
+                    "max_concurrent", metric_params.get("batch_size", 20)
                 )
                 metrics.append(
                     LLMJudgeQAMetric(
@@ -287,12 +286,16 @@ class ComponentFactory:
 
             # Try Ragas metrics (with ragas_ prefix or direct name)
             elif metric_name.startswith("ragas_") or metric_name in [
-                "answer_relevancy", "context_precision", "context_recall",
-                "context_relevancy", "answer_similarity", "answer_correctness"
+                "answer_relevancy",
+                "context_precision",
+                "context_recall",
+                "context_relevancy",
+                "answer_similarity",
+                "answer_correctness",
             ]:
                 try:
                     from ragicamp.metrics.ragas_adapter import create_ragas_metric
-                    
+
                     # Remove ragas_ prefix if present
                     ragas_name = metric_name.replace("ragas_", "")
                     print(f"🔄 Using Ragas metric: {ragas_name}")

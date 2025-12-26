@@ -1,7 +1,7 @@
 """Evaluation metrics for RAG systems."""
 
-from ragicamp.metrics.base import Metric
 from ragicamp.metrics.async_base import AsyncAPIMetric
+from ragicamp.metrics.base import Metric
 
 # Import specific metrics (but handle import errors gracefully)
 try:

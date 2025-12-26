@@ -5,7 +5,7 @@ Using @runtime_checkable allows isinstance() checks.
 
 Usage:
     from ragicamp.core.protocols import HasGenerate
-    
+
     def evaluate_model(model: HasGenerate):
         if not isinstance(model, HasGenerate):
             raise TypeError("Model must implement generate()")
@@ -22,16 +22,16 @@ from typing import (
     runtime_checkable,
 )
 
-
 # === Model Protocols ===
+
 
 @runtime_checkable
 class HasGenerate(Protocol):
     """Protocol for objects that can generate text.
-    
+
     Implemented by: LanguageModel, HuggingFaceModel, OpenAIModel
     """
-    
+
     def generate(
         self,
         prompt: Union[str, List[str]],
@@ -46,10 +46,10 @@ class HasGenerate(Protocol):
 @runtime_checkable
 class HasEmbeddings(Protocol):
     """Protocol for objects that can produce embeddings.
-    
+
     Implemented by: LanguageModel, EmbeddingModel
     """
-    
+
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get embeddings for texts."""
         ...
@@ -58,10 +58,10 @@ class HasEmbeddings(Protocol):
 @runtime_checkable
 class HasTokenCount(Protocol):
     """Protocol for objects that can count tokens.
-    
+
     Implemented by: LanguageModel
     """
-    
+
     def count_tokens(self, text: str) -> int:
         """Count tokens in text."""
         ...
@@ -69,13 +69,14 @@ class HasTokenCount(Protocol):
 
 # === Retriever Protocols ===
 
+
 @runtime_checkable
 class HasRetrieve(Protocol):
     """Protocol for objects that can retrieve documents.
-    
+
     Implemented by: Retriever, DenseRetriever, SparseRetriever
     """
-    
+
     def retrieve(
         self,
         query: str,
@@ -89,10 +90,10 @@ class HasRetrieve(Protocol):
 @runtime_checkable
 class HasIndex(Protocol):
     """Protocol for objects that can index documents.
-    
+
     Implemented by: Retriever
     """
-    
+
     def index_documents(self, documents: List[Any]) -> None:
         """Index a collection of documents."""
         ...
@@ -100,13 +101,14 @@ class HasIndex(Protocol):
 
 # === Agent Protocols ===
 
+
 @runtime_checkable
 class HasAnswer(Protocol):
     """Protocol for objects that can answer questions.
-    
+
     Implemented by: RAGAgent, DirectLLMAgent, FixedRAGAgent
     """
-    
+
     def answer(self, query: str, **kwargs: Any) -> Any:  # RAGResponse
         """Generate an answer for a query."""
         ...
@@ -115,10 +117,10 @@ class HasAnswer(Protocol):
 @runtime_checkable
 class HasBatchAnswer(Protocol):
     """Protocol for objects that support batch answering.
-    
+
     Implemented by: RAGAgent (with batch support)
     """
-    
+
     def batch_answer(
         self,
         queries: List[str],
@@ -130,13 +132,14 @@ class HasBatchAnswer(Protocol):
 
 # === Metric Protocols ===
 
+
 @runtime_checkable
 class HasCompute(Protocol):
     """Protocol for objects that can compute metrics.
-    
+
     Implemented by: Metric, ExactMatchMetric, BERTScoreMetric
     """
-    
+
     def compute(
         self,
         predictions: List[str],
@@ -147,13 +150,13 @@ class HasCompute(Protocol):
         ...
 
 
-@runtime_checkable  
+@runtime_checkable
 class HasComputeSingle(Protocol):
     """Protocol for objects that can compute single metrics.
-    
+
     Implemented by: Metric
     """
-    
+
     def compute_single(
         self,
         prediction: str,
@@ -166,13 +169,14 @@ class HasComputeSingle(Protocol):
 
 # === Dataset Protocols ===
 
+
 @runtime_checkable
 class HasIterate(Protocol):
     """Protocol for objects that can be iterated.
-    
+
     Implemented by: QADataset
     """
-    
+
     def __iter__(self): ...
     def __len__(self) -> int: ...
     def __getitem__(self, idx: int): ...
@@ -180,13 +184,14 @@ class HasIterate(Protocol):
 
 # === Persistence Protocols ===
 
+
 @runtime_checkable
 class HasSave(Protocol):
     """Protocol for objects that can be saved.
-    
+
     Implemented by: Retriever, Agent
     """
-    
+
     def save(self, path: str, **kwargs: Any) -> str:
         """Save to disk."""
         ...
@@ -195,10 +200,10 @@ class HasSave(Protocol):
 @runtime_checkable
 class HasLoad(Protocol):
     """Protocol for objects that can be loaded.
-    
+
     Implemented by: Retriever, Agent
     """
-    
+
     @classmethod
     def load(cls, path: str, **kwargs: Any) -> Any:
         """Load from disk."""
@@ -207,13 +212,14 @@ class HasLoad(Protocol):
 
 # === State Protocols ===
 
+
 @runtime_checkable
 class HasReset(Protocol):
     """Protocol for objects with resettable state.
-    
+
     Implemented by: RAGAgent
     """
-    
+
     def reset(self) -> None:
         """Reset internal state."""
         ...
@@ -221,16 +227,17 @@ class HasReset(Protocol):
 
 # === Utility Functions ===
 
+
 def check_implements(obj: Any, protocol: type) -> bool:
     """Check if an object implements a protocol.
-    
+
     Args:
         obj: Object to check
         protocol: Protocol class to check against
-        
+
     Returns:
         True if object implements protocol
-        
+
     Example:
         >>> if not check_implements(model, HasGenerate):
         ...     raise TypeError("Model must implement generate()")
@@ -240,21 +247,19 @@ def check_implements(obj: Any, protocol: type) -> bool:
 
 def require_implements(obj: Any, protocol: type, name: str = "Object") -> None:
     """Require that an object implements a protocol.
-    
+
     Args:
         obj: Object to check
         protocol: Protocol class to check against
         name: Name to use in error message
-        
+
     Raises:
         TypeError: If object doesn't implement protocol
-        
+
     Example:
         >>> require_implements(model, HasGenerate, "model")
     """
     if not isinstance(obj, protocol):
         protocol_name = protocol.__name__
         obj_type = type(obj).__name__
-        raise TypeError(
-            f"{name} must implement {protocol_name}, got {obj_type}"
-        )
+        raise TypeError(f"{name} must implement {protocol_name}, got {obj_type}")

@@ -6,10 +6,10 @@ API calls, especially in LLM-as-a-judge metrics.
 
 Example:
     >>> model = OpenAIModel("gpt-4o-mini")
-    >>> 
+    >>>
     >>> # Sync usage (backward compatible)
     >>> response = model.generate("Hello, world!")
-    >>> 
+    >>>
     >>> # Async usage (for parallel calls)
     >>> responses = await model.agenerate(["prompt1", "prompt2", "prompt3"])
 """
@@ -27,7 +27,7 @@ from ragicamp.models.base import LanguageModel
 
 class OpenAIModel(LanguageModel):
     """Language model implementation using OpenAI API.
-    
+
     Supports both synchronous and asynchronous generation.
     Use async methods for efficient parallel API calls.
     """
@@ -62,10 +62,10 @@ class OpenAIModel(LanguageModel):
             self.encoding = tiktoken.encoding_for_model(model_name)
         except KeyError:
             self.encoding = tiktoken.get_encoding("cl100k_base")
-        
+
         # Lazy-initialized async client
         self._async_client: Optional[AsyncOpenAI] = None
-    
+
     @property
     def async_client(self) -> AsyncOpenAI:
         """Get or create the async OpenAI client."""
@@ -105,7 +105,7 @@ class OpenAIModel(LanguageModel):
         **kwargs: Any,
     ) -> Union[str, List[str]]:
         """Generate text using OpenAI API.
-        
+
         Args:
             prompt: Single prompt or list of prompts
             max_tokens: Maximum tokens to generate
@@ -114,7 +114,7 @@ class OpenAIModel(LanguageModel):
             stop: Stop sequences
             parallel: Use parallel API calls for batches (default: True)
             **kwargs: Additional API parameters
-            
+
         Returns:
             Generated text or list of texts
         """
@@ -131,17 +131,16 @@ class OpenAIModel(LanguageModel):
         # Multiple prompts - use parallel execution
         if parallel and len(prompts) > 1:
             results = [None] * len(prompts)
-            
+
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 # Submit all tasks with their indices
                 future_to_idx = {
                     executor.submit(
-                        self._single_generate,
-                        p, max_tokens, temperature, top_p, stop, **kwargs
+                        self._single_generate, p, max_tokens, temperature, top_p, stop, **kwargs
                     ): i
                     for i, p in enumerate(prompts)
                 }
-                
+
                 # Collect results maintaining order
                 for future in as_completed(future_to_idx):
                     idx = future_to_idx[future]
@@ -150,7 +149,7 @@ class OpenAIModel(LanguageModel):
                     except Exception as e:
                         # On error, store error message
                         results[idx] = f"[ERROR: {str(e)}]"
-            
+
             return results
         else:
             # Sequential fallback
@@ -169,11 +168,11 @@ class OpenAIModel(LanguageModel):
     def count_tokens(self, text: str) -> int:
         """Count tokens using tiktoken."""
         return len(self.encoding.encode(text))
-    
+
     # =========================================================================
     # Async Methods
     # =========================================================================
-    
+
     async def agenerate_single(
         self,
         prompt: str,
@@ -185,7 +184,7 @@ class OpenAIModel(LanguageModel):
         **kwargs: Any,
     ) -> str:
         """Generate text for a single prompt asynchronously.
-        
+
         Args:
             prompt: The prompt to generate from
             max_tokens: Maximum tokens to generate
@@ -194,7 +193,7 @@ class OpenAIModel(LanguageModel):
             stop: Stop sequences
             system_message: Optional system message
             **kwargs: Additional API parameters
-            
+
         Returns:
             Generated text
         """
@@ -202,7 +201,7 @@ class OpenAIModel(LanguageModel):
         if system_message:
             messages.append({"role": "system", "content": system_message})
         messages.append({"role": "user", "content": prompt})
-        
+
         response = await self.async_client.chat.completions.create(
             model=self.model_name,
             messages=messages,
@@ -213,7 +212,7 @@ class OpenAIModel(LanguageModel):
             **kwargs,
         )
         return response.choices[0].message.content
-    
+
     async def agenerate(
         self,
         prompts: List[str],
@@ -225,9 +224,9 @@ class OpenAIModel(LanguageModel):
         **kwargs: Any,
     ) -> List[str]:
         """Generate text for multiple prompts asynchronously with rate limiting.
-        
+
         Uses asyncio.Semaphore to limit concurrent API calls.
-        
+
         Args:
             prompts: List of prompts to generate from
             max_tokens: Maximum tokens to generate
@@ -236,12 +235,12 @@ class OpenAIModel(LanguageModel):
             stop: Stop sequences
             system_message: Optional system message for all prompts
             **kwargs: Additional API parameters
-            
+
         Returns:
             List of generated texts (in same order as prompts)
         """
         semaphore = asyncio.Semaphore(self.max_concurrent_async)
-        
+
         async def rate_limited_generate(idx: int, prompt: str) -> tuple[int, str]:
             """Generate with rate limiting, returning index for ordering."""
             async with semaphore:
@@ -258,23 +257,23 @@ class OpenAIModel(LanguageModel):
                     return (idx, result)
                 except Exception as e:
                     return (idx, f"[ERROR: {str(e)}]")
-        
+
         # Create tasks for all prompts
         tasks = [rate_limited_generate(i, p) for i, p in enumerate(prompts)]
-        
+
         # Execute all tasks concurrently
         results = await asyncio.gather(*tasks)
-        
+
         # Sort by index to maintain order
         sorted_results = sorted(results, key=lambda x: x[0])
         return [r[1] for r in sorted_results]
-    
+
     async def aget_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get embeddings using OpenAI embeddings API asynchronously.
-        
+
         Args:
             texts: List of texts to embed
-            
+
         Returns:
             List of embedding vectors
         """

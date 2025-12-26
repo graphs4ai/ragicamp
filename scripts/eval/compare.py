@@ -10,10 +10,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -35,35 +36,35 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
     """Load results from a JSON file."""
     with open(path) as f:
         data = json.load(f)
-    
+
     # Skip orchestration logs
     if "total_passed" in data and "results" in data:
         return None
-    
+
     # Extract metrics
     metrics = {}
     if "overall_metrics" in data:
         for key, value in data["overall_metrics"].items():
             if isinstance(value, (int, float)) and key not in ["num_successful", "num_failures"]:
                 metrics[key] = value
-    
+
     for key in ["exact_match", "f1", "bertscore_f1", "bleurt", "llm_judge_qa"]:
         if key in data and key not in metrics:
             metrics[key] = data[key]
-    
+
     if "metrics" in data and isinstance(data["metrics"], dict):
         metrics.update(data["metrics"])
-    
+
     if not metrics:
         return None
-    
+
     # Load Hydra config for full experiment info
     hydra_config = load_hydra_config(path.parent)
-    
+
     # Extract experiment parameters
     model_name = "?"
     prompt_style = "?"
-    
+
     if hydra_config:
         model_cfg = hydra_config.get("model", {})
         model_name = model_cfg.get("model_name", "?")
@@ -72,7 +73,7 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
             model_name = model_name.split("/")[-1]
         if len(model_name) > 20:
             model_name = model_name[:17] + "..."
-        
+
         prompt_cfg = hydra_config.get("prompt", {})
         prompt_style = prompt_cfg.get("style", "?")
     else:
@@ -84,17 +85,17 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
             model_name = "llama3"
         elif "phi" in agent_name.lower():
             model_name = "phi3"
-        
+
         if "rag" in agent_name.lower():
             prompt_style = "rag"
         elif "quick" in agent_name.lower():
             prompt_style = "quick"
-    
+
     dataset = data.get("dataset_name", "?")
-    
+
     # Build descriptive name
     name = f"{dataset[:8]}/{model_name[:12]}/{prompt_style}"
-    
+
     return {
         "path": str(path),
         "name": name,
@@ -112,13 +113,13 @@ def find_result_files(base_path: Path, pattern: str = "*summary*.json") -> List[
     """Find result files recursively."""
     if base_path.is_file():
         return [base_path]
-    
+
     files = []
     for f in base_path.rglob(pattern):
         if "baseline_study_summary" in f.name or "rag_baseline_study" in f.name:
             continue
         files.append(f)
-    
+
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
@@ -127,25 +128,25 @@ def compare_results(results: List[Dict[str, Any]], sort_by: str = None, group_by
     if not results:
         print("No results found with metrics")
         return
-    
+
     # Collect all metrics
     all_metrics = set()
     for r in results:
         all_metrics.update(r["metrics"].keys())
-    
+
     # Priority order
     priority = ["exact_match", "f1", "bertscore_f1", "bleurt", "llm_judge_qa"]
     display_metrics = [m for m in priority if m in all_metrics][:5]
-    
+
     # Sort results
     if sort_by and sort_by in all_metrics:
         results = sorted(results, key=lambda r: r["metrics"].get(sort_by, 0), reverse=True)
-    
+
     # Print header
     print("\n" + "=" * 100)
     print("Experiment Comparison")
     print("=" * 100)
-    
+
     # Column headers
     header = f"{'Dataset':<12} | {'Model':<15} | {'Prompt':<10} | {'N':>4}"
     for metric in display_metrics:
@@ -153,13 +154,13 @@ def compare_results(results: List[Dict[str, Any]], sort_by: str = None, group_by
         header += f" | {short:>8}"
     print(header)
     print("-" * len(header))
-    
+
     # Print rows
     for r in results:
         dataset = r["dataset"][:12] if r["dataset"] else "?"
         model = r["model"][:15] if r["model"] else "?"
         prompt = r["prompt"][:10] if r["prompt"] else "?"
-        
+
         row = f"{dataset:<12} | {model:<15} | {prompt:<10} | {str(r['num_examples']):>4}"
         for metric in display_metrics:
             value = r["metrics"].get(metric)
@@ -170,9 +171,9 @@ def compare_results(results: List[Dict[str, Any]], sort_by: str = None, group_by
             else:
                 row += f" | {'-':>8}"
         print(row)
-    
+
     print("-" * len(header))
-    
+
     # Best results per dataset
     if len(results) > 1:
         print("\n🏆 Best per dataset:")
@@ -192,20 +193,20 @@ def main():
     parser.add_argument("--sort", "-s", default="f1", help="Sort by metric (default: f1)")
     parser.add_argument("--pattern", "-p", default="*summary*.json", help="File pattern")
     parser.add_argument("--all", "-a", action="store_true", help="Show all files found")
-    
+
     args = parser.parse_args()
-    
+
     result_files = []
     for path in args.paths:
         result_files.extend(find_result_files(path, args.pattern))
-    
+
     if not result_files:
         print("No result files found")
         sys.exit(1)
-    
+
     if args.all:
         print(f"Found {len(result_files)} files")
-    
+
     results = []
     for path in result_files:
         try:
@@ -215,7 +216,7 @@ def main():
         except Exception as e:
             if args.all:
                 print(f"Warning: {path}: {e}")
-    
+
     compare_results(results, sort_by=args.sort)
     print()
 

@@ -9,17 +9,17 @@ from typing import List
 
 class AgentType(str, Enum):
     """Agent types supported by RAGiCamp."""
-    
+
     DIRECT_LLM = "direct_llm"
     FIXED_RAG = "fixed_rag"
     BANDIT_RAG = "bandit_rag"
     MDP_RAG = "mdp_rag"
-    
+
     @classmethod
     def rag_types(cls) -> List["AgentType"]:
         """Get agent types that use retrieval."""
         return [cls.FIXED_RAG, cls.BANDIT_RAG, cls.MDP_RAG]
-    
+
     @classmethod
     def requires_retriever(cls, agent_type: str) -> bool:
         """Check if agent type requires a retriever."""
@@ -28,7 +28,7 @@ class AgentType(str, Enum):
 
 class ModelType(str, Enum):
     """Model types supported by RAGiCamp."""
-    
+
     HUGGINGFACE = "huggingface"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"  # Future
@@ -37,7 +37,7 @@ class ModelType(str, Enum):
 
 class RetrieverType(str, Enum):
     """Retriever types supported by RAGiCamp."""
-    
+
     DENSE = "dense"
     SPARSE = "sparse"
     HYBRID = "hybrid"  # Future
@@ -45,15 +45,15 @@ class RetrieverType(str, Enum):
 
 class MetricType(str, Enum):
     """Metric types supported by RAGiCamp."""
-    
+
     # Standard metrics
     EXACT_MATCH = "exact_match"
     F1 = "f1"
-    
+
     # Semantic metrics
     BERTSCORE = "bertscore"
     BLEURT = "bleurt"
-    
+
     # RAG-specific (Ragas)
     FAITHFULNESS = "faithfulness"
     ANSWER_RELEVANCY = "answer_relevancy"
@@ -61,24 +61,24 @@ class MetricType(str, Enum):
     CONTEXT_RECALL = "context_recall"
     ANSWER_SIMILARITY = "answer_similarity"
     ANSWER_CORRECTNESS = "answer_correctness"
-    
+
     # LLM-based
     LLM_JUDGE = "llm_judge"
     LLM_JUDGE_QA = "llm_judge_qa"
-    
+
     # Legacy (can be deprecated)
     HALLUCINATION = "hallucination"
-    
+
     @classmethod
     def standard_metrics(cls) -> List["MetricType"]:
         """Fast, deterministic metrics."""
         return [cls.EXACT_MATCH, cls.F1]
-    
+
     @classmethod
     def semantic_metrics(cls) -> List["MetricType"]:
         """Neural-based semantic metrics."""
         return [cls.BERTSCORE, cls.BLEURT]
-    
+
     @classmethod
     def ragas_metrics(cls) -> List["MetricType"]:
         """Ragas-powered RAG metrics."""
@@ -90,12 +90,12 @@ class MetricType(str, Enum):
             cls.ANSWER_SIMILARITY,
             cls.ANSWER_CORRECTNESS,
         ]
-    
+
     @classmethod
     def llm_metrics(cls) -> List["MetricType"]:
         """LLM-based metrics."""
         return [cls.LLM_JUDGE, cls.LLM_JUDGE_QA]
-    
+
     @classmethod
     def requires_context(cls, metric_type: str) -> bool:
         """Check if metric requires retrieved context."""
@@ -107,7 +107,7 @@ class MetricType(str, Enum):
 
 class DatasetType(str, Enum):
     """Dataset types supported by RAGiCamp."""
-    
+
     NATURAL_QUESTIONS = "natural_questions"
     TRIVIAQA = "triviaqa"
     HOTPOTQA = "hotpotqa"
@@ -116,15 +116,15 @@ class DatasetType(str, Enum):
 
 class EvaluationMode(str, Enum):
     """Evaluation modes."""
-    
-    GENERATE = "generate"   # Only generate predictions
-    EVALUATE = "evaluate"   # Only compute metrics
-    BOTH = "both"           # Generate and evaluate
+
+    GENERATE = "generate"  # Only generate predictions
+    EVALUATE = "evaluate"  # Only compute metrics
+    BOTH = "both"  # Generate and evaluate
 
 
 class PhaseStatus(str, Enum):
     """Status of an experiment phase."""
-    
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -134,9 +134,10 @@ class PhaseStatus(str, Enum):
 
 # === File Extensions ===
 
+
 class FileExtension:
     """Common file extensions."""
-    
+
     JSON = ".json"
     YAML = ".yaml"
     YML = ".yml"
@@ -147,22 +148,23 @@ class FileExtension:
 
 # === Default Values ===
 
+
 class Defaults:
     """Default configuration values."""
-    
+
     # Model
     MAX_TOKENS = 256
     TEMPERATURE = 0.7
     TOP_P = 1.0
-    
+
     # Retrieval
     TOP_K = 5
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-    
+
     # Evaluation
     BATCH_SIZE = 8
     CHECKPOINT_EVERY = 20
-    
+
     # Paths
     DATA_DIR = "data"
     OUTPUT_DIR = "outputs"
@@ -172,22 +174,23 @@ class Defaults:
 
 # === Prompt Templates ===
 
+
 class PromptTemplates:
     """Default prompt templates."""
-    
+
     QA_SYSTEM = "You are a helpful assistant. Answer the question based on the provided context."
-    
+
     QA_CONTEXT = """Context:
 {context}
 
 Question: {query}
 
 Answer:"""
-    
+
     QA_NO_CONTEXT = """Question: {query}
 
 Answer:"""
-    
+
     LLM_JUDGE = """You are an expert judge. Evaluate if the answer is correct.
 
 Question: {question}

@@ -11,15 +11,15 @@ Example:
     orchestrator.add_phase(GenerationPhase(...))
     orchestrator.add_phase(MetricsPhase(...))
     results = orchestrator.run(initial_inputs)
-    
+
 With checkpointing:
     orchestrator = ExperimentOrchestrator(name="my_exp", state_path="outputs/state.json")
     orchestrator.add_phase(GenerationPhase(..., checkpoint_every=10))
     orchestrator.add_phase(MetricsPhase(...))
-    
+
     # First run - might fail at question 50
     results = orchestrator.run({"dataset": ds, "output_path": "outputs/pred.json"})
-    
+
     # Second run - automatically resumes from checkpoint
     results = orchestrator.run({"dataset": ds, "output_path": "outputs/pred.json"})
 """
@@ -74,7 +74,7 @@ class ExperimentOrchestrator:
         })
 
         print(result.final_outputs["results"])
-        
+
     With checkpointing:
         orchestrator = ExperimentOrchestrator(
             name="my_experiment",
@@ -84,7 +84,7 @@ class ExperimentOrchestrator:
     """
 
     def __init__(
-        self, 
+        self,
         name: str = "experiment",
         state_path: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
@@ -128,7 +128,7 @@ class ExperimentOrchestrator:
         print(f"{'='*70}")
 
         ResourceManager.print_memory_status("pipeline start")
-        
+
         # Initialize or load experiment state
         state = None
         if self.state_path:
@@ -143,7 +143,7 @@ class ExperimentOrchestrator:
 
         phase_results = {}
         current_inputs = initial_inputs.copy()
-        
+
         # Pass state to phases
         if state:
             current_inputs["experiment_state"] = state
@@ -152,13 +152,13 @@ class ExperimentOrchestrator:
             # Check if phase should be skipped (already completed)
             if state and not state.should_run_phase(phase.name):
                 print(f"\n[{i}/{len(self.phases)}] ⏭️  Skipping completed phase: {phase.name}")
-                
+
                 # Load output from previous run
                 output_path = state.get_phase_output(phase.name)
                 if output_path:
                     current_inputs["last_output_path"] = output_path
                 continue
-            
+
             print(f"\n[{i}/{len(self.phases)}] Running phase: {phase.name}")
 
             try:
@@ -169,7 +169,7 @@ class ExperimentOrchestrator:
                     if state:
                         state.fail_phase(phase.name, result.error or "Unknown error")
                         state.save()
-                    
+
                     return PipelineResult(
                         success=False,
                         phase_results=phase_results,
@@ -186,11 +186,11 @@ class ExperimentOrchestrator:
 
             except Exception as e:
                 print(f"✗ Phase '{phase.name}' failed with exception: {e}")
-                
+
                 if state:
                     state.fail_phase(phase.name, str(e))
                     state.save()
-                
+
                 return PipelineResult(
                     success=False,
                     phase_results=phase_results,
@@ -205,7 +205,7 @@ class ExperimentOrchestrator:
         print(f"✅ PIPELINE COMPLETED: {self.name}")
         print(f"{'='*70}")
         ResourceManager.print_memory_status("pipeline end")
-        
+
         # Print final state summary
         if state:
             print(f"\n{state.summary()}")
@@ -266,10 +266,8 @@ def create_rag_pipeline(
     # Determine state path from output path
     state_path = None
     if enable_checkpointing:
-        state_path = str(Path(output_path).with_name(
-            Path(output_path).stem + "_state.json"
-        ))
-    
+        state_path = str(Path(output_path).with_name(Path(output_path).stem + "_state.json"))
+
     orchestrator = ExperimentOrchestrator(
         name=experiment_name,
         state_path=state_path,

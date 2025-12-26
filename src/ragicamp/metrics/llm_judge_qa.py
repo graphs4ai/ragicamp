@@ -6,13 +6,13 @@ QA systems. Uses parallel async API calls for efficient batch evaluation.
 Example:
     >>> from ragicamp.models import OpenAIModel
     >>> from ragicamp.metrics import LLMJudgeQAMetric
-    >>> 
+    >>>
     >>> judge = OpenAIModel("gpt-4o-mini")
     >>> metric = LLMJudgeQAMetric(judge_model=judge, judgment_type="binary")
-    >>> 
+    >>>
     >>> # Sync usage (internally uses async)
     >>> scores = metric.compute(predictions, references, questions)
-    >>> 
+    >>>
     >>> # Async usage (for integration with async pipelines)
     >>> scores = await metric.acompute(predictions, references, questions)
 """
@@ -29,7 +29,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
     Uses GPT-4 or similar to evaluate answer quality with clear categorical judgments.
     Particularly useful when standard metrics don't capture semantic correctness.
-    
+
     Inherits from AsyncAPIMetric for efficient parallel async API calls.
     """
 
@@ -96,7 +96,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         )
 
         # Call LLM asynchronously
-        if hasattr(self.judge_model, 'agenerate_single'):
+        if hasattr(self.judge_model, "agenerate_single"):
             judgment = await self.judge_model.agenerate_single(
                 prompt,
                 temperature=0.0,
@@ -105,10 +105,10 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         else:
             # Fallback to sync if async not available
             import asyncio
+
             loop = asyncio.get_event_loop()
             judgment = await loop.run_in_executor(
-                None,
-                lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
+                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
             )
 
         # Extract categorical judgment
@@ -118,28 +118,28 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             "llm_judge_qa": score,
             f"llm_judge_qa_{category}": 1.0,  # For category counting
         }
-    
+
     def _aggregate_results(self, results: List[Dict[str, float]]) -> Dict[str, float]:
         """Aggregate individual results with category statistics.
-        
+
         Args:
             results: List of per-item result dictionaries
-            
+
         Returns:
             Aggregated metrics including category proportions
         """
         if not results:
             return {"llm_judge_qa": 0.0}
-        
+
         total = len(results)
-        
+
         # Sum scores
         avg_score = sum(r.get("llm_judge_qa", 0.0) for r in results) / total
-        
+
         # Count categories
         correct_count = sum(1 for r in results if r.get("llm_judge_qa_correct", 0) > 0)
         incorrect_count = sum(1 for r in results if r.get("llm_judge_qa_incorrect", 0) > 0)
-        
+
         aggregated = {
             "llm_judge_qa": avg_score,
             "llm_judge_qa_correct": correct_count / total,
@@ -155,9 +155,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
         return aggregated
 
-    def _create_judgment_prompt(
-        self, question: str, prediction: str, references: List[str]
-    ) -> str:
+    def _create_judgment_prompt(self, question: str, prediction: str, references: List[str]) -> str:
         """Create a clear prompt for categorical QA judgment."""
 
         if self.judgment_type == "binary":

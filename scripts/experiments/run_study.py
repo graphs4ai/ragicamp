@@ -30,35 +30,35 @@ def load_config(config_path: Path) -> Dict[str, Any]:
 
 def get_dataset(name: str, num_questions: Optional[int]):
     """Load dataset by name."""
-    from ragicamp.datasets import NaturalQuestionsDataset, TriviaQADataset, HotpotQADataset
-    
+    from ragicamp.datasets import HotpotQADataset, NaturalQuestionsDataset, TriviaQADataset
+
     DATASET_MAP = {
         "nq": NaturalQuestionsDataset,
         "triviaqa": TriviaQADataset,
         "hotpotqa": HotpotQADataset,
     }
-    
+
     dataset_cls = DATASET_MAP.get(name)
     if not dataset_cls:
         raise ValueError(f"Unknown dataset: {name}")
-    
+
     dataset = dataset_cls(split="validation")
     dataset.load()
-    
+
     examples = dataset.examples[:num_questions] if num_questions else dataset.examples
     return examples, dataset
 
 
 def get_model(model_spec: str):
     """Create model from spec like 'openai:gpt-4o-mini' or 'hf:google/gemma-2b-it'."""
-    from ragicamp.models import OpenAIModel, HuggingFaceModel
-    
+    from ragicamp.models import HuggingFaceModel, OpenAIModel
+
     if ":" in model_spec:
         provider, model_name = model_spec.split(":", 1)
     else:
         # Default to openai
         provider, model_name = "openai", model_spec
-    
+
     if provider == "openai":
         return OpenAIModel(name=model_name, temperature=0.0)
     elif provider == "hf":
@@ -70,13 +70,14 @@ def get_model(model_spec: str):
 def clear_gpu_memory():
     """Aggressively clear GPU memory before loading new models."""
     import gc
-    
+
     # Multiple GC passes
     for _ in range(3):
         gc.collect()
-    
+
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
@@ -86,21 +87,23 @@ def clear_gpu_memory():
         pass
 
 
-def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str], config: Dict = None) -> tuple:
+def compute_metrics_per_question(
+    predictions: List[Dict], metric_names: List[str], config: Dict = None
+) -> tuple:
     """Compute metrics per question and aggregated.
-    
+
     Returns:
         Tuple of (aggregated_results, per_question_results)
     """
     from ragicamp.metrics import ExactMatchMetric, F1Metric
-    
+
     aggregated = {}
     per_question = [{} for _ in predictions]
-    
+
     preds = [p["prediction"] for p in predictions]
     refs = [p["expected_answers"] for p in predictions]
     questions = [p["question"] for p in predictions]
-    
+
     for m in metric_names:
         try:
             if m == "f1":
@@ -111,17 +114,18 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                     per_question[i]["f1"] = score.get("f1", 0)
                 # Aggregate
                 aggregated.update(metric.compute(preds, refs))
-                
+
             elif m == "exact_match":
                 metric = ExactMatchMetric()
                 for i, (pred, ref) in enumerate(zip(preds, refs)):
                     score = metric.compute([pred], [ref])
                     per_question[i]["exact_match"] = score.get("exact_match", 0)
                 aggregated.update(metric.compute(preds, refs))
-                
+
             elif m == "bertscore":
                 clear_gpu_memory()
                 from ragicamp.metrics import BERTScoreMetric
+
                 metric = BERTScoreMetric(model_type="microsoft/deberta-base-mnli")
                 full_result = metric.compute(preds, refs)
                 aggregated.update(full_result)
@@ -129,10 +133,11 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                 item_scores = metric.get_per_item_scores()
                 for i, score in enumerate(item_scores):
                     per_question[i]["bertscore_f1"] = score
-                        
+
             elif m == "bleurt":
                 clear_gpu_memory()
                 from ragicamp.metrics import BLEURTMetric
+
                 metric = BLEURTMetric()
                 full_result = metric.compute(preds, refs)
                 aggregated.update(full_result)
@@ -140,9 +145,10 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                 item_scores = metric.get_per_item_scores()
                 for i, score in enumerate(item_scores):
                     per_question[i]["bleurt"] = score
-                        
+
             elif m == "llm_judge":
                 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
+
                 judge_cfg = config.get("llm_judge", {}) if config else {}
                 judge_model = get_model(judge_cfg.get("model", "openai:gpt-4o-mini"))
                 metric = LLMJudgeQAMetric(
@@ -150,22 +156,21 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                     judgment_type=judge_cfg.get("type", "binary"),
                 )
                 import asyncio
+
                 loop = asyncio.new_event_loop()
-                metric_results = loop.run_until_complete(
-                    metric.acompute(preds, refs, questions)
-                )
+                metric_results = loop.run_until_complete(metric.acompute(preds, refs, questions))
                 loop.close()
                 aggregated.update(metric_results)
                 # Get per-question scores
                 item_scores = metric.get_per_item_scores()
                 for i, score in enumerate(item_scores):
                     per_question[i]["llm_judge"] = score
-                
+
         except ImportError as e:
             print(f"  ⚠️ Skipping {m}: {e}")
         except Exception as e:
             print(f"  ⚠️ Error computing {m}: {e}")
-    
+
     return aggregated, per_question
 
 
@@ -202,13 +207,13 @@ def run_direct_experiment(
 
     # Create model and agent
     model = get_model(model_spec)
-    
+
     prompt = None
     if prompt_key == "concise":
         prompt = "Answer briefly.\n\nQ: {question}\nA:"
     elif prompt_key == "detailed":
         prompt = "Answer the following question thoroughly.\n\nQuestion: {question}\n\nAnswer:"
-    
+
     agent = DirectLLMAgent(name=exp_name, model=model, prompt_template=prompt)
 
     # Generate predictions
@@ -216,31 +221,35 @@ def run_direct_experiment(
     for i, example in enumerate(examples):
         try:
             response = agent.answer(example.question)
-            predictions.append({
-                "question_id": example.id,
-                "question": example.question,
-                "prediction": response.answer,
-                "expected_answers": example.answers,
-            })
+            predictions.append(
+                {
+                    "question_id": example.id,
+                    "question": example.question,
+                    "prediction": response.answer,
+                    "expected_answers": example.answers,
+                }
+            )
             if (i + 1) % 5 == 0:
                 print(f"  {i+1}/{len(examples)} done")
         except Exception as e:
             print(f"  Error on {i}: {e}")
-            predictions.append({
-                "question_id": example.id,
-                "question": example.question,
-                "prediction": f"[ERROR: {e}]",
-                "expected_answers": example.answers,
-            })
+            predictions.append(
+                {
+                    "question_id": example.id,
+                    "question": example.question,
+                    "prediction": f"[ERROR: {e}]",
+                    "expected_answers": example.answers,
+                }
+            )
 
     # Cleanup model (important for HF models)
-    if hasattr(model, 'unload'):
+    if hasattr(model, "unload"):
         model.unload()
     clear_gpu_memory()
 
     # Compute metrics (per-question and aggregated)
     results, per_question_metrics = compute_metrics_per_question(predictions, metric_names, config)
-    
+
     # Merge per-question metrics into predictions
     for i, pred in enumerate(predictions):
         pred["metrics"] = per_question_metrics[i]
@@ -270,7 +279,9 @@ def run_direct_experiment(
     with open(exp_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)")
+    print(
+        f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)"
+    )
     return metadata
 
 
@@ -312,17 +323,17 @@ def run_rag_experiment(
 
     # Create model and agent with prompt variation
     model = get_model(model_spec)
-    
+
     context_template = "Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
     if prompt_key == "concise":
         context_template = "Context:\n{context}\n\nQ: {query}\nA:"
     elif prompt_key == "detailed":
         context_template = "Use the following context to answer the question thoroughly.\n\nContext:\n{context}\n\nQuestion: {query}\n\nProvide a detailed answer:"
-    
+
     agent = FixedRAGAgent(
-        name=exp_name, 
-        model=model, 
-        retriever=retriever, 
+        name=exp_name,
+        model=model,
+        retriever=retriever,
         top_k=top_k,
         context_template=context_template,
     )
@@ -332,31 +343,35 @@ def run_rag_experiment(
     for i, example in enumerate(examples):
         try:
             response = agent.answer(example.question)
-            predictions.append({
-                "question_id": example.id,
-                "question": example.question,
-                "prediction": response.answer,
-                "expected_answers": example.answers,
-            })
+            predictions.append(
+                {
+                    "question_id": example.id,
+                    "question": example.question,
+                    "prediction": response.answer,
+                    "expected_answers": example.answers,
+                }
+            )
             if (i + 1) % 5 == 0:
                 print(f"  {i+1}/{len(examples)} done")
         except Exception as e:
             print(f"  Error on {i}: {e}")
-            predictions.append({
-                "question_id": example.id,
-                "question": example.question,
-                "prediction": f"[ERROR: {e}]",
-                "expected_answers": example.answers,
-            })
+            predictions.append(
+                {
+                    "question_id": example.id,
+                    "question": example.question,
+                    "prediction": f"[ERROR: {e}]",
+                    "expected_answers": example.answers,
+                }
+            )
 
     # Cleanup model
-    if hasattr(model, 'unload'):
+    if hasattr(model, "unload"):
         model.unload()
     clear_gpu_memory()
 
     # Compute metrics (per-question and aggregated)
     results, per_question_metrics = compute_metrics_per_question(predictions, metric_names, config)
-    
+
     # Merge per-question metrics into predictions
     for i, pred in enumerate(predictions):
         pred["metrics"] = per_question_metrics[i]
@@ -388,14 +403,16 @@ def run_rag_experiment(
     with open(exp_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)")
+    print(
+        f"✓ {exp_name}: F1={results.get('f1', 0)*100:.1f}% EM={results.get('exact_match', 0)*100:.1f}% ({duration:.1f}s)"
+    )
     return metadata
 
 
 def compare_results(output_dir: Path) -> Dict:
     """Generate comparison summary with all metrics."""
     results = []
-    
+
     for exp_dir in output_dir.iterdir():
         if not exp_dir.is_dir():
             continue
@@ -403,33 +420,33 @@ def compare_results(output_dir: Path) -> Dict:
         if meta_path.exists():
             with open(meta_path) as f:
                 results.append(json.load(f))
-    
+
     if not results:
         return {}
-    
+
     # Sort by F1
     results.sort(key=lambda x: x.get("results", {}).get("f1", 0), reverse=True)
-    
+
     # Collect all metric names
     all_metrics = set()
     for r in results:
         all_metrics.update(r.get("results", {}).keys())
-    
+
     # Core metrics to show (in order)
     core_metrics = ["f1", "exact_match", "bertscore_f1", "bleurt"]
     display_metrics = [m for m in core_metrics if m in all_metrics]
-    
+
     print(f"\n{'='*100}")
     print("Results Comparison")
     print(f"{'='*100}")
-    
+
     # Header
     header = f"{'Experiment':<50}"
     for m in display_metrics:
         header += f" {m[:10]:>10}"
     print(header)
     print("-" * 100)
-    
+
     # Rows
     for r in results:
         name = r["name"]
@@ -441,7 +458,7 @@ def compare_results(output_dir: Path) -> Dict:
             val = r.get("results", {}).get(m, 0) * 100
             row += f" {val:>9.1f}%"
         print(row)
-    
+
     # Summary statistics
     print("-" * 100)
     print("\n📊 Summary:")
@@ -450,7 +467,7 @@ def compare_results(output_dir: Path) -> Dict:
         avg = sum(values) / len(values) if values else 0
         best = max(values) if values else 0
         print(f"  {m}: avg={avg*100:.1f}%, best={best*100:.1f}%")
-    
+
     comparison = {
         "experiments": results,
         "metrics_computed": list(all_metrics),
@@ -464,57 +481,57 @@ def compare_results(output_dir: Path) -> Dict:
         },
         "timestamp": datetime.now().isoformat(),
     }
-    
+
     with open(output_dir / "comparison.json", "w") as f:
         json.dump(comparison, f, indent=2)
-    
+
     print(f"\n✓ Full comparison saved to: {output_dir / 'comparison.json'}")
-    
+
     return comparison
 
 
 def run_study(config: Dict, dry_run: bool = False) -> None:
     """Run a complete study from config."""
-    
+
     print("\n" + "=" * 70)
     print(f"📊 Study: {config['name']}")
     print(f"   {config.get('description', '')}")
     print("=" * 70)
-    
+
     output_dir = Path(config.get("output_dir", "outputs"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     num_questions = config.get("num_questions")
     datasets = config.get("datasets", ["nq"])
     metrics = config.get("metrics", ["f1", "exact_match"])
-    
+
     # Count experiments
     direct_cfg = config.get("direct", {})
     rag_cfg = config.get("rag", {})
-    
+
     direct_count = 0
     rag_count = 0
-    
+
     if direct_cfg.get("enabled", False):
         direct_count = (
-            len(direct_cfg.get("models", [])) *
-            len(direct_cfg.get("prompts", [])) *
-            len(datasets)
+            len(direct_cfg.get("models", [])) * len(direct_cfg.get("prompts", [])) * len(datasets)
         )
-    
+
     if rag_cfg.get("enabled", False):
         rag_count = (
-            len(rag_cfg.get("models", [])) *
-            len(rag_cfg.get("retrievers", [])) *
-            len(rag_cfg.get("top_k_values", [])) *
-            len(rag_cfg.get("prompts", ["default"])) *
-            len(datasets)
+            len(rag_cfg.get("models", []))
+            * len(rag_cfg.get("retrievers", []))
+            * len(rag_cfg.get("top_k_values", []))
+            * len(rag_cfg.get("prompts", ["default"]))
+            * len(datasets)
         )
-    
-    print(f"\nExperiments: {direct_count} DirectLLM + {rag_count} RAG = {direct_count + rag_count} total")
+
+    print(
+        f"\nExperiments: {direct_count} DirectLLM + {rag_count} RAG = {direct_count + rag_count} total"
+    )
     print(f"Questions per experiment: {num_questions or 'all'}")
     print(f"Output: {output_dir}")
-    
+
     if dry_run:
         print("\n[DRY RUN] Would run these experiments:")
         if direct_cfg.get("enabled"):
@@ -529,15 +546,15 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                         for ds in datasets:
                             print(f"  - rag_{retr}_k{k}_{ds}")
         return
-    
+
     all_results = []
-    
+
     # Run DirectLLM
     if direct_cfg.get("enabled", False):
         print("\n" + "-" * 40)
         print("Phase 1: DirectLLM")
         print("-" * 40)
-        
+
         for model in direct_cfg.get("models", []):
             for prompt in direct_cfg.get("prompts", []):
                 for ds in datasets:
@@ -554,15 +571,15 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                         all_results.append(result)
                     except Exception as e:
                         print(f"❌ Failed: {e}")
-    
+
     # Run RAG
     if rag_cfg.get("enabled", False):
         print("\n" + "-" * 40)
         print("Phase 2: RAG")
         print("-" * 40)
-        
+
         rag_prompts = rag_cfg.get("prompts", ["default"])
-        
+
         for model in rag_cfg.get("models", []):
             for retr in rag_cfg.get("retrievers", []):
                 for k in rag_cfg.get("top_k_values", []):
@@ -586,10 +603,10 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
                                 print("   Run: make index-simple")
                             except Exception as e:
                                 print(f"❌ Failed: {e}")
-    
+
     # Compare
     compare_results(output_dir)
-    
+
     print("\n" + "=" * 70)
     print(f"✅ Study complete: {len(all_results)} experiments")
     print(f"   Results: {output_dir}")
@@ -600,13 +617,13 @@ def main():
     parser = argparse.ArgumentParser(description="Run study from config")
     parser.add_argument("config", type=Path, help="Path to study config YAML")
     parser.add_argument("--dry-run", action="store_true", help="Preview only")
-    
+
     args = parser.parse_args()
-    
+
     if not args.config.exists():
         print(f"Config not found: {args.config}")
         sys.exit(1)
-    
+
     config = load_config(args.config)
     run_study(config, dry_run=args.dry_run)
 

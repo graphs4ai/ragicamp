@@ -21,19 +21,19 @@ import pytest
 
 # Import RAGiCamp components
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.datasets.base import QAExample, QADataset
+from ragicamp.datasets.base import QADataset, QAExample
 from ragicamp.metrics.base import Metric
 from ragicamp.retrievers.base import Document
 
-
 # === Mock Model ===
+
 
 class MockLanguageModel:
     """Mock language model for testing.
-    
+
     Returns predictable responses based on configuration.
     """
-    
+
     def __init__(
         self,
         model_name: str = "mock_model",
@@ -44,7 +44,7 @@ class MockLanguageModel:
         self.default_response = default_response
         self.responses = responses or {}
         self.call_history: List[Dict[str, Any]] = []
-    
+
     def generate(
         self,
         prompt: str,
@@ -53,24 +53,26 @@ class MockLanguageModel:
         **kwargs,
     ) -> str:
         """Generate a mock response."""
-        self.call_history.append({
-            "prompt": prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            **kwargs,
-        })
-        
+        self.call_history.append(
+            {
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                **kwargs,
+            }
+        )
+
         # Check for specific responses
         for pattern, response in self.responses.items():
             if pattern in prompt:
                 return response
-        
+
         return self.default_response
-    
+
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Return mock embeddings."""
         return [[0.1, 0.2, 0.3, 0.4, 0.5] for _ in texts]
-    
+
     def count_tokens(self, text: str) -> int:
         """Approximate token count."""
         return len(text.split())
@@ -96,12 +98,13 @@ def mock_model_with_responses() -> MockLanguageModel:
 
 # === Mock Retriever ===
 
+
 class MockRetriever:
     """Mock retriever for testing.
-    
+
     Returns predefined documents or generates mock ones.
     """
-    
+
     def __init__(
         self,
         name: str = "mock_retriever",
@@ -110,7 +113,7 @@ class MockRetriever:
         self.name = name
         self.documents = documents or self._default_documents()
         self.call_history: List[Dict[str, Any]] = []
-    
+
     def _default_documents(self) -> List[Document]:
         """Create default mock documents."""
         return [
@@ -133,7 +136,7 @@ class MockRetriever:
                 score=0.82,
             ),
         ]
-    
+
     def retrieve(
         self,
         query: str,
@@ -141,13 +144,15 @@ class MockRetriever:
         **kwargs,
     ) -> List[Document]:
         """Retrieve mock documents."""
-        self.call_history.append({
-            "query": query,
-            "top_k": top_k,
-            **kwargs,
-        })
+        self.call_history.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                **kwargs,
+            }
+        )
         return self.documents[:top_k]
-    
+
     def index_documents(self, documents: List[Document]) -> None:
         """Store documents for retrieval."""
         self.documents = documents
@@ -160,6 +165,7 @@ def mock_retriever() -> MockRetriever:
 
 
 # === Sample Data ===
+
 
 @pytest.fixture
 def sample_qa_examples() -> List[QAExample]:
@@ -200,7 +206,7 @@ def sample_qa_examples() -> List[QAExample]:
 
 class MockQADataset(QADataset):
     """Mock QA dataset for testing."""
-    
+
     def __init__(
         self,
         examples: List[QAExample],
@@ -209,7 +215,7 @@ class MockQADataset(QADataset):
     ):
         super().__init__(name=name, split=split)
         self.examples = examples
-    
+
     def load(self) -> None:
         """Already loaded."""
         pass
@@ -229,12 +235,13 @@ def small_dataset(sample_qa_examples) -> MockQADataset:
 
 # === Mock Metrics ===
 
+
 class MockMetric(Metric):
     """Mock metric for testing.
-    
+
     Returns predefined scores or calculates simple metrics.
     """
-    
+
     def __init__(
         self,
         name: str = "mock_metric",
@@ -243,7 +250,7 @@ class MockMetric(Metric):
         super().__init__(name=name)
         self.fixed_score = fixed_score
         self.call_count = 0
-    
+
     def compute(
         self,
         predictions: List[str],
@@ -252,13 +259,14 @@ class MockMetric(Metric):
     ) -> Dict[str, float]:
         """Compute mock metric."""
         self.call_count += 1
-        
+
         if self.fixed_score is not None:
             return {self.name: self.fixed_score}
-        
+
         # Simple exact match calculation
         matches = sum(
-            1 for pred, refs in zip(predictions, references)
+            1
+            for pred, refs in zip(predictions, references)
             if pred.lower().strip() in [r.lower().strip() for r in refs]
         )
         score = matches / len(predictions) if predictions else 0.0
@@ -281,6 +289,7 @@ def mock_metrics() -> List[MockMetric]:
 
 
 # === Temporary Files ===
+
 
 @pytest.fixture
 def temp_dir():
@@ -308,12 +317,13 @@ def temp_config_file(temp_dir) -> Path:
         },
         "metrics": ["exact_match", "f1"],
     }
-    
+
     config_path = temp_dir / "test_config.yaml"
     import yaml
+
     with open(config_path, "w") as f:
         yaml.dump(config, f)
-    
+
     return config_path
 
 
@@ -327,49 +337,39 @@ def temp_predictions_file(temp_dir) -> Path:
         ],
         "metadata": {"model": "test", "timestamp": "2024-01-01"},
     }
-    
+
     pred_path = temp_dir / "predictions.json"
     with open(pred_path, "w") as f:
         json.dump(predictions, f)
-    
+
     return pred_path
 
 
 # === Test Utilities ===
 
+
 @pytest.fixture
 def assert_no_warnings():
     """Fixture to assert no warnings are raised."""
     import warnings
-    
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         yield w
-        
+
         if w:
             warning_messages = [str(warning.message) for warning in w]
             pytest.fail(f"Unexpected warnings: {warning_messages}")
 
 
-# === Skip Markers ===
-
-requires_gpu = pytest.mark.skipif(
-    not _has_cuda(),
-    reason="Test requires GPU"
-)
-
-requires_openai = pytest.mark.skipif(
-    not _has_openai_key(),
-    reason="Test requires OPENAI_API_KEY"
-)
-
-slow = pytest.mark.slow
+# === Helper Functions ===
 
 
 def _has_cuda() -> bool:
     """Check if CUDA is available."""
     try:
         import torch
+
         return torch.cuda.is_available()
     except ImportError:
         return False
@@ -378,10 +378,21 @@ def _has_cuda() -> bool:
 def _has_openai_key() -> bool:
     """Check if OpenAI API key is set."""
     import os
+
     return bool(os.environ.get("OPENAI_API_KEY"))
 
 
+# === Skip Markers ===
+
+requires_gpu = pytest.mark.skipif(not _has_cuda(), reason="Test requires GPU")
+
+requires_openai = pytest.mark.skipif(not _has_openai_key(), reason="Test requires OPENAI_API_KEY")
+
+slow = pytest.mark.slow
+
+
 # === Configure pytest ===
+
 
 def pytest_configure(config):
     """Configure pytest markers."""

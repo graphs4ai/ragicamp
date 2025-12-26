@@ -105,18 +105,23 @@ class EvaluationConfig(BaseModel):
     predictions_file: Optional[str] = Field(
         default=None, description="Path to predictions file (required for 'evaluate' mode)"
     )
-    
+
     # Checkpointing (existing)
-    checkpoint_every: Optional[int] = Field(default=None, description="Save checkpoint every N examples")
-    resume_from_checkpoint: bool = Field(default=False, description="Resume from checkpoint if exists")
+    checkpoint_every: Optional[int] = Field(
+        default=None, description="Save checkpoint every N examples"
+    )
+    resume_from_checkpoint: bool = Field(
+        default=False, description="Resume from checkpoint if exists"
+    )
     retry_failures: bool = Field(default=False, description="Retry failed examples on resume")
-    
+
     # State management (new)
-    save_state: bool = Field(default=True, description="Save experiment state for phase-level resumption")
+    save_state: bool = Field(
+        default=True, description="Save experiment state for phase-level resumption"
+    )
     state_file: Optional[str] = Field(default=None, description="Path to state file")
     force_rerun_phases: List[str] = Field(
-        default_factory=list,
-        description="List of phase names to force rerun (e.g., ['metrics'])"
+        default_factory=list, description="List of phase names to force rerun (e.g., ['metrics'])"
     )
 
     @validator("mode")
@@ -141,7 +146,7 @@ class EvaluationConfig(BaseModel):
 
 class MLflowConfig(BaseModel):
     """MLflow tracking configuration."""
-    
+
     enabled: bool = Field(default=True, description="Enable MLflow tracking")
     experiment_name: Optional[str] = Field(default=None, description="MLflow experiment name")
     tracking_uri: Optional[str] = Field(default=None, description="MLflow tracking URI")
@@ -180,18 +185,20 @@ class TrainingConfig(BaseModel):
 
 class OptunaConfig(BaseModel):
     """Optuna hyperparameter optimization configuration."""
-    
+
     enabled: bool = Field(default=False, description="Enable Optuna optimization")
     n_trials: int = Field(default=20, description="Number of optimization trials")
     study_name: Optional[str] = Field(default=None, description="Optuna study name")
     storage: Optional[str] = Field(default=None, description="Optuna storage URI (for persistence)")
-    direction: str = Field(default="maximize", description="Optimization direction (maximize/minimize)")
+    direction: str = Field(
+        default="maximize", description="Optimization direction (maximize/minimize)"
+    )
     metric_to_optimize: str = Field(default="f1", description="Metric name to optimize")
-    
+
     # Parameter search spaces (examples)
     search_params: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Parameter search spaces (e.g., {'top_k': [1, 20], 'temperature': [0.1, 2.0]})"
+        description="Parameter search spaces (e.g., {'top_k': [1, 20], 'temperature': [0.1, 2.0]})",
     )
 
 
@@ -218,7 +225,9 @@ class ExperimentConfig(BaseModel):
     )
     output: OutputConfig = Field(default_factory=OutputConfig, description="Output settings")
     training: Optional[TrainingConfig] = Field(default=None, description="Training settings")
-    mlflow: MLflowConfig = Field(default_factory=MLflowConfig, description="MLflow tracking settings")
+    mlflow: MLflowConfig = Field(
+        default_factory=MLflowConfig, description="MLflow tracking settings"
+    )
     optuna: Optional[OptunaConfig] = Field(default=None, description="Optuna optimization settings")
 
     @validator("agent")

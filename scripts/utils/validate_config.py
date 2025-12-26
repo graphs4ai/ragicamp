@@ -30,29 +30,21 @@ Examples:
   
   # Validate and show summary
   python validate_config.py config.yaml --verbose
-        """
+        """,
     )
-    
-    parser.add_argument(
-        "configs",
-        nargs="+",
-        help="Configuration file(s) to validate"
-    )
-    
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Show detailed information"
-    )
-    
+
+    parser.add_argument("configs", nargs="+", help="Configuration file(s) to validate")
+
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed information")
+
     args = parser.parse_args()
-    
+
     all_valid = True
     valid_count = 0
     invalid_count = 0
-    
+
     print(f"\n🔍 Validating {len(args.configs)} configuration file(s)...\n")
-    
+
     for config_path in args.configs:
         try:
             if ConfigLoader.validate_file(config_path):
@@ -66,15 +58,14 @@ Examples:
             print(f"✗ Error validating {config_path}: {e}\n")
             invalid_count += 1
             all_valid = False
-    
+
     # Summary
     print("=" * 70)
     print(f"Summary: {valid_count} valid, {invalid_count} invalid")
     print("=" * 70)
-    
+
     sys.exit(0 if all_valid else 1)
 
 
 if __name__ == "__main__":
     main()
-

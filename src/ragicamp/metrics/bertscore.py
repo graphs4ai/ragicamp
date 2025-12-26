@@ -14,7 +14,7 @@ from ragicamp.metrics.base import Metric
 
 class BERTScoreMetric(Metric):
     """BERTScore for semantic similarity evaluation.
-    
+
     Uses lazy loading - model is only loaded when compute() is called,
     and unloaded immediately after to free GPU memory.
     """
@@ -34,9 +34,10 @@ class BERTScoreMetric(Metric):
         """Load the BERTScore model (lazy loading)."""
         if self._scorer is not None:
             return
-            
+
         try:
             from bert_score import BERTScorer
+
             print(f"  📥 Loading BERTScore model: {self.model_type}")
             self._scorer = BERTScorer(model_type=self.model_type, lang="en")
         except ImportError:
@@ -49,15 +50,15 @@ class BERTScoreMetric(Metric):
         """Unload the BERTScore model to free GPU memory."""
         if self._scorer is None:
             return
-            
+
         import torch
-        
+
         # Delete the scorer and its model
-        if hasattr(self._scorer, 'model'):
+        if hasattr(self._scorer, "model"):
             del self._scorer.model
         del self._scorer
         self._scorer = None
-        
+
         # Force GPU memory cleanup
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -68,7 +69,7 @@ class BERTScoreMetric(Metric):
         self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
     ) -> Dict[str, float]:
         """Compute BERTScore.
-        
+
         Loads model, computes scores, then unloads to free GPU memory.
 
         Returns:
@@ -85,10 +86,10 @@ class BERTScoreMetric(Metric):
         try:
             # Load model (lazy)
             self._load_scorer()
-            
+
             # Compute BERTScore
             P, R, F1 = self._scorer.score(predictions, refs)
-            
+
             # Store per-item scores for detailed analysis
             self._last_scores = F1.tolist()
 
@@ -100,7 +101,7 @@ class BERTScoreMetric(Metric):
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
-    
+
     def get_per_item_scores(self) -> List[float]:
         """Get per-item F1 scores from last compute() call."""
-        return getattr(self, '_last_scores', [])
+        return getattr(self, "_last_scores", [])

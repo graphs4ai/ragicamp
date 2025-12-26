@@ -3,19 +3,19 @@
 .. deprecated::
     This module is deprecated. Use `ragicamp.checkpointing.ExperimentState`
     for experiment state management and checkpointing instead.
-    
+
     The ExperimentState class provides:
     - Phase-level checkpointing
     - Question-level checkpointing within phases
     - Per-metric checkpointing
     - Resume from any point
     - Config change detection
-    
+
     Example migration:
         # Old way
         manager = OutputManager()
         manager.save_experiment(config, results, exp_dir)
-        
+
         # New way
         from ragicamp.checkpointing import ExperimentState
         state = ExperimentState.load_or_create(path, name, phases, config)
@@ -62,7 +62,7 @@ class OutputManager:
 
         Args:
             base_dir: Base directory for all outputs
-        
+
         .. deprecated::
             Use `ragicamp.checkpointing.ExperimentState` instead.
         """

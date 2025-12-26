@@ -11,7 +11,7 @@ from ragicamp.models.base import LanguageModel
 
 class HuggingFaceModel(LanguageModel):
     """Language model implementation using HuggingFace transformers.
-    
+
     Includes proper resource management with unload() method to free GPU memory.
     """
 
@@ -52,13 +52,13 @@ class HuggingFaceModel(LanguageModel):
 
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
+
         # Set padding token if not defined (required for batch processing)
         # Many models like Llama don't have a pad token by default
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto" if self._use_quantization else None,
@@ -79,28 +79,28 @@ class HuggingFaceModel(LanguageModel):
 
     def unload(self) -> None:
         """Unload model and tokenizer to free GPU memory.
-        
+
         Call this when done with the model to release GPU resources
         before loading other heavy models (like BERTScore, BLEURT).
         """
         if not self._is_loaded:
             return
-            
+
         # Delete model
-        if hasattr(self, 'model') and self.model is not None:
+        if hasattr(self, "model") and self.model is not None:
             del self.model
             self.model = None
-            
+
         # Delete tokenizer
-        if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+        if hasattr(self, "tokenizer") and self.tokenizer is not None:
             del self.tokenizer
             self.tokenizer = None
-        
+
         # Force GPU memory cleanup
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
-        
+
         self._is_loaded = False
         print(f"🗑️  Model {self.model_name} unloaded from GPU")
 
@@ -122,12 +122,12 @@ class HuggingFaceModel(LanguageModel):
         prompts = prompt if is_batch else [prompt]
 
         # Tokenize - get the actual device from the model
-        if hasattr(self.model, 'device'):
+        if hasattr(self.model, "device"):
             target_device = self.model.device
         else:
             # For quantized models with device_map="auto", get first parameter's device
             target_device = next(self.model.parameters()).device
-        
+
         inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(
             target_device
         )

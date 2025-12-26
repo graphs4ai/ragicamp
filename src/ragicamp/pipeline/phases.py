@@ -12,10 +12,10 @@ checkpoint/resume support.
 Example:
     >>> from ragicamp.pipeline import GenerationPhase, MetricsPhase
     >>> from ragicamp.checkpointing import ExperimentState
-    >>> 
+    >>>
     >>> # Create state for checkpointing
     >>> state = ExperimentState.load_or_create(...)
-    >>> 
+    >>>
     >>> # Generation with question-level checkpoints
     >>> gen_phase = GenerationPhase(
     ...     model_factory=lambda: HuggingFaceModel("gemma-2b"),
@@ -23,7 +23,7 @@ Example:
     ...     checkpoint_every=10,  # Save every 10 questions
     ... )
     >>> result = gen_phase.run({"dataset": ds, "experiment_state": state})
-    >>> 
+    >>>
     >>> # Metrics with per-metric checkpoints
     >>> metrics_phase = MetricsPhase(metrics=[...])
     >>> result = metrics_phase.run({"predictions_file": ..., "experiment_state": state})
@@ -83,7 +83,7 @@ class GenerationPhase(Phase):
     2. Generates predictions for all questions (with checkpointing)
     3. Saves predictions to disk
     4. Unloads model to free memory
-    
+
     Supports resume from checkpoint if generation was interrupted.
     """
 
@@ -125,7 +125,7 @@ class GenerationPhase(Phase):
         dataset = inputs["dataset"]
         output_path = inputs.get("output_path", "outputs/predictions.json")
         state = inputs.get("experiment_state")
-        
+
         # Checkpoint file path
         checkpoint_path = Path(output_path).with_suffix(".checkpoint.json")
 
@@ -135,25 +135,25 @@ class GenerationPhase(Phase):
 
         examples = list(dataset)
         total_examples = len(examples)
-        
+
         # Check for resume
         predictions = []
         start_idx = 0
-        
+
         if state and state.can_resume_phase(self.name):
             start_idx = state.get_checkpoint_idx(self.name)
             checkpoint_file = state.get_checkpoint_file(self.name)
-            
+
             if checkpoint_file and Path(checkpoint_file).exists():
                 print(f"📂 Resuming from checkpoint: {start_idx}/{total_examples}")
                 with open(checkpoint_file, "r") as f:
                     checkpoint_data = json.load(f)
                     predictions = checkpoint_data.get("predictions", [])
-        
+
         # Update state
         if state:
             state.start_phase(self.name, total_items=total_examples)
-        
+
         agent_name = "unknown"
 
         # Use context manager for automatic cleanup
@@ -163,10 +163,14 @@ class GenerationPhase(Phase):
             agent_name = agent.name
 
             remaining = total_examples - start_idx
-            print(f"\n📝 Generating predictions: {start_idx}/{total_examples} done, {remaining} remaining...")
+            print(
+                f"\n📝 Generating predictions: {start_idx}/{total_examples} done, {remaining} remaining..."
+            )
 
             for i, example in enumerate(
-                tqdm(examples[start_idx:], desc="Generating", initial=start_idx, total=total_examples)
+                tqdm(
+                    examples[start_idx:], desc="Generating", initial=start_idx, total=total_examples
+                )
             ):
                 actual_idx = start_idx + i
 
@@ -192,26 +196,24 @@ class GenerationPhase(Phase):
                             "metadata": {"error": str(e)},
                         }
                     )
-                
+
                 # Save checkpoint
                 if (actual_idx + 1) % self.checkpoint_every == 0:
                     self._save_checkpoint(
-                        predictions, 
-                        checkpoint_path, 
-                        agent_name, 
+                        predictions,
+                        checkpoint_path,
+                        agent_name,
                         dataset.name,
                         actual_idx + 1,
                         total_examples,
                     )
-                    
+
                     if state:
                         state.update_phase_checkpoint(
-                            self.name, 
-                            actual_idx + 1, 
-                            str(checkpoint_path)
+                            self.name, actual_idx + 1, str(checkpoint_path)
                         )
                         state.save()
-                    
+
                     print(f"\n💾 Checkpoint saved: {actual_idx + 1}/{total_examples}")
 
         # Model is automatically unloaded here
@@ -235,12 +237,12 @@ class GenerationPhase(Phase):
         shutil.move(str(temp_path), output_path)
 
         print(f"✓ Predictions saved to: {output_path}")
-        
+
         # Update state
         if state:
             state.complete_phase(self.name, output_path=output_path)
             state.save()
-        
+
         # Clean up checkpoint file
         if checkpoint_path.exists():
             checkpoint_path.unlink()
@@ -250,10 +252,10 @@ class GenerationPhase(Phase):
             data={"predictions": predictions, "predictions_data": predictions_data},
             output_path=output_path,
         )
-    
+
     def _save_checkpoint(
-        self, 
-        predictions: List[Dict], 
+        self,
+        predictions: List[Dict],
         path: Path,
         agent_name: str,
         dataset_name: str,
@@ -269,7 +271,7 @@ class GenerationPhase(Phase):
             "timestamp": datetime.now().isoformat(),
             "predictions": predictions,
         }
-        
+
         temp_path = path.with_suffix(".tmp")
         with open(temp_path, "w") as f:
             json.dump(checkpoint_data, f, indent=2)
@@ -285,7 +287,7 @@ class MetricsPhase(Phase):
     3. Clears GPU memory between metrics
     4. Checkpoints after each metric
     5. Saves results
-    
+
     Supports resume: if interrupted, will skip already-computed metrics.
     """
 
@@ -319,7 +321,7 @@ class MetricsPhase(Phase):
             PhaseResult with metric scores
         """
         state = inputs.get("experiment_state")
-        
+
         print(f"\n{'='*60}")
         print(f"PHASE: {self.name.upper()}")
         print(f"{'='*60}")
@@ -343,14 +345,14 @@ class MetricsPhase(Phase):
 
         # Determine which metrics to run
         all_metric_names = [m.name for m in self.metrics]
-        
+
         if state:
             pending_metrics = state.get_pending_metrics(self.name, all_metric_names)
             completed_metrics = [m for m in all_metric_names if m not in pending_metrics]
-            
+
             if completed_metrics:
                 print(f"⏭️  Skipping completed metrics: {', '.join(completed_metrics)}")
-            
+
             state.start_phase(self.name, total_items=len(all_metric_names))
         else:
             pending_metrics = all_metric_names
@@ -361,13 +363,13 @@ class MetricsPhase(Phase):
         for metric in self.metrics:
             if metric.name not in pending_metrics:
                 continue
-                
+
             print(f"\n📊 Computing: {metric.name}")
             ResourceManager.print_memory_status(f"before {metric.name}")
 
             try:
                 # Check if metric supports async (AsyncAPIMetric)
-                if hasattr(metric, 'acompute'):
+                if hasattr(metric, "acompute"):
                     # Use async for API-based metrics
                     scores = asyncio.run(
                         metric.acompute(
@@ -387,7 +389,7 @@ class MetricsPhase(Phase):
 
                 results.update(scores)
                 print(f"  ✓ {metric.name}: {scores}")
-                
+
                 # Mark metric as complete
                 if state:
                     state.mark_metric_complete(self.name, metric.name)
@@ -411,12 +413,12 @@ class MetricsPhase(Phase):
         if output_path:
             output_dir = Path(output_path).parent
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             with open(output_path, "w") as f:
                 json.dump(results, f, indent=2)
-            
+
             print(f"✓ Results saved to: {output_path}")
-        
+
         # Update state
         if state:
             state.complete_phase(self.name, output_path=output_path, results=results)

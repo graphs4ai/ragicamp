@@ -30,7 +30,7 @@ Advanced Usage with Checkpointing:
     )
     orchestrator.add_phase(GenerationPhase(..., checkpoint_every=10))
     orchestrator.add_phase(MetricsPhase(...))
-    
+
     # Run - if interrupted, re-running will resume from checkpoint
     result = orchestrator.run(inputs)
 """

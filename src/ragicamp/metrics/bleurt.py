@@ -29,7 +29,7 @@ class BLEURTMetric(Metric):
 
     A learned metric for natural language generation that correlates well with
     human judgments.
-    
+
     Uses lazy loading - model is only loaded when compute() is called,
     and unloaded immediately after to free GPU memory.
 
@@ -54,7 +54,7 @@ class BLEURTMetric(Metric):
         """Load the BLEURT model (lazy loading)."""
         if self._scorer is not None:
             return
-            
+
         try:
             from bleurt import score as bleurt_score
         except ImportError:
@@ -64,7 +64,7 @@ class BLEURTMetric(Metric):
             )
 
         print(f"  📥 Loading BLEURT model: {self.checkpoint}")
-        
+
         # Try to load checkpoint, download if needed
         try:
             self._scorer = bleurt_score.BleurtScorer(self.checkpoint)
@@ -94,31 +94,33 @@ class BLEURTMetric(Metric):
         """Unload the BLEURT model to free GPU memory."""
         if self._scorer is None:
             return
-        
+
         # Delete the scorer
         del self._scorer
         self._scorer = None
-        
+
         # Clear TensorFlow session/memory
         try:
             import tensorflow as tf
+
             tf.keras.backend.clear_session()
             # Reset GPU memory
-            gpus = tf.config.list_physical_devices('GPU')
+            gpus = tf.config.list_physical_devices("GPU")
             if gpus:
                 for gpu in gpus:
                     tf.config.experimental.reset_memory_stats(gpu)
         except Exception:
             pass
-        
+
         # Also clear PyTorch if available
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
             pass
-        
+
         gc.collect()
         print(f"  🗑️  BLEURT model unloaded")
 
@@ -166,7 +168,7 @@ class BLEURTMetric(Metric):
         self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
     ) -> Dict[str, float]:
         """Compute BLEURT scores.
-        
+
         Loads model, computes scores, then unloads to free GPU memory.
 
         Returns:
@@ -183,10 +185,10 @@ class BLEURTMetric(Metric):
         try:
             # Load model (lazy)
             self._load_scorer()
-            
+
             # Compute BLEURT scores
             scores = self._scorer.score(references=refs, candidates=predictions)
-            
+
             # Store per-item scores for detailed analysis
             self._last_scores = list(scores)
 
@@ -195,7 +197,7 @@ class BLEURTMetric(Metric):
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
-    
+
     def get_per_item_scores(self) -> List[float]:
         """Get per-item scores from last compute() call."""
-        return getattr(self, '_last_scores', [])
+        return getattr(self, "_last_scores", [])

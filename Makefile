@@ -1,6 +1,6 @@
 # RAGiCamp Makefile
 
-.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full evaluate
+.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full evaluate compare
 
 # ============================================================================
 # HELP
@@ -23,10 +23,10 @@ help:
 	@echo "  make index-full           Build all indexes for baseline"
 	@echo "  make run-baseline-full    Run full baseline (100+ questions)"
 	@echo ""
-	@echo "Re-evaluate existing predictions:"
+	@echo "Re-evaluate and compare:"
 	@echo "  make evaluate PATH=outputs/simple METRICS=bertscore,bleurt"
-	@echo "  make evaluate PATH=outputs/simple METRICS=llm_judge"
-	@echo "  make evaluate PATH=outputs/simple METRICS=all"
+	@echo "  make compare PATH=outputs/simple              # Show comparison table"
+	@echo "  make compare PATH=outputs/simple --filter rag # Filter by type"
 	@echo ""
 	@echo "Other:"
 	@echo "  make download             Download datasets"
@@ -80,6 +80,10 @@ run-baseline-full:
 evaluate:
 	@echo "📊 Re-evaluating predictions..."
 	uv run python scripts/experiments/evaluate_predictions.py $(PATH) --metrics $(or $(METRICS),all)
+
+# Compare results in a table: make compare PATH=outputs/simple
+compare:
+	@uv run python scripts/experiments/compare_results.py $(or $(PATH),outputs/simple)
 
 # Examples:
 #   make evaluate PATH=outputs/simple_hf METRICS=bertscore
