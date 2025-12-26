@@ -88,6 +88,9 @@ class BERTScoreMetric(Metric):
             
             # Compute BERTScore
             P, R, F1 = self._scorer.score(predictions, refs)
+            
+            # Store per-item scores for detailed analysis
+            self._last_scores = F1.tolist()
 
             return {
                 "bertscore_precision": P.mean().item(),
@@ -97,3 +100,7 @@ class BERTScoreMetric(Metric):
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
+    
+    def get_per_item_scores(self) -> List[float]:
+        """Get per-item F1 scores from last compute() call."""
+        return getattr(self, '_last_scores', [])

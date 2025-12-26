@@ -186,9 +186,16 @@ class BLEURTMetric(Metric):
             
             # Compute BLEURT scores
             scores = self._scorer.score(references=refs, candidates=predictions)
+            
+            # Store per-item scores for detailed analysis
+            self._last_scores = list(scores)
 
             # Only return the mean score (not individual scores)
             return {"bleurt": float(sum(scores) / len(scores)) if scores else 0.0}
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
+    
+    def get_per_item_scores(self) -> List[float]:
+        """Get per-item scores from last compute() call."""
+        return getattr(self, '_last_scores', [])

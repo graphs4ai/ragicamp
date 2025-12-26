@@ -123,13 +123,12 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                 clear_gpu_memory()
                 from ragicamp.metrics import BERTScoreMetric
                 metric = BERTScoreMetric(model_type="microsoft/deberta-base-mnli")
-                # BERTScore returns per-item scores
                 full_result = metric.compute(preds, refs)
                 aggregated.update(full_result)
-                # Get per-question scores if available
-                if hasattr(metric, '_last_scores'):
-                    for i, score in enumerate(metric._last_scores):
-                        per_question[i]["bertscore"] = score
+                # Get per-question scores
+                item_scores = metric.get_per_item_scores()
+                for i, score in enumerate(item_scores):
+                    per_question[i]["bertscore_f1"] = score
                         
             elif m == "bleurt":
                 clear_gpu_memory()
@@ -137,10 +136,10 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                 metric = BLEURTMetric()
                 full_result = metric.compute(preds, refs)
                 aggregated.update(full_result)
-                # Get per-question scores if available
-                if hasattr(metric, '_last_scores'):
-                    for i, score in enumerate(metric._last_scores):
-                        per_question[i]["bleurt"] = score
+                # Get per-question scores
+                item_scores = metric.get_per_item_scores()
+                for i, score in enumerate(item_scores):
+                    per_question[i]["bleurt"] = score
                         
             elif m == "llm_judge":
                 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
