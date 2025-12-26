@@ -1,8 +1,8 @@
-# Baseline Study - Full comprehensive baseline experiments
-# Run: make run-study STUDY=baseline
+# Full Study - Complete baseline experiments
+# Run: make run-baseline-full
 
-name: baseline
-description: "Full baseline study for publication (100+ questions, all variations)"
+name: full
+description: "Full baseline study (100 questions, all variations)"
 
 # Full dataset or capped for initial runs
 num_questions: 100  # Set to null for full dataset

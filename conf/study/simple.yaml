@@ -1,8 +1,8 @@
-# Validation Study - Quick end-to-end pipeline test
-# Run: make run-study STUDY=validation
+# Simple Study - Quick dev/validation
+# Run: make run-baseline-simple
 
-name: validation
-description: "Quick pipeline validation (10 questions, minimal variations)"
+name: simple
+description: "Quick baseline for development (10 questions, minimal variations)"
 
 # Limit questions for speed
 num_questions: 10
