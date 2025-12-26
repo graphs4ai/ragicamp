@@ -153,8 +153,53 @@ def main():
     print(f"\nSaving retriever artifact...")
     artifact_path = retriever.save_index(args.artifact_name)
 
-    # Save corpus metadata
+    # Save comprehensive metadata for later analysis
+    from datetime import datetime
+    import json
+    
     corpus_info = corpus.get_info()
+    
+    full_metadata = {
+        "artifact_name": args.artifact_name,
+        "created_at": datetime.now().isoformat(),
+        
+        # Corpus info
+        "corpus": {
+            "name": args.corpus_name,
+            "source": args.corpus_source,
+            "version": args.corpus_version,
+            "raw_documents": len(raw_documents),
+            **corpus_info,
+        },
+        
+        # Embedding info
+        "embedding": {
+            "model": args.embedding_model,
+            "dimensions": retriever.embedding_dim,
+        },
+        
+        # Chunking info
+        "chunking": {
+            "enabled": args.chunk_strategy is not None,
+            "strategy": args.chunk_strategy,
+            "chunk_size": args.chunk_size,
+            "chunk_overlap": args.chunk_overlap,
+            "total_chunks": len(documents),
+            "avg_chunks_per_doc": len(documents) / len(raw_documents) if raw_documents else 0,
+        },
+        
+        # Index info
+        "index": {
+            "type": "faiss_flat",
+            "num_vectors": len(documents),
+        },
+    }
+    
+    metadata_path = Path(artifact_path) / "metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(full_metadata, f, indent=2)
+    
+    print(f"\n✓ Full metadata saved to: {metadata_path}")
     print(f"\n✓ Corpus info:")
     for key, value in corpus_info.items():
         print(f"  {key}: {value}")
