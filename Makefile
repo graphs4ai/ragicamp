@@ -15,8 +15,9 @@ help:
 	@echo "  make install              Install dependencies"
 	@echo ""
 	@echo "Quick Development (simple):"
-	@echo "  make index-simple         Build 1 small index (500 docs)"
-	@echo "  make run-baseline-simple  Run quick baseline (10 questions)"
+	@echo "  make index-simple            Build 1 small index (500 docs)"
+	@echo "  make run-baseline-simple     Run quick baseline (10 questions)"
+	@echo "  make run-baseline-simple-hf  HF models only, no OpenAI costs"
 	@echo ""
 	@echo "Full Experiments:"
 	@echo "  make index-full           Build all indexes for baseline"
@@ -49,6 +50,10 @@ index-simple:
 run-baseline-simple:
 	@echo "🚀 Running simple baseline (10 questions)..."
 	uv run python scripts/experiments/run_study.py conf/study/simple.yaml
+
+run-baseline-simple-hf:
+	@echo "🚀 Running simple baseline - HF only, no OpenAI (10 questions)..."
+	uv run python scripts/experiments/run_study.py conf/study/simple_hf.yaml
 
 # ============================================================================
 # FULL (production experiments)
