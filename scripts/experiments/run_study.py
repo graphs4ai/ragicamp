@@ -86,11 +86,16 @@ def clear_gpu_memory():
         pass
 
 
-def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Dict = None) -> Dict[str, float]:
-    """Compute metrics on predictions."""
+def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str], config: Dict = None) -> tuple:
+    """Compute metrics per question and aggregated.
+    
+    Returns:
+        Tuple of (aggregated_results, per_question_results)
+    """
     from ragicamp.metrics import ExactMatchMetric, F1Metric
     
-    results = {}
+    aggregated = {}
+    per_question = [{} for _ in predictions]
     
     preds = [p["prediction"] for p in predictions]
     refs = [p["expected_answers"] for p in predictions]
@@ -100,22 +105,43 @@ def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Di
         try:
             if m == "f1":
                 metric = F1Metric()
-                results.update(metric.compute(preds, refs))
+                # Compute per-question
+                for i, (pred, ref) in enumerate(zip(preds, refs)):
+                    score = metric.compute([pred], [ref])
+                    per_question[i]["f1"] = score.get("f1", 0)
+                # Aggregate
+                aggregated.update(metric.compute(preds, refs))
+                
             elif m == "exact_match":
                 metric = ExactMatchMetric()
-                results.update(metric.compute(preds, refs))
+                for i, (pred, ref) in enumerate(zip(preds, refs)):
+                    score = metric.compute([pred], [ref])
+                    per_question[i]["exact_match"] = score.get("exact_match", 0)
+                aggregated.update(metric.compute(preds, refs))
+                
             elif m == "bertscore":
-                # Clear GPU before loading BERTScore model
                 clear_gpu_memory()
                 from ragicamp.metrics import BERTScoreMetric
-                # Use smaller model to avoid OOM
                 metric = BERTScoreMetric(model_type="microsoft/deberta-base-mnli")
-                results.update(metric.compute(preds, refs))
+                # BERTScore returns per-item scores
+                full_result = metric.compute(preds, refs)
+                aggregated.update(full_result)
+                # Get per-question scores if available
+                if hasattr(metric, '_last_scores'):
+                    for i, score in enumerate(metric._last_scores):
+                        per_question[i]["bertscore"] = score
+                        
             elif m == "bleurt":
                 clear_gpu_memory()
                 from ragicamp.metrics import BLEURTMetric
                 metric = BLEURTMetric()
-                results.update(metric.compute(preds, refs))
+                full_result = metric.compute(preds, refs)
+                aggregated.update(full_result)
+                # Get per-question scores if available
+                if hasattr(metric, '_last_scores'):
+                    for i, score in enumerate(metric._last_scores):
+                        per_question[i]["bleurt"] = score
+                        
             elif m == "llm_judge":
                 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
                 judge_cfg = config.get("llm_judge", {}) if config else {}
@@ -124,20 +150,20 @@ def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Di
                     judge_model=judge_model,
                     judgment_type=judge_cfg.get("type", "binary"),
                 )
-                # Run async
                 import asyncio
                 loop = asyncio.new_event_loop()
                 metric_results = loop.run_until_complete(
                     metric.acompute(preds, refs, questions)
                 )
                 loop.close()
-                results.update(metric_results)
+                aggregated.update(metric_results)
+                
         except ImportError as e:
             print(f"  ⚠️ Skipping {m}: {e}")
         except Exception as e:
             print(f"  ⚠️ Error computing {m}: {e}")
     
-    return results
+    return aggregated, per_question
 
 
 def run_direct_experiment(
@@ -209,14 +235,18 @@ def run_direct_experiment(
         model.unload()
     clear_gpu_memory()
 
-    # Save predictions
+    # Compute metrics (per-question and aggregated)
+    results, per_question_metrics = compute_metrics_per_question(predictions, metric_names, config)
+    
+    # Merge per-question metrics into predictions
+    for i, pred in enumerate(predictions):
+        pred["metrics"] = per_question_metrics[i]
+
+    # Save predictions with per-question metrics
     with open(exp_dir / "predictions.json", "w") as f:
         json.dump({"predictions": predictions}, f, indent=2)
 
-    # Compute metrics
-    results = compute_metrics(predictions, metric_names, config)
-
-    # Save results
+    # Save aggregated results
     with open(exp_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2)
 
@@ -319,15 +349,20 @@ def run_rag_experiment(
     # Cleanup model
     if hasattr(model, 'unload'):
         model.unload()
+    clear_gpu_memory()
 
-    # Save predictions
+    # Compute metrics (per-question and aggregated)
+    results, per_question_metrics = compute_metrics_per_question(predictions, metric_names, config)
+    
+    # Merge per-question metrics into predictions
+    for i, pred in enumerate(predictions):
+        pred["metrics"] = per_question_metrics[i]
+
+    # Save predictions with per-question metrics
     with open(exp_dir / "predictions.json", "w") as f:
         json.dump({"predictions": predictions}, f, indent=2)
 
-    # Compute metrics
-    results = compute_metrics(predictions, metric_names, config)
-
-    # Save results
+    # Save aggregated results
     with open(exp_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2)
 
