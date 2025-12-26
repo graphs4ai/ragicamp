@@ -62,12 +62,11 @@ RAG_MODELS = [
     "llama3_8b",
 ]
 
-# Retrievers: embedding model × chunking strategy combinations
+# Retrievers: embedding model variations (all use recursive chunking)
 # These must be pre-built with: make index-all or make index-standard
 RAG_RETRIEVERS = [
-    "wiki_minilm_recursive",   # MiniLM + recursive chunking
-    "wiki_minilm_sentence",    # MiniLM + sentence chunking
-    "wiki_mpnet_recursive",    # MPNet + recursive chunking
+    "wiki_minilm_recursive",   # MiniLM (fast, 384 dims)
+    "wiki_mpnet_recursive",    # MPNet (better quality, 768 dims)
 ]
 
 RAG_TOP_K = [3, 5, 10]
