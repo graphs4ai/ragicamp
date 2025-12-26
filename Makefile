@@ -1,6 +1,6 @@
 # RAGiCamp Makefile
 
-.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full
+.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full evaluate
 
 # ============================================================================
 # HELP
@@ -22,6 +22,11 @@ help:
 	@echo "Full Experiments:"
 	@echo "  make index-full           Build all indexes for baseline"
 	@echo "  make run-baseline-full    Run full baseline (100+ questions)"
+	@echo ""
+	@echo "Re-evaluate existing predictions:"
+	@echo "  make evaluate PATH=outputs/simple METRICS=bertscore,bleurt"
+	@echo "  make evaluate PATH=outputs/simple METRICS=llm_judge"
+	@echo "  make evaluate PATH=outputs/simple METRICS=all"
 	@echo ""
 	@echo "Other:"
 	@echo "  make download             Download datasets"
@@ -66,6 +71,20 @@ index-full:
 run-baseline-full:
 	@echo "🚀 Running full baseline (100 questions, all variations)..."
 	uv run python scripts/experiments/run_study.py conf/study/full.yaml
+
+# ============================================================================
+# EVALUATION (re-run metrics on existing predictions)
+# ============================================================================
+
+# Re-evaluate with specific metrics: make evaluate PATH=outputs/simple METRICS=bertscore,bleurt
+evaluate:
+	@echo "📊 Re-evaluating predictions..."
+	uv run python scripts/experiments/evaluate_predictions.py $(PATH) --metrics $(or $(METRICS),all)
+
+# Examples:
+#   make evaluate PATH=outputs/simple_hf METRICS=bertscore
+#   make evaluate PATH=outputs/simple_hf/direct_hf_google_gemma2bit_default_nq METRICS=llm_judge
+#   make evaluate PATH=outputs/simple METRICS=all
 
 # ============================================================================
 # DEV
