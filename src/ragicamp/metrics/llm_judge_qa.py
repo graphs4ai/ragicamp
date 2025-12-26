@@ -75,26 +75,26 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         **kwargs: Any,
     ) -> Dict[str, float]:
         """Compute judgment for a single prediction-reference pair (async).
-        
+
         Args:
             prediction: Predicted answer
             reference: Reference answer(s)
             question: Question for context (highly recommended)
             **kwargs: Additional parameters
-            
+
         Returns:
             Dict with score and category info
         """
         # Handle multiple references
         refs = [reference] if isinstance(reference, str) else reference
-        
+
         # Create judgment prompt
         prompt = self._create_judgment_prompt(
             question=question,
             prediction=prediction,
             references=refs,
         )
-        
+
         # Call LLM asynchronously
         if hasattr(self.judge_model, 'agenerate_single'):
             judgment = await self.judge_model.agenerate_single(
@@ -110,10 +110,10 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
                 None,
                 lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
             )
-        
+
         # Extract categorical judgment
         category, score = self._extract_judgment(judgment)
-        
+
         return {
             "llm_judge_qa": score,
             f"llm_judge_qa_{category}": 1.0,  # For category counting
@@ -145,14 +145,14 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             "llm_judge_qa_correct": correct_count / total,
             "llm_judge_qa_incorrect": incorrect_count / total,
         }
-        
+
         # Add partial category for ternary
         if self.judgment_type == "ternary":
             partial_count = sum(
                 1 for r in results if r.get("llm_judge_qa_partially_correct", 0) > 0
             )
             aggregated["llm_judge_qa_partial"] = partial_count / total
-        
+
         return aggregated
 
     def _create_judgment_prompt(

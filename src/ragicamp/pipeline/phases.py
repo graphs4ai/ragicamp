@@ -169,7 +169,7 @@ class GenerationPhase(Phase):
                 tqdm(examples[start_idx:], desc="Generating", initial=start_idx, total=total_examples)
             ):
                 actual_idx = start_idx + i
-                
+
                 try:
                     response = agent.answer(example.question)
                     predictions.append(
@@ -405,7 +405,7 @@ class MetricsPhase(Phase):
         results["num_examples"] = len(predictions)
         results["agent_name"] = predictions_data.get("agent_name", "unknown")
         results["dataset_name"] = predictions_data.get("dataset_name", "unknown")
-        
+
         # Save results
         output_path = self.output_path
         if output_path:

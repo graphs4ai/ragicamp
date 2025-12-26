@@ -111,7 +111,23 @@ run:
 	uv run python -m ragicamp.cli.run $(ARGS)
 
 # ============================================================================
-# COMPREHENSIVE STUDY (NEW - 100 examples, MLflow, structured JSON)
+# PIPELINE VALIDATION (Test everything works end-to-end)
+# ============================================================================
+
+validate:
+	@echo "🔬 Full pipeline validation (50 questions, multiple variations)..."
+	uv run python scripts/experiments/validate_pipeline.py
+
+validate-quick:
+	@echo "🔬 Quick pipeline validation (10 questions, minimal variations)..."
+	uv run python scripts/experiments/validate_pipeline.py --quick
+
+validate-direct:
+	@echo "🔬 Validate DirectLLM only (no index needed)..."
+	uv run python scripts/experiments/validate_pipeline.py --skip-rag
+
+# ============================================================================
+# COMPREHENSIVE STUDY (100 examples, MLflow, structured JSON)
 # ============================================================================
 
 study-quick:
@@ -211,8 +227,8 @@ index:
 
 # Build multiple indexes for RAG study
 index-standard:
-	@echo "📚 Building standard indexes (4: 2 embeddings × 2 strategies)..."
-	@echo "   - MiniLM/MPNet × recursive/paragraph @ 512 chars"
+	@echo "📚 Building standard indexes (4: 2 embeddings × 2 chunk sizes)..."
+	@echo "   - MiniLM/MPNet × recursive @ 512/1024 chars"
 	uv run python scripts/data/build_all_indexes.py --standard
 
 index-extended:
@@ -227,7 +243,11 @@ index-all:
 	uv run python scripts/data/build_all_indexes.py --all
 
 index-test:
-	@echo "📚 Test index (100 docs only)..."
+	@echo "📚 Test indexes (2 variations, 500 docs for quick validation)..."
+	uv run python scripts/data/build_all_indexes.py --test --max-docs 500
+
+index-test-minimal:
+	@echo "📚 Minimal test index (1 index, 100 docs)..."
 	uv run python scripts/data/build_all_indexes.py --minimal --max-docs 100
 
 index-preview:
