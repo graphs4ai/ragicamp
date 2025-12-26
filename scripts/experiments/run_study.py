@@ -390,7 +390,7 @@ def run_rag_experiment(
 
 
 def compare_results(output_dir: Path) -> Dict:
-    """Generate comparison summary."""
+    """Generate comparison summary with all metrics."""
     results = []
     
     for exp_dir in output_dir.iterdir():
@@ -407,26 +407,65 @@ def compare_results(output_dir: Path) -> Dict:
     # Sort by F1
     results.sort(key=lambda x: x.get("results", {}).get("f1", 0), reverse=True)
     
-    print(f"\n{'='*60}")
-    print("Results Comparison")
-    print(f"{'='*60}")
-    print(f"{'Experiment':<45} {'F1':>8} {'EM':>8}")
-    print("-" * 65)
-    
+    # Collect all metric names
+    all_metrics = set()
     for r in results:
-        name = r["name"][:43]
-        f1 = r.get("results", {}).get("f1", 0) * 100
-        em = r.get("results", {}).get("exact_match", 0) * 100
-        print(f"{name:<45} {f1:>7.1f}% {em:>7.1f}%")
+        all_metrics.update(r.get("results", {}).keys())
+    
+    # Core metrics to show (in order)
+    core_metrics = ["f1", "exact_match", "bertscore_f1", "bleurt"]
+    display_metrics = [m for m in core_metrics if m in all_metrics]
+    
+    print(f"\n{'='*100}")
+    print("Results Comparison")
+    print(f"{'='*100}")
+    
+    # Header
+    header = f"{'Experiment':<50}"
+    for m in display_metrics:
+        header += f" {m[:10]:>10}"
+    print(header)
+    print("-" * 100)
+    
+    # Rows
+    for r in results:
+        name = r["name"]
+        # Shorten long names but keep meaningful parts
+        if len(name) > 48:
+            name = name[:45] + "..."
+        row = f"{name:<50}"
+        for m in display_metrics:
+            val = r.get("results", {}).get(m, 0) * 100
+            row += f" {val:>9.1f}%"
+        print(row)
+    
+    # Summary statistics
+    print("-" * 100)
+    print("\n📊 Summary:")
+    for m in display_metrics:
+        values = [r.get("results", {}).get(m, 0) for r in results]
+        avg = sum(values) / len(values) if values else 0
+        best = max(values) if values else 0
+        print(f"  {m}: avg={avg*100:.1f}%, best={best*100:.1f}%")
     
     comparison = {
         "experiments": results,
+        "metrics_computed": list(all_metrics),
         "best": results[0] if results else None,
+        "summary": {
+            m: {
+                "avg": sum(r.get("results", {}).get(m, 0) for r in results) / len(results),
+                "best": max(r.get("results", {}).get(m, 0) for r in results),
+            }
+            for m in all_metrics
+        },
         "timestamp": datetime.now().isoformat(),
     }
     
     with open(output_dir / "comparison.json", "w") as f:
         json.dump(comparison, f, indent=2)
+    
+    print(f"\n✓ Full comparison saved to: {output_dir / 'comparison.json'}")
     
     return comparison
 
