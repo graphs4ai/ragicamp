@@ -156,6 +156,10 @@ def compute_metrics_per_question(predictions: List[Dict], metric_names: List[str
                 )
                 loop.close()
                 aggregated.update(metric_results)
+                # Get per-question scores
+                item_scores = metric.get_per_item_scores()
+                for i, score in enumerate(item_scores):
+                    per_question[i]["llm_judge"] = score
                 
         except ImportError as e:
             print(f"  ⚠️ Skipping {m}: {e}")

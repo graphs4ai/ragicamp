@@ -134,8 +134,20 @@ class AsyncAPIMetric(Metric):
         else:
             results = await asyncio.gather(*tasks)
         
+        # Store per-item results for detailed analysis
+        self._last_results = results
+        
         # Aggregate results
         return self._aggregate_results(results)
+    
+    def get_per_item_scores(self) -> List[float]:
+        """Get per-item main scores from last compute() call."""
+        results = getattr(self, '_last_results', [])
+        return [r.get(self.name, 0.0) for r in results]
+    
+    def get_per_item_results(self) -> List[Dict[str, float]]:
+        """Get full per-item result dicts from last compute() call."""
+        return getattr(self, '_last_results', [])
     
     def _aggregate_results(self, results: List[Dict[str, float]]) -> Dict[str, float]:
         """Aggregate individual results into final metrics.
