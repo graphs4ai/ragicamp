@@ -32,23 +32,41 @@ def load_hydra_config(result_dir: Path) -> Dict[str, Any]:
     return {}
 
 
-def load_results(path: Path) -> Optional[Dict[str, Any]]:
-    """Load results from a JSON file."""
+def load_results(path: Path) -> Optional[List[Dict[str, Any]]]:
+    """Load results from a JSON file. Returns list of result dicts."""
     with open(path) as f:
         data = json.load(f)
+
+    # Handle comparison.json format (aggregated from run_study.py)
+    if "experiments" in data:
+        results = []
+        for exp in data["experiments"]:
+            metrics = exp.get("results", {})
+            results.append({
+                "path": str(path),
+                "name": exp.get("name", "?"),
+                "metrics": metrics,
+                "num_examples": exp.get("num_questions", "?"),
+                "dataset": exp.get("dataset", "?"),
+                "model": exp.get("model", "?").replace("openai:", "").replace("hf:", ""),
+                "prompt": exp.get("prompt", "?"),
+                "agent": exp.get("type", "?"),
+                "timestamp": exp.get("timestamp", "?"),
+            })
+        return results
 
     # Skip orchestration logs
     if "total_passed" in data and "results" in data:
         return None
 
-    # Extract metrics
+    # Extract metrics from results.json or legacy summary files
     metrics = {}
     if "overall_metrics" in data:
         for key, value in data["overall_metrics"].items():
             if isinstance(value, (int, float)) and key not in ["num_successful", "num_failures"]:
                 metrics[key] = value
 
-    for key in ["exact_match", "f1", "bertscore_f1", "bleurt", "llm_judge_qa"]:
+    for key in ["exact_match", "f1", "bertscore_f1", "bertscore_precision", "bertscore_recall", "bleurt", "llm_judge_qa"]:
         if key in data and key not in metrics:
             metrics[key] = data[key]
 
@@ -64,11 +82,11 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
     # Extract experiment parameters
     model_name = "?"
     prompt_style = "?"
+    dataset = "?"
 
     if hydra_config:
         model_cfg = hydra_config.get("model", {})
         model_name = model_cfg.get("model_name", "?")
-        # Shorten model name
         if "/" in model_name:
             model_name = model_name.split("/")[-1]
         if len(model_name) > 20:
@@ -77,26 +95,49 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
         prompt_cfg = hydra_config.get("prompt", {})
         prompt_style = prompt_cfg.get("style", "?")
     else:
-        # Fallback: try to parse agent_name for older runs
-        agent_name = data.get("agent_name", "")
-        if "gemma" in agent_name.lower():
-            model_name = "gemma-2b"
-        elif "llama" in agent_name.lower():
-            model_name = "llama3"
-        elif "phi" in agent_name.lower():
-            model_name = "phi3"
+        # Try to parse from metadata.json (new format)
+        metadata_path = path.parent / "metadata.json"
+        if metadata_path.exists():
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            model_name = metadata.get("model", "?").replace("openai:", "").replace("hf:", "")
+            prompt_style = metadata.get("prompt", "?")
+            dataset = metadata.get("dataset", "?")
+        else:
+            # Fallback: try to parse from directory name or agent_name
+            dir_name = path.parent.name
+            agent_name = data.get("agent_name", dir_name)
+            
+            if "gemma" in agent_name.lower():
+                model_name = "gemma-2b-it"
+            elif "llama" in agent_name.lower():
+                model_name = "llama3"
+            elif "phi" in agent_name.lower():
+                model_name = "phi3"
+            elif "gpt4o" in agent_name.lower() or "gpt-4o" in agent_name.lower():
+                model_name = "gpt-4o-mini"
+            
+            if "rag" in agent_name.lower():
+                prompt_style = "rag"
+            elif "default" in agent_name.lower():
+                prompt_style = "default"
+            elif "concise" in agent_name.lower():
+                prompt_style = "concise"
+            elif "detailed" in agent_name.lower():
+                prompt_style = "detailed"
+            
+            # Parse dataset from dir name
+            for ds in ["nq", "triviaqa", "hotpotqa"]:
+                if ds in agent_name.lower():
+                    dataset = ds
+                    break
 
-        if "rag" in agent_name.lower():
-            prompt_style = "rag"
-        elif "quick" in agent_name.lower():
-            prompt_style = "quick"
+    if dataset == "?":
+        dataset = data.get("dataset_name", "?")
 
-    dataset = data.get("dataset_name", "?")
-
-    # Build descriptive name
     name = f"{dataset[:8]}/{model_name[:12]}/{prompt_style}"
 
-    return {
+    return [{
         "path": str(path),
         "name": name,
         "metrics": metrics,
@@ -105,8 +146,8 @@ def load_results(path: Path) -> Optional[Dict[str, Any]]:
         "model": model_name,
         "prompt": prompt_style,
         "agent": data.get("agent_name", "?"),
-        "timestamp": path.parent.name,  # e.g., "14-30-05"
-    }
+        "timestamp": path.parent.name,
+    }]
 
 
 def find_result_files(base_path: Path, pattern: str = "*summary*.json") -> List[Path]:
@@ -115,10 +156,22 @@ def find_result_files(base_path: Path, pattern: str = "*summary*.json") -> List[
         return [base_path]
 
     files = []
+    
+    # First check for comparison.json (preferred - aggregated results)
+    comparison_file = base_path / "comparison.json"
+    if comparison_file.exists():
+        return [comparison_file]
+    
+    # Then look for results.json files (new format from run_study.py)
+    for f in base_path.rglob("results.json"):
+        files.append(f)
+    
+    # Also look for legacy summary files
     for f in base_path.rglob(pattern):
         if "baseline_study_summary" in f.name or "rag_baseline_study" in f.name:
             continue
-        files.append(f)
+        if f not in files:
+            files.append(f)
 
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -212,7 +265,8 @@ def main():
         try:
             r = load_results(path)
             if r:
-                results.append(r)
+                # load_results now returns a list
+                results.extend(r)
         except Exception as e:
             if args.all:
                 print(f"Warning: {path}: {e}")
