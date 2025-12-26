@@ -223,12 +223,14 @@ def run_rag_experiment(
     metric_names: List[str],
     output_dir: Path,
     config: Dict = None,
+    prompt_key: str = "default",
 ) -> Dict:
     """Run a single RAG experiment."""
     from ragicamp.agents import FixedRAGAgent
     from ragicamp.retrievers import DenseRetriever
 
-    exp_name = f"rag_{retriever_name}_k{top_k}_{dataset_name}"
+    model_short = model_spec.replace(":", "_").replace("/", "_").replace("-", "")
+    exp_name = f"rag_{model_short}_{retriever_name}_k{top_k}_{prompt_key}_{dataset_name}"
     exp_dir = output_dir / exp_name
     exp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -245,9 +247,22 @@ def run_rag_experiment(
     # Load retriever
     retriever = DenseRetriever.load_index(retriever_name)
 
-    # Create model and agent
+    # Create model and agent with prompt variation
     model = get_model(model_spec)
-    agent = FixedRAGAgent(name=exp_name, model=model, retriever=retriever, top_k=top_k)
+    
+    context_template = "Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+    if prompt_key == "concise":
+        context_template = "Context:\n{context}\n\nQ: {query}\nA:"
+    elif prompt_key == "detailed":
+        context_template = "Use the following context to answer the question thoroughly.\n\nContext:\n{context}\n\nQuestion: {query}\n\nProvide a detailed answer:"
+    
+    agent = FixedRAGAgent(
+        name=exp_name, 
+        model=model, 
+        retriever=retriever, 
+        top_k=top_k,
+        context_template=context_template,
+    )
 
     # Generate predictions
     predictions = []
@@ -295,6 +310,7 @@ def run_rag_experiment(
         "model": model_spec,
         "retriever": retriever_name,
         "top_k": top_k,
+        "prompt": prompt_key,
         "dataset": dataset_name,
         "num_questions": len(examples),
         "results": results,
@@ -384,6 +400,7 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
             len(rag_cfg.get("models", [])) *
             len(rag_cfg.get("retrievers", [])) *
             len(rag_cfg.get("top_k_values", [])) *
+            len(rag_cfg.get("prompts", ["default"])) *
             len(datasets)
         )
     
@@ -437,27 +454,31 @@ def run_study(config: Dict, dry_run: bool = False) -> None:
         print("Phase 2: RAG")
         print("-" * 40)
         
+        rag_prompts = rag_cfg.get("prompts", ["default"])
+        
         for model in rag_cfg.get("models", []):
             for retr in rag_cfg.get("retrievers", []):
                 for k in rag_cfg.get("top_k_values", []):
-                    for ds in datasets:
-                        try:
-                            result = run_rag_experiment(
-                                model_spec=model,
-                                retriever_name=retr,
-                                top_k=k,
-                                dataset_name=ds,
-                                num_questions=num_questions,
-                                metric_names=metrics,
-                                output_dir=output_dir,
-                                config=config,
-                            )
-                            all_results.append(result)
-                        except FileNotFoundError:
-                            print(f"⚠️  Index not found: {retr}")
-                            print("   Run: make index-simple")
-                        except Exception as e:
-                            print(f"❌ Failed: {e}")
+                    for prompt in rag_prompts:
+                        for ds in datasets:
+                            try:
+                                result = run_rag_experiment(
+                                    model_spec=model,
+                                    retriever_name=retr,
+                                    top_k=k,
+                                    dataset_name=ds,
+                                    num_questions=num_questions,
+                                    metric_names=metrics,
+                                    output_dir=output_dir,
+                                    config=config,
+                                    prompt_key=prompt,
+                                )
+                                all_results.append(result)
+                            except FileNotFoundError:
+                                print(f"⚠️  Index not found: {retr}")
+                                print("   Run: make index-simple")
+                            except Exception as e:
+                                print(f"❌ Failed: {e}")
     
     # Compare
     compare_results(output_dir)
