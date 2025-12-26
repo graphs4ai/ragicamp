@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional, Union
 if "MPLBACKEND" not in os.environ:
     os.environ["MPLBACKEND"] = "Agg"
 
+# Configure TensorFlow to use memory growth (don't allocate all GPU memory)
+# This MUST be done before importing TensorFlow
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+
 from ragicamp.metrics.base import Metric
 
 # Available BLEURT checkpoints (small ones for faster download/inference)
