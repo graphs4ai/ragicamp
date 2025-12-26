@@ -42,10 +42,10 @@ help:
 	@echo ""
 	@echo "📚 DATA & INDEXING"
 	@echo "  make download-all     Download datasets"
-	@echo "  make index            Build single index (minilm + recursive)"
-	@echo "  make index-minimal    Build 1 index (for quick testing)"
-	@echo "  make index-standard   Build 4 indexes (2 embeddings × 2 strategies)"
-	@echo "  make index-all        Build 9 indexes (3 embeddings × 3 strategies)"
+	@echo "  make index            Build 1 index (Simple Wiki + MiniLM)"
+	@echo "  make index-standard   Build 2 indexes (MiniLM + MPNet)"
+	@echo "  make index-extended   Build 6 indexes (3 embeddings × 2 chunk sizes)"
+	@echo "  make index-all        Build all (including full Wikipedia)"
 	@echo "  make index-preview    Preview index builds (dry-run)"
 	@echo "  make info             Show data info"
 	@echo ""
@@ -204,30 +204,22 @@ download-all:
 	@echo "📚 Downloading datasets..."
 	uv run python scripts/data/download.py --all
 
-# Single index (legacy)
+# Single index (quick setup)
 index:
-	@echo "📚 Building single index (minilm + recursive)..."
-	uv run python experiments/scripts/index_corpus.py \
-		--corpus-name wikipedia_simple \
-		--corpus-source wikimedia/wikipedia \
-		--corpus-version 20231101.simple \
-		--embedding-model all-MiniLM-L6-v2 \
-		--artifact-name wiki_minilm_recursive \
-		--chunk-strategy recursive \
-		--chunk-size 512 \
-		--chunk-overlap 50
-
-# Build multiple indexes for comprehensive RAG study
-index-minimal:
-	@echo "📚 Building minimal indexes (1 embedding × 1 strategy)..."
+	@echo "📚 Building single index (Simple Wiki + MiniLM + 512)..."
 	uv run python scripts/data/build_all_indexes.py --minimal
 
+# Build multiple indexes for RAG study
 index-standard:
-	@echo "📚 Building standard indexes (2 embeddings × 2 strategies)..."
+	@echo "📚 Building standard indexes (2: MiniLM + MPNet)..."
 	uv run python scripts/data/build_all_indexes.py --standard
 
+index-extended:
+	@echo "📚 Building extended indexes (6: all embeddings × 2 chunk sizes)..."
+	uv run python scripts/data/build_all_indexes.py --extended
+
 index-all:
-	@echo "📚 Building ALL indexes (3 embeddings × 3 strategies)..."
+	@echo "📚 Building ALL indexes (including full Wikipedia)..."
 	uv run python scripts/data/build_all_indexes.py --all
 
 index-test:

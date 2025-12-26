@@ -1,0 +1,8 @@
+# Dense Retriever: Simple Wikipedia + MPNet + 512 chunks
+# Higher quality embeddings (768 dims)
+
+type: dense
+name: simple_mpnet_512
+embedding_model: "all-mpnet-base-v2"
+index_type: flat
+artifact_path: simple_mpnet_512

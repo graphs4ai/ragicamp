@@ -18,7 +18,7 @@ defaults:
   - override /model: gemma_2b_4bit
   - override /dataset: nq
   - override /agent: fixed_rag
-  - override /retriever: wiki_minilm_recursive
+  - override /retriever: simple_minilm_512
   - override /metrics: study_core
   - override /evaluation: study_100
   - override /prompt: rag_concise
