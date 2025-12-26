@@ -121,9 +121,15 @@ class HuggingFaceModel(LanguageModel):
         is_batch = isinstance(prompt, list)
         prompts = prompt if is_batch else [prompt]
 
-        # Tokenize
+        # Tokenize - get the actual device from the model
+        if hasattr(self.model, 'device'):
+            target_device = self.model.device
+        else:
+            # For quantized models with device_map="auto", get first parameter's device
+            target_device = next(self.model.parameters()).device
+        
         inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(
-            self.device
+            target_device
         )
 
         # Generate

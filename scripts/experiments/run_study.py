@@ -67,6 +67,19 @@ def get_model(model_spec: str):
         raise ValueError(f"Unknown provider: {provider}")
 
 
+def clear_gpu_memory():
+    """Clear GPU memory before loading new models."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except ImportError:
+        pass
+
+
 def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Dict = None) -> Dict[str, float]:
     """Compute metrics on predictions."""
     from ragicamp.metrics import ExactMatchMetric, F1Metric
@@ -86,10 +99,14 @@ def compute_metrics(predictions: List[Dict], metric_names: List[str], config: Di
                 metric = ExactMatchMetric()
                 results.update(metric.compute(preds, refs))
             elif m == "bertscore":
+                # Clear GPU before loading BERTScore model
+                clear_gpu_memory()
                 from ragicamp.metrics import BERTScoreMetric
-                metric = BERTScoreMetric()
+                # Use smaller model to avoid OOM
+                metric = BERTScoreMetric(model_type="microsoft/deberta-base-mnli")
                 results.update(metric.compute(preds, refs))
             elif m == "bleurt":
+                clear_gpu_memory()
                 from ragicamp.metrics import BLEURTMetric
                 metric = BLEURTMetric()
                 results.update(metric.compute(preds, refs))
@@ -181,6 +198,7 @@ def run_direct_experiment(
     # Cleanup model (important for HF models)
     if hasattr(model, 'unload'):
         model.unload()
+    clear_gpu_memory()
 
     # Save predictions
     with open(exp_dir / "predictions.json", "w") as f:
