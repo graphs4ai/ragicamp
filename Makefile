@@ -73,6 +73,45 @@ run-baseline-full:
 	uv run python scripts/experiments/run_study.py conf/study/full.yaml
 
 # ============================================================================
+# COMPREHENSIVE BASELINE (all models, all datasets)
+# ============================================================================
+
+# Build all 6 indexes for comprehensive study
+index-comprehensive:
+	@echo "📚 Building comprehensive indexes (6 variations)..."
+	@echo "This will take 2-4 hours for English Wikipedia..."
+	uv run python scripts/data/build_all_indexes.py \
+		--corpora wiki_simple wiki_en \
+		--embeddings minilm mpnet e5 \
+		--chunk-configs recursive_512
+
+# Build just Simple Wikipedia indexes (faster, for testing)
+index-simple-wiki:
+	@echo "📚 Building Simple Wikipedia indexes (3 variations)..."
+	uv run python scripts/data/build_all_indexes.py \
+		--corpora wiki_simple \
+		--embeddings minilm mpnet e5 \
+		--chunk-configs recursive_512 recursive_1024
+
+# Run comprehensive baseline study
+run-comprehensive:
+	@echo "🚀 Running comprehensive baseline (full study)..."
+	@echo "This will take 10-20 hours with all models..."
+	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
+
+# Run just DirectLLM experiments (no RAG)
+run-comprehensive-direct:
+	@echo "🚀 Running DirectLLM experiments only..."
+	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml \
+		--override rag.enabled=false
+
+# Run just RAG experiments
+run-comprehensive-rag:
+	@echo "🚀 Running RAG experiments only..."
+	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml \
+		--override direct.enabled=false
+
+# ============================================================================
 # EVALUATION (re-run metrics on existing predictions)
 # ============================================================================
 
