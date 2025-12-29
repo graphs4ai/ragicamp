@@ -301,12 +301,17 @@ class Experiment:
         if checkpoint_path.exists():
             checkpoint_path.unlink()
 
-        logger.info(
-            "Done! F1=%.1f%% EM=%.1f%% (%.1fs)",
-            result.f1 * 100,
-            result.exact_match * 100,
-            duration,
-        )
+        # Build dynamic metrics summary
+        metrics_parts = []
+        for key, val in result.metrics.items():
+            if isinstance(val, float):
+                # Format as percentage for common metrics
+                if key in ("f1", "exact_match", "bertscore_f1", "bleurt", "llm_judge_qa"):
+                    metrics_parts.append(f"{key}={val*100:.1f}%")
+                else:
+                    metrics_parts.append(f"{key}={val:.3f}")
+        metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
+        logger.info("Done! %s (%.1fs)", metrics_str, duration)
 
         return result
 

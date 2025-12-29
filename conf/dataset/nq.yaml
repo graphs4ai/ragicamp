@@ -1,8 +1,0 @@
-# Natural Questions Dataset
-# Google's real user questions from Google Search
-
-name: natural_questions
-split: validation
-num_examples: 100
-filter_no_answer: true
-cache_dir: data/datasets

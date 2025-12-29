@@ -1,7 +1,0 @@
-# OpenAI GPT-4
-# Requires OPENAI_API_KEY environment variable
-
-type: openai
-model_name: "gpt-4o"
-temperature: 0.7
-max_tokens: 256

@@ -1,7 +1,0 @@
-# Sparse Retriever (BM25)
-# Traditional keyword-based retrieval
-
-type: sparse
-name: bm25_retriever
-algorithm: bm25
-artifact_path: wikipedia_small_chunked
