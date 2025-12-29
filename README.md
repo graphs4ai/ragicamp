@@ -1,300 +1,177 @@
-# RAGiCamp 🏕️
+# RAGiCamp
 
-A modular, production-ready framework for experimenting with Retrieval-Augmented Generation (RAG). Build, evaluate, and compare QA systems - from simple baselines to adaptive RL-based agents.
+A modular framework for experimenting with RAG (Retrieval-Augmented Generation) approaches.
 
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## Features
 
->**🎉 NEW!** Automatic checkpointing, memory-efficient evaluation, and RL training support! See **[WHATS_NEW.md](WHATS_NEW.md)**
+- **Unified Experiment API** - Single `Experiment` class for all evaluations
+- **Multiple Agents** - DirectLLM (no retrieval) and FixedRAG baselines
+- **Multiple Models** - HuggingFace and OpenAI model support
+- **Batch Processing** - Parallel answer generation for faster experiments
+- **Checkpointing** - Automatic save/resume for long experiments
+- **Comprehensive Metrics** - F1, Exact Match, BERTScore, BLEURT, LLM-as-judge
 
-## ✨ Key Features
-
-- 🛡️ **Robust Evaluation** - Automatic checkpointing, resume from failures, never lose progress
-- 💾 **Memory Efficient** - Automatic GPU memory management between generation and metrics
-- 🎯 **Multiple RAG Strategies** - DirectLLM baseline, FixedRAG, adaptive BanditRAG, and MDP-based agents
-- 📊 **Comprehensive Metrics** - Standard (EM, F1), semantic (BERTScore, BLEURT), and LLM-as-a-judge
-- ⚙️ **Config-Driven** - Run experiments by editing YAML configs, no code changes needed
-- 🔬 **Research-Ready** - Built-in RL training, policy optimization, experiment tracking
-
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-# Install dependencies
-make install
+# Install
+uv sync
 
-# Quick evaluation (10 examples)
-make eval-baseline-quick
+# Run a study
+uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
 
-# Full evaluation (100 examples)
-make eval-baseline-full
-
-# RAG with Wikipedia
-make index-wiki-small-chunked  # Index once
-make eval-rag-wiki-simple      # Then evaluate
-
-# See all commands
-make help
+# Or use the CLI
+uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
 ```
 
-## 💡 Evaluation Workflow
-
-### Simple (One Command)
-
-```bash
-# Everything in one go - with automatic checkpointing
-make eval-baseline-quick
-```
-
-### Advanced (Two-Phase for Large Runs)
-
-```yaml
-# Phase 1: Generate predictions (saved immediately)
-evaluation:
-  mode: generate
-  checkpoint_every: 10  # Save every 10 questions
-
-# Phase 2: Compute metrics separately (can retry if fails)
-evaluation:
-  mode: evaluate
-  predictions_file: "outputs/predictions_raw.json"
-```
-
-**Why two-phase:**
-- ✅ **Never lose progress** - Predictions saved before metrics
-- ✅ **Retry on failure** - If BERTScore/LLM judge fails, just run again
-- ✅ **Experiment freely** - Try different metrics on same predictions
-
-See **[Evaluation Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** for details.
-
-## 🎯 Config-Based Workflow ⭐
-
-```bash
-# Create from template
-make create-config OUTPUT=my_exp.yaml TYPE=baseline
-
-# Validate
-make validate-config CONFIG=my_exp.yaml
-
-# Run
-uv run python experiments/scripts/run_experiment.py \
-  --config my_exp.yaml
-```
-
-**Edit config to change everything:**
-```yaml
-agent:
-  type: fixed_rag  # or: direct_llm, bandit_rag, mdp_rag
-
-model:
-  model_name: "google/gemma-2-2b-it"
-  load_in_4bit: true
-
-retriever:
-  artifact_path: "wikipedia_simple_chunked_1024_overlap_128"
-
-dataset:
-  num_examples: 100
-
-metrics:
-  - exact_match
-  - f1
-  - bertscore
-```
-
-No code changes needed! ✅
-
-## 🏗️ Architecture
+## Project Structure
 
 ```
 ragicamp/
-├── src/ragicamp/           # Core framework
-│   ├── agents/             # RAG strategies (DirectLLM, FixedRAG, BanditRAG, MDPRAG)
-│   ├── models/             # LLM interfaces (HuggingFace, OpenAI)
-│   ├── retrievers/         # Retrieval systems (Dense, Sparse)
-│   ├── datasets/           # QA datasets (NQ, HotpotQA, TriviaQA)
-│   ├── metrics/            # Evaluation metrics
-│   ├── policies/           # Decision policies (Bandits, MDP)
-│   ├── training/           # Training utilities
-│   ├── evaluation/         # Evaluation utilities
-│   ├── config/             # Pydantic schemas & validation (NEW!)
-│   ├── factory.py          # Component instantiation (NEW!)
-│   ├── registry.py         # Component registration (NEW!)
-│   └── utils/              # Formatting, prompts, artifacts
-├── experiments/            # Configs and scripts
-├── scripts/                # CLI tools (validate, create configs)
-├── docs/                   # Documentation
-├── artifacts/              # Saved models and indices
-└── outputs/                # Evaluation results
+├── src/ragicamp/          # Core library
+│   ├── experiment.py      # Unified Experiment class
+│   ├── agents/            # RAG agents (DirectLLM, FixedRAG)
+│   ├── models/            # LLM backends (HuggingFace, OpenAI)
+│   ├── retrievers/        # Dense/Sparse retrieval
+│   ├── datasets/          # QA datasets (NQ, TriviaQA, HotpotQA)
+│   ├── metrics/           # Evaluation metrics
+│   ├── evaluation/        # Evaluator class
+│   └── cli/               # Command-line interface
+├── conf/                  # Configuration files
+│   ├── study/             # Study configs
+│   ├── model/             # Model configs
+│   └── retriever/         # Retriever configs
+├── scripts/               # Utility scripts
+│   └── experiments/       # Experiment runners
+├── artifacts/             # Saved indexes and models
+└── outputs/               # Experiment results
 ```
 
-### ✨ New in Latest Version
+## Running Experiments
 
-- **Type-Safe Configs**: Pydantic schemas with validation
-- **Component Factory**: Centralized component creation
-- **Registry System**: Easy extensibility for custom components
-- **Config Validation**: Catch errors before running experiments
-- **Better Imports**: Clean `from ragicamp.agents import DirectLLMAgent`
+### Using Python API
 
-## 🎯 Typical Workflow
+```python
+from ragicamp import Experiment, ComponentFactory
+from ragicamp.metrics import F1Metric, ExactMatchMetric
 
-### 1. Choose Your Approach
+# Create components
+model = ComponentFactory.create_model({
+    "type": "huggingface",
+    "model_name": "google/gemma-2b-it",
+    "load_in_4bit": True,
+})
 
-**Baseline (No RAG):**
-```bash
-make eval-baseline-quick  # DirectLLM agent
+agent = ComponentFactory.create_agent(
+    {"type": "direct_llm", "name": "baseline"},
+    model=model,
+)
+
+dataset = ComponentFactory.create_dataset({
+    "name": "natural_questions",
+    "split": "validation",
+    "num_examples": 100,
+})
+
+# Run experiment
+exp = Experiment(
+    name="my_experiment",
+    agent=agent,
+    dataset=dataset,
+    metrics=[F1Metric(), ExactMatchMetric()],
+)
+
+result = exp.run(batch_size=8, checkpoint_every=50)
+print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
 ```
 
-**With Retrieval:**
-```bash
-make index-wiki-small  # Index corpus (once)
-make eval-rag          # Evaluate with retrieval
+### Using Study Config
+
+```yaml
+# conf/study/my_study.yaml
+name: my_study
+description: "My experiment"
+num_questions: 100
+datasets: [nq, hotpotqa]
+
+direct:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+  prompts: [default, concise]
+  quantization: [4bit]
+
+metrics: [f1, exact_match]
+output_dir: outputs/my_study
 ```
-
-### 2. Select Metrics
-
-- **Fast & Free**: Exact Match, F1
-- **Semantic**: BERTScore, BLEURT
-- **High-Quality**: LLM-as-a-judge (requires OpenAI API key)
-
-### 3. Compare Results
-
-All evaluations save 3 JSON files:
-- `{dataset}_questions.json` - Questions (reusable)
-- `{agent}_predictions.json` - Per-question predictions & metrics
-- `{agent}_summary.json` - Overall metrics & statistics
-
-## 📚 Documentation
-
-| Guide | Description |
-|-------|-------------|
-| **[What's New](WHATS_NEW.md)** ⭐ | Latest features and improvements |
-| **[Changelog](CHANGELOG.md)** | Detailed version history |
-| **[Quick Reference](QUICK_REFERENCE.md)** | One-page command cheat sheet |
-| **[Documentation Index](docs/README.md)** | Complete documentation catalog |
-| **[Config Guide](docs/guides/CONFIG_BASED_EVALUATION.md)** | How to use config files |
-| **[Metrics Guide](docs/guides/METRICS.md)** | Choosing the right metrics |
-| **[LLM Judge Guide](docs/guides/LLM_JUDGE.md)** | Using GPT-4 for evaluation |
-| **[Architecture](docs/ARCHITECTURE.md)** | System design & components |
-| **[Agents Guide](docs/AGENTS.md)** | Understanding different agents |
-
-**📖 Navigation Tips:**
-- **New here?** Start with [Quick Reference](QUICK_REFERENCE.md) for commands, then [docs/](docs/README.md) for full docs
-- **Need help?** Check [docs/README.md](docs/README.md) - it's the complete documentation index
-- **Specific topic?** Browse [docs/guides/](docs/guides/) for focused guides on configs, metrics, LLM judge, etc.
-
-## 🛠️ Common Commands
-
-```bash
-# Setup
-make install                    # Install dependencies
-make setup                      # Full setup + verification
-
-# Quick Evaluation
-make eval-baseline-quick        # 10 examples, fast metrics
-make eval-baseline-full         # 100 examples, all metrics
-make eval-baseline-cpu          # CPU mode (slower)
-
-# With LLM Judge (requires OPENAI_API_KEY)
-make eval-with-llm-judge        # Binary correctness evaluation
-make eval-with-llm-judge-mini   # Budget version (GPT-4o-mini)
-
-# RAG Evaluation
-make index-wiki-small           # Index corpus (once)
-make eval-rag                   # Evaluate with retrieval
-
-# Configuration Management (NEW!)
-make validate-config CONFIG=my.yaml   # Validate a config file
-make validate-all-configs             # Validate all configs
-make create-config OUTPUT=my.yaml     # Create config template
-
-# Utilities
-make help                       # Show all commands
-make list-artifacts             # List saved models/indices
-
-# See 'make help' for complete list
-```
-
-## 🔬 What's Inside
-
-### Agents (Answer Generation)
-
-| Agent | Description | Best For |
-|-------|-------------|----------|
-| **DirectLLM** | No retrieval, direct LLM queries | Baseline, model capabilities |
-| **FixedRAG** | Standard RAG with fixed parameters | Production, most use cases |
-| **BanditRAG** | Learns optimal retrieval parameters | Adaptive systems, optimization |
-| **MDPRAG** | Multi-step reasoning with state | Complex reasoning, research |
-
-### Metrics (Evaluation)
-
-| Type | Metrics | Speed | Use Case |
-|------|---------|-------|----------|
-| **Standard** | Exact Match, F1 | ⚡ Fast | Baseline, development |
-| **Semantic** | BERTScore, BLEURT | 🐢 Slow | Research, publication |
-| **LLM Judge** | GPT-4 evaluation | 💰 Paid | High-quality labels, production monitoring |
-
-### Datasets
-
-- **Natural Questions** - Real Google search queries
-- **HotpotQA** - Multi-hop reasoning questions  
-- **TriviaQA** - Trivia questions from the web
-
-## 🎓 Use Cases
-
-- **Research**: Experiment with different RAG strategies, publish results
-- **Development**: Quickly prototype and evaluate QA systems
-- **Production**: Build and deploy RAG applications with saved artifacts
-- **Benchmarking**: Compare models and approaches systematically
-- **Learning**: Understand RAG, RL, and QA evaluation methods
-
-## 🧪 Testing
-
-RAGiCamp has comprehensive unit tests covering all core functionality:
 
 ```bash
-# Run all tests
-make test
-
-# Run specific test categories
-make test-two-phase      # Two-phase evaluation tests
-make test-checkpoint     # Checkpointing tests
-make test-config         # Config validation tests
-
-# Run with coverage
-make test-coverage
-
-# Fast tests only (skip slow ones)
-make test-fast
+uv run ragicamp run conf/study/my_study.yaml
 ```
 
-**Test Coverage:**
-- ✅ Two-phase evaluation system (generate → evaluate)
-- ✅ LLM judge checkpointing (resume from failures)
-- ✅ Config validation (all three modes)
-- ✅ Metrics computation (EM, F1, etc.)
-- ✅ Component factory
-- ✅ Agent functionality
+## CLI Commands
 
-See **[tests/README.md](tests/README.md)** for detailed testing guide.
+```bash
+# Run study
+ragicamp run <config.yaml> [--dry-run] [--skip-existing]
 
-## 🤝 Contributing
+# Build index
+ragicamp index --corpus simple --embedding minilm --chunk-size 512
 
-Contributions welcome! This is a research framework designed for experimentation.
+# Compare results
+ragicamp compare outputs/my_study/
 
-**Before contributing:**
-1. Run tests: `make test`
-2. Check coverage: `make test-coverage`
-3. Format code: `make format`
-4. Validate configs: `make validate-all-configs`
+# Compute metrics on predictions
+ragicamp evaluate predictions.json --metrics f1 exact_match
+```
 
-## 📄 License
+## Configuration
 
-MIT License - see LICENSE file for details
+### Study Config
 
-## 🙏 Acknowledgments
+| Field | Description | Default |
+|-------|-------------|---------|
+| `name` | Study name | required |
+| `num_questions` | Limit per dataset | null (all) |
+| `datasets` | List of datasets | `[nq]` |
+| `batch_size` | Batch size for inference | 8 |
+| `metrics` | Metrics to compute | `[f1, exact_match]` |
 
-Built with: [HuggingFace Transformers](https://huggingface.co/transformers) • [FAISS](https://github.com/facebookresearch/faiss) • [Sentence Transformers](https://www.sbert.net/) • [BERTScore](https://github.com/Tiiiger/bert_score) • [OpenAI](https://openai.com)
+### Model Spec Format
 
----
+- HuggingFace: `hf:google/gemma-2b-it`
+- OpenAI: `openai:gpt-4o-mini`
 
-**Ready to start?** → `make help` | **Questions?** → See [docs/](docs/) | **Quick test?** → `make eval-baseline-quick`
+### Quantization
+
+- `4bit` - 4-bit quantization (faster, less VRAM)
+- `8bit` - 8-bit quantization
+- `none` - Full precision
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Getting Started](docs/GETTING_STARTED.md)
+- [Agents Guide](docs/guides/AGENTS.md)
+- [Metrics Guide](docs/guides/METRICS.md)
+
+## Development
+
+```bash
+# Install dev dependencies
+uv sync --extra dev
+
+# Format code
+uv run black src/ tests/ scripts/
+uv run isort src/ tests/ scripts/
+
+# Run tests
+uv run pytest
+
+# Type check
+uv run mypy src/
+```
+
+## License
+
+MIT

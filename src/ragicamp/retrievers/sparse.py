@@ -25,9 +25,7 @@ class SparseRetriever(Retriever):
         """
         super().__init__(name, **kwargs)
 
-        self.vectorizer = TfidfVectorizer(
-            max_features=max_features, stop_words="english", **kwargs
-        )
+        self.vectorizer = TfidfVectorizer(max_features=max_features, stop_words="english", **kwargs)
         self.documents: List[Document] = []
         self.doc_vectors = None
 

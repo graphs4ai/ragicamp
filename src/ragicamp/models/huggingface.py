@@ -1,15 +1,22 @@
-"""HuggingFace model implementation."""
+"""HuggingFace model implementation with proper resource management."""
 
+import gc
 from typing import Any, List, Optional, Union
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
+
+logger = get_logger(__name__)
 
 
 class HuggingFaceModel(LanguageModel):
-    """Language model implementation using HuggingFace transformers."""
+    """Language model implementation using HuggingFace transformers.
+
+    Includes proper resource management with unload() method to free GPU memory.
+    """
 
     def __init__(
         self,
@@ -32,6 +39,7 @@ class HuggingFaceModel(LanguageModel):
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._use_quantization = load_in_8bit or load_in_4bit
+        self._is_loaded = False
 
         # Configure quantization using BitsAndBytesConfig (new API)
         quantization_config = None
@@ -47,6 +55,16 @@ class HuggingFaceModel(LanguageModel):
 
         # Load tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        # Set padding token if not defined (required for batch processing)
+        # Many models like Llama don't have a pad token by default
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
+        # Use left-padding for decoder-only models (required for correct generation)
+        self.tokenizer.padding_side = "left"
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto" if self._use_quantization else None,
@@ -63,6 +81,38 @@ class HuggingFaceModel(LanguageModel):
             self.model.gradient_checkpointing_enable()
 
         self.model.eval()
+        self._is_loaded = True
+
+    def unload(self) -> None:
+        """Unload model and tokenizer to free GPU memory.
+
+        Call this when done with the model to release GPU resources
+        before loading other heavy models (like BERTScore, BLEURT).
+        """
+        if not self._is_loaded:
+            return
+
+        # Delete model
+        if hasattr(self, "model") and self.model is not None:
+            del self.model
+            self.model = None
+
+        # Delete tokenizer
+        if hasattr(self, "tokenizer") and self.tokenizer is not None:
+            del self.tokenizer
+            self.tokenizer = None
+
+        # Force GPU memory cleanup
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        self._is_loaded = False
+        logger.info("Model %s unloaded from GPU", self.model_name)
+
+    def is_loaded(self) -> bool:
+        """Check if model is currently loaded."""
+        return self._is_loaded
 
     def generate(
         self,
@@ -77,9 +127,15 @@ class HuggingFaceModel(LanguageModel):
         is_batch = isinstance(prompt, list)
         prompts = prompt if is_batch else [prompt]
 
-        # Tokenize
+        # Tokenize - get the actual device from the model
+        if hasattr(self.model, "device"):
+            target_device = self.model.device
+        else:
+            # For quantized models with device_map="auto", get first parameter's device
+            target_device = next(self.model.parameters()).device
+
         inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(
-            self.device
+            target_device
         )
 
         # Generate
@@ -97,12 +153,23 @@ class HuggingFaceModel(LanguageModel):
         # Decode
         generated_texts = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
+        # Default stop sequences to prevent runaway generation
+        stop_sequences = stop or []
+        # Always stop at new questions or common continuation patterns
+        stop_sequences.extend(["\nQ:", "\nQuestion:", "\n\nQ:", "\n\nQuestion:", "\n\n\n"])
+
         # Remove input prompt from output
         results = []
         for prompt_text, generated in zip(prompts, generated_texts):
             # Remove the prompt from the generated text
             if generated.startswith(prompt_text):
                 generated = generated[len(prompt_text) :].strip()
+
+            # Truncate at stop sequences
+            for stop_seq in stop_sequences:
+                if stop_seq in generated:
+                    generated = generated.split(stop_seq)[0].strip()
+
             results.append(generated)
 
         return results if is_batch else results[0]

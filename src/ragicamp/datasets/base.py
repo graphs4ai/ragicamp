@@ -127,7 +127,9 @@ class QADataset(ABC):
         return filtered
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name='{self.name}', split='{self.split}', size={len(self)})"
+        return (
+            f"{self.__class__.__name__}(name='{self.name}', split='{self.split}', size={len(self)})"
+        )
 
     def get_cache_path(self) -> Path:
         """Get the path where this dataset should be cached.
@@ -166,8 +168,7 @@ class QADataset(ABC):
 
         # Prepare data to save
         data = {
-            "info": info
-            or {"dataset": self.name, "split": self.split, "size": len(self.examples)},
+            "info": info or {"dataset": self.name, "split": self.split, "size": len(self.examples)},
             "examples": examples_data,
         }
 

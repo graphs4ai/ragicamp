@@ -1,304 +1,194 @@
-"""Tests for LLM judge checkpointing system."""
+"""Tests for LLM judge async computation.
 
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, Mock
+Note: Checkpointing functionality was removed when LLMJudgeQAMetric
+was refactored to use AsyncAPIMetric base class with parallel async
+API calls. The new implementation handles errors gracefully per-item
+without checkpointing.
+"""
+
+import asyncio
+from typing import Any, Dict, List, Optional, Union
+from unittest.mock import AsyncMock
 
 import pytest
 
 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
 
 
-class MockJudgeModel:
-    """Mock LLM judge model for testing."""
+class MockAsyncJudgeModel:
+    """Mock async LLM judge model for testing."""
 
-    def __init__(self, fail_at_batch=None):
+    def __init__(self, responses: Optional[List[str]] = None):
         self.model_name = "mock_judge"
         self.call_count = 0
-        self.fail_at_batch = fail_at_batch
+        self.responses = responses or []
 
-    def generate(self, prompts, **kwargs):
-        """Generate mock judgments."""
+    async def agenerate_single(self, prompt: str, **kwargs) -> str:
+        """Generate mock judgment asynchronously."""
         self.call_count += 1
-
-        # Simulate failure at specific batch
-        if self.fail_at_batch is not None and self.call_count == self.fail_at_batch:
-            raise Exception("Simulated API failure (403)")
-
-        # Return mock judgments
-        if isinstance(prompts, list):
-            return [f"JUDGMENT: CORRECT\nThe answer is right." for _ in prompts]
+        if self.responses and self.call_count <= len(self.responses):
+            return self.responses[self.call_count - 1]
         return "JUDGMENT: CORRECT\nThe answer is right."
 
 
-class TestCheckpointSaving:
-    """Test checkpoint saving functionality."""
+class TestLLMJudgeQAMetric:
+    """Test LLM judge async computation."""
 
-    def test_checkpoint_created_on_failure(self):
-        """Test that checkpoint is created when LLM judge fails."""
-        judge_model = MockJudgeModel(fail_at_batch=3)  # Fail at 3rd batch
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=4)
+    def test_binary_judgment_correct(self):
+        """Test binary judgment returns correct score."""
+        judge_model = MockAsyncJudgeModel(responses=["JUDGMENT: CORRECT\nThe answer is accurate."])
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-        predictions = [f"Answer {i}" for i in range(16)]  # 4 batches of 4
-        references = [["Ref"] for _ in range(16)]
-        questions = [f"Q{i}" for i in range(16)]
+        results = metric.compute(
+            predictions=["Paris"],
+            references=[["Paris"]],
+            questions=["What is the capital of France?"],
+        )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
+        assert results["llm_judge_qa"] == 1.0
 
-            # Should fail at batch 3 but save checkpoint
-            with pytest.raises(Exception) as exc_info:
-                metric.compute(
-                    predictions=predictions,
-                    references=references,
-                    questions=questions,
-                    checkpoint_path=str(checkpoint_path),
-                )
+    def test_binary_judgment_incorrect(self):
+        """Test binary judgment returns incorrect score."""
+        judge_model = MockAsyncJudgeModel(responses=["JUDGMENT: INCORRECT\nThe answer is wrong."])
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-            assert "Simulated API failure" in str(exc_info.value)
+        results = metric.compute(
+            predictions=["London"],
+            references=[["Paris"]],
+            questions=["What is the capital of France?"],
+        )
 
-            # Checkpoint should exist
-            assert checkpoint_path.exists()
+        assert results["llm_judge_qa"] == 0.0
 
-            # Load and verify checkpoint
-            with open(checkpoint_path, "r") as f:
-                checkpoint_data = json.load(f)
+    def test_ternary_judgment_partial(self):
+        """Test ternary judgment returns partial score."""
+        judge_model = MockAsyncJudgeModel(
+            responses=["JUDGMENT: PARTIALLY_CORRECT\nClose but missing details."]
+        )
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="ternary")
 
-            assert "last_batch" in checkpoint_data
-            assert "cache" in checkpoint_data
-            assert checkpoint_data["judgment_type"] == "binary"
-            assert checkpoint_data["batch_size"] == 4
+        results = metric.compute(
+            predictions=["France"],
+            references=[["Paris, France"]],
+            questions=["Where is the Eiffel Tower?"],
+        )
 
-            # Should have cached judgments from batches 1 and 2
-            assert len(checkpoint_data["cache"]) > 0
+        assert results["llm_judge_qa"] == 0.5
 
-    def test_checkpoint_resume(self):
-        """Test resuming from checkpoint after failure."""
-        # First run: fail at batch 2
-        judge_model1 = MockJudgeModel(fail_at_batch=2)
-        metric1 = LLMJudgeQAMetric(judge_model=judge_model1, judgment_type="binary", batch_size=4)
+    def test_multiple_predictions(self):
+        """Test batch of predictions."""
+        judge_model = MockAsyncJudgeModel(
+            responses=[
+                "JUDGMENT: CORRECT\nRight.",
+                "JUDGMENT: INCORRECT\nWrong.",
+                "JUDGMENT: CORRECT\nRight.",
+            ]
+        )
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-        predictions = [f"Answer {i}" for i in range(12)]  # 3 batches
-        references = [["Ref"] for _ in range(12)]
-        questions = [f"Q{i}" for i in range(12)]
+        results = metric.compute(
+            predictions=["A", "B", "C"],
+            references=[["A"], ["X"], ["C"]],
+            questions=["Q1", "Q2", "Q3"],
+        )
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
+        # Average: (1.0 + 0.0 + 1.0) / 3 = 0.666...
+        assert abs(results["llm_judge_qa"] - 0.666) < 0.01
 
-            # First attempt - fails and saves checkpoint
-            with pytest.raises(Exception):
-                metric1.compute(
-                    predictions=predictions,
-                    references=references,
-                    questions=questions,
-                    checkpoint_path=str(checkpoint_path),
-                )
+    def test_error_handling_graceful(self):
+        """Test that errors are handled gracefully per-item."""
 
-            assert checkpoint_path.exists()
-            assert judge_model1.call_count == 2  # Called twice before failing
+        class FailingMockModel:
+            model_name = "failing_mock"
 
-            # Second attempt - resume from checkpoint
-            judge_model2 = MockJudgeModel()  # No failure this time
-            metric2 = LLMJudgeQAMetric(
-                judge_model=judge_model2, judgment_type="binary", batch_size=4
-            )
+            async def agenerate_single(self, prompt: str, **kwargs) -> str:
+                raise Exception("API Error")
 
-            results = metric2.compute(
-                predictions=predictions,
-                references=references,
-                questions=questions,
-                checkpoint_path=str(checkpoint_path),
-            )
+        metric = LLMJudgeQAMetric(
+            judge_model=FailingMockModel(),
+            judgment_type="binary",
+            show_progress=False,
+        )
 
-            # Should have resumed from batch 2 (skipped batch 0 and 1)
-            # Only batch 2 should be processed
-            assert judge_model2.call_count == 1  # Only called once for remaining batch
+        # Should not raise, but return error score
+        results = metric.compute(
+            predictions=["Answer"],
+            references=[["Ref"]],
+            questions=["Question"],
+        )
 
-            # Checkpoint should be deleted on success
-            assert not checkpoint_path.exists()
+        # Error should result in 0.0 score
+        assert results["llm_judge_qa"] == 0.0
 
-            # Results should be complete
-            assert "llm_judge_qa" in results
-            assert results["llm_judge_qa"] >= 0.0
+    def test_categories_tracked(self):
+        """Test that category proportions are tracked."""
+        judge_model = MockAsyncJudgeModel(
+            responses=[
+                "JUDGMENT: CORRECT",
+                "JUDGMENT: CORRECT",
+                "JUDGMENT: INCORRECT",
+            ]
+        )
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
+        results = metric.compute(
+            predictions=["A", "B", "C"],
+            references=[["A"], ["B"], ["C"]],
+            questions=["Q1", "Q2", "Q3"],
+        )
 
-class TestCheckpointContent:
-    """Test checkpoint content and structure."""
-
-    def test_checkpoint_saves_progress_every_5_batches(self):
-        """Test that checkpoint is saved every 5 batches."""
-        judge_model = MockJudgeModel()
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=4)
-
-        # Mock the _save_checkpoint method to track calls
-        save_calls = []
-        original_save = metric._save_checkpoint
-
-        def mock_save(checkpoint_path, last_batch):
-            save_calls.append(last_batch)
-            original_save(checkpoint_path, last_batch)
-
-        metric._save_checkpoint = mock_save
-
-        predictions = [f"Answer {i}" for i in range(40)]  # 10 batches
-        references = [["Ref"] for _ in range(40)]
-        questions = [f"Q{i}" for i in range(40)]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
-
-            results = metric.compute(
-                predictions=predictions,
-                references=references,
-                questions=questions,
-                checkpoint_path=str(checkpoint_path),
-            )
-
-            # Should save at batches 4, 9 (every 5 batches)
-            assert len(save_calls) >= 2
-
-    def test_checkpoint_cache_format(self):
-        """Test checkpoint cache key format."""
-        judge_model = MockJudgeModel(fail_at_batch=2)
-        # Use batch_size=2 with 10 predictions so we get to batch 2
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=2)
-
-        predictions = [f"Answer {i}" for i in range(10)]
-        references = [[f"Ref {i}"] for i in range(10)]
-        questions = [f"Q{i}" for i in range(10)]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
-
-            try:
-                metric.compute(
-                    predictions=predictions,
-                    references=references,
-                    questions=questions,
-                    checkpoint_path=str(checkpoint_path),
-                )
-            except Exception:
-                pass
-
-            # Check if checkpoint was created (should exist since we fail at batch 2)
-            if checkpoint_path.exists():
-                # Load checkpoint
-                with open(checkpoint_path, "r") as f:
-                    checkpoint_data = json.load(f)
-
-                # Cache keys should be in format: prediction:::reference:::question
-                cache_keys = list(checkpoint_data["cache"].keys())
-                if cache_keys:
-                    key = cache_keys[0]
-                    assert ":::" in key
-                    parts = key.split(":::")
-                    assert len(parts) == 3  # prediction, reference, question
+        # 2 correct, 1 incorrect
+        assert abs(results["llm_judge_qa_correct"] - 0.666) < 0.01
+        assert abs(results["llm_judge_qa_incorrect"] - 0.333) < 0.01
 
 
-class TestCheckpointCleanup:
-    """Test checkpoint cleanup after successful completion."""
+class TestJudgmentParsing:
+    """Test judgment text parsing."""
 
-    def test_checkpoint_deleted_on_success(self):
-        """Test that checkpoint is deleted after successful completion."""
-        judge_model = MockJudgeModel()
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=4)
+    def test_parse_correct(self):
+        """Test parsing CORRECT judgment."""
+        judge_model = MockAsyncJudgeModel()
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-        predictions = [f"Answer {i}" for i in range(8)]
-        references = [["Ref"] for _ in range(8)]
-        questions = [f"Q{i}" for i in range(8)]
+        category, score = metric._extract_judgment("JUDGMENT: CORRECT\nGood answer.")
+        assert category == "correct"
+        assert score == 1.0
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
+    def test_parse_incorrect(self):
+        """Test parsing INCORRECT judgment."""
+        judge_model = MockAsyncJudgeModel()
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-            # Create a dummy checkpoint file
-            checkpoint_path.write_text('{"test": "data"}')
-            assert checkpoint_path.exists()
+        category, score = metric._extract_judgment("JUDGMENT: INCORRECT\nBad answer.")
+        assert category == "incorrect"
+        assert score == 0.0
 
-            # Compute successfully
-            results = metric.compute(
-                predictions=predictions,
-                references=references,
-                questions=questions,
-                checkpoint_path=str(checkpoint_path),
-            )
+    def test_parse_partial_ternary(self):
+        """Test parsing PARTIALLY_CORRECT judgment in ternary mode."""
+        judge_model = MockAsyncJudgeModel()
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="ternary")
 
-            # Checkpoint should be cleaned up
-            assert not checkpoint_path.exists()
+        category, score = metric._extract_judgment("JUDGMENT: PARTIALLY_CORRECT")
+        assert category == "partially_correct"
+        assert score == 0.5
 
-    def test_no_checkpoint_file_on_first_run(self):
-        """Test that no checkpoint is needed on first successful run."""
-        judge_model = MockJudgeModel()
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=4)
+    def test_parse_partial_in_binary_mode(self):
+        """Test that partial is mapped to incorrect in binary mode."""
+        judge_model = MockAsyncJudgeModel()
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-        predictions = ["Answer 1", "Answer 2"]
-        references = [["Ref 1"], ["Ref 2"]]
-        questions = ["Q1", "Q2"]
+        category, score = metric._extract_judgment("JUDGMENT: PARTIALLY_CORRECT")
+        assert category == "incorrect"
+        assert score == 0.0
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
+    def test_parse_fallback_conservative(self):
+        """Test that unparseable text defaults to incorrect."""
+        judge_model = MockAsyncJudgeModel()
+        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary")
 
-            # First run - should succeed without checkpoint
-            results = metric.compute(
-                predictions=predictions,
-                references=references,
-                questions=questions,
-                checkpoint_path=str(checkpoint_path),
-            )
-
-            assert "llm_judge_qa" in results
-            # No checkpoint file should exist
-            assert not checkpoint_path.exists()
-
-
-class TestBinaryVsTernaryJudgment:
-    """Test binary vs ternary judgment types."""
-
-    def test_binary_judgment_checkpoint(self):
-        """Test checkpoint with binary judgment type."""
-        judge_model = MockJudgeModel(fail_at_batch=2)
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="binary", batch_size=2)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
-
-            try:
-                metric.compute(
-                    predictions=["A1", "A2", "A3", "A4"],
-                    references=[["R1"], ["R2"], ["R3"], ["R4"]],
-                    questions=["Q1", "Q2", "Q3", "Q4"],
-                    checkpoint_path=str(checkpoint_path),
-                )
-            except Exception:
-                pass
-
-            with open(checkpoint_path, "r") as f:
-                checkpoint_data = json.load(f)
-
-            assert checkpoint_data["judgment_type"] == "binary"
-
-    def test_ternary_judgment_checkpoint(self):
-        """Test checkpoint with ternary judgment type."""
-        judge_model = MockJudgeModel(fail_at_batch=2)
-        metric = LLMJudgeQAMetric(judge_model=judge_model, judgment_type="ternary", batch_size=2)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            checkpoint_path = Path(tmpdir) / "checkpoint.json"
-
-            try:
-                metric.compute(
-                    predictions=["A1", "A2", "A3", "A4"],
-                    references=[["R1"], ["R2"], ["R3"], ["R4"]],
-                    questions=["Q1", "Q2", "Q3", "Q4"],
-                    checkpoint_path=str(checkpoint_path),
-                )
-            except Exception:
-                pass
-
-            with open(checkpoint_path, "r") as f:
-                checkpoint_data = json.load(f)
-
-            assert checkpoint_data["judgment_type"] == "ternary"
+        category, score = metric._extract_judgment("Some random text without judgment")
+        assert category == "incorrect"
+        assert score == 0.0
 
 
 if __name__ == "__main__":

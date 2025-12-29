@@ -1,0 +1,20 @@
+# Baseline Study Metrics
+# Comprehensive metrics for thorough evaluation
+# Includes: token-based, semantic, and LLM-as-judge
+#
+# Note: Requires OPENAI_API_KEY for llm_judge
+
+metrics:
+  # Token-based (fast)
+  - exact_match
+  - f1
+  
+  # Semantic similarity (GPU, ~1min for 100 examples)
+  - bertscore
+  - bleurt
+  
+  # LLM-as-a-Judge (parallel API calls, ~30s for 100 examples)
+  - name: llm_judge_qa
+    params:
+      judgment_type: binary  # correct/incorrect
+      batch_size: 50         # Process 50 at a time (parallel)

@@ -1,5 +1,6 @@
 """Evaluation metrics for RAG systems."""
 
+from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.metrics.base import Metric
 
 # Import specific metrics (but handle import errors gracefully)
@@ -25,7 +26,7 @@ except ImportError:
     _has_bleurt = False
 
 try:
-    from ragicamp.metrics.llm_judge import LLMJudgeMetric
+    from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
 
     _has_llm_judge = True
 except ImportError:
@@ -45,7 +46,15 @@ try:
 except ImportError:
     _has_hallucination = False
 
-__all__ = ["Metric"]
+# Import Ragas adapter
+try:
+    from ragicamp.metrics.ragas_adapter import RagasMetricAdapter, create_ragas_metric
+
+    _has_ragas = True
+except ImportError:
+    _has_ragas = False
+
+__all__ = ["Metric", "AsyncAPIMetric"]
 
 # Add available metrics to __all__
 if _has_exact_match:
@@ -55,8 +64,10 @@ if _has_bertscore:
 if _has_bleurt:
     __all__.append("BLEURTMetric")
 if _has_llm_judge:
-    __all__.append("LLMJudgeMetric")
+    __all__.append("LLMJudgeQAMetric")
 if _has_faithfulness:
     __all__.append("FaithfulnessMetric")
 if _has_hallucination:
     __all__.append("HallucinationMetric")
+if _has_ragas:
+    __all__.extend(["RagasMetricAdapter", "create_ragas_metric"])

@@ -1,0 +1,8 @@
+# GPT-4.1 Judge
+# High-quality LLM judge (more accurate, slower)
+# Requires OPENAI_API_KEY
+
+type: openai
+model_name: "gpt-4.1"
+temperature: 0.0
+max_workers: 20

@@ -1,741 +1,425 @@
-# RAGiCamp Agents Guide
+# RAGiCamp Development Guidelines
 
-Complete guide to understanding, using, and creating RAG agents in RAGiCamp.
+This document describes the repository philosophy, patterns, and guidelines for both contributors and users.
 
-## 📖 Table of Contents
+## Repository Goals
 
-- [What Are Agents?](#what-are-agents)
-- [Agent Types](#agent-types)
-- [Using Agents](#using-agents)
-- [Saving & Loading](#saving--loading)
-- [Creating Custom Agents](#creating-custom-agents)
-- [Best Practices](#best-practices)
+RAGiCamp is a **research framework** for experimenting with RAG approaches. It prioritizes:
 
----
+1. **Simplicity** - Easy to understand, easy to modify
+2. **Modularity** - Components can be swapped independently
+3. **Reproducibility** - Experiments should be reproducible via configs
+4. **Performance** - Efficient use of GPU resources
 
-## What Are Agents?
+This is NOT:
+- A production RAG system
+- A comprehensive evaluation suite
+- An MLOps platform
 
-**Agents** are the core decision-making components in RAGiCamp. An agent takes a question and produces an answer, potentially using retrieval, intermediate reasoning steps, or adaptive strategies.
+## Architecture Overview
 
-### Base Abstraction
+```
+Experiment (with ExperimentCallbacks)
+    ├── Agent (DirectLLM or FixedRAG)
+    │   ├── Model (HuggingFace or OpenAI or custom)
+    │   └── Retriever (optional, for RAG)
+    ├── Dataset (NQ, TriviaQA, HotpotQA)
+    └── Metrics (F1, EM, BERTScore, etc.)
+```
 
-All agents inherit from `RAGAgent` and implement the `answer()` method:
+Key classes:
+- `Experiment` - Unified entry point for running evaluations
+- `ExperimentCallbacks` - Hooks for monitoring progress (on_batch_start, on_complete, etc.)
+- `Evaluator` - Lower-level evaluation with checkpointing
+- `ComponentFactory` - Creates components from config dicts (supports plugin registration)
 
+Interfaces:
+- All base classes in `{module}/base.py`
+- Protocols in `core/protocols.py` for duck-typing
+- Exception hierarchy: `RAGiCampError` → `ConfigError`, `ModelError`, `EvaluationError`
+
+## Do's
+
+### Code Style
+- **Keep functions small** - If a function is >50 lines, split it
+- **Use type hints** - All public APIs should have type hints
+- **Document with docstrings** - Google style, include examples
+- **Fail fast** - Validate inputs early, not deep in the stack
+
+### Patterns to Follow
+- **Factory pattern** - Use `ComponentFactory` for creating components from configs
+- **Dataclasses** - Use for simple data containers (e.g., `ExperimentResult`)
+- **Context managers** - Use for resource cleanup (GPU memory)
+- **Checkpointing** - Long operations should save progress
+
+### Adding New Components
+
+New Model (with plugin registration):
 ```python
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-
-class MyAgent(RAGAgent):
-    def answer(self, query: str, **kwargs) -> RAGResponse:
-        """Generate an answer for the given query."""
-        # Your implementation here
-        pass
-```
-
-### Key Concepts
-
-**RAGContext** - Information about the query:
-```python
-@dataclass
-class RAGContext:
-    query: str                           # The question
-    retrieved_docs: List[Document]       # Retrieved documents
-    intermediate_steps: List[Dict]       # Action history (for MDP)
-    metadata: Dict[str, Any]             # Additional info
-```
-
-**RAGResponse** - The agent's answer:
-```python
-@dataclass
-class RAGResponse:
-    answer: str                          # Generated answer
-    context: RAGContext                  # Context used
-    confidence: Optional[float]          # Confidence score
-    metadata: Dict[str, Any]             # Additional metadata
-```
-
----
-
-## Agent Types
-
-### 1. DirectLLMAgent
-
-**No retrieval** - Just queries the LLM directly.
-
-```python
-from ragicamp.agents.direct_llm import DirectLLMAgent
-from ragicamp.models.huggingface import HuggingFaceModel
-
-model = HuggingFaceModel('google/gemma-2-2b-it')
-agent = DirectLLMAgent(
-    name="baseline_llm",
-    model=model,
-    system_prompt="You are a helpful assistant."
-)
-
-response = agent.answer("What is Python?")
-print(response.answer)
-```
-
-**Use Cases:**
-- Baseline comparison
-- When documents aren't needed
-- Testing LLM capabilities
-
-**Training:** None required
-
----
-
-### 2. FixedRAGAgent
-
-**Standard RAG** with fixed parameters (most common for production).
-
-```python
-from ragicamp.agents.fixed_rag import FixedRAGAgent
-from ragicamp.models.huggingface import HuggingFaceModel
-from ragicamp.retrievers.dense import DenseRetriever
-
-# Create retriever
-retriever = DenseRetriever(
-    name="wiki_retriever",
-    embedding_model="all-MiniLM-L6-v2"
-)
-retriever.index_documents(documents)
-
-# Create agent
-model = HuggingFaceModel('google/gemma-2-2b-it')
-agent = FixedRAGAgent(
-    name="fixed_rag",
-    model=model,
-    retriever=retriever,
-    top_k=5,  # Retrieve 5 documents
-    system_prompt="Use the context to answer accurately."
-)
-
-response = agent.answer("What is machine learning?")
-print(response.answer)
-print(f"Used {len(response.context.retrieved_docs)} documents")
-```
-
-**Use Cases:**
-- Production RAG systems
-- When you know good parameters
-- Stable, reliable performance
-
-**Training:** Index documents once
-
-**Save/Load:**
-```python
-# Save
-agent.save("fixed_rag_v1", "wikipedia_nq_v1")
-
-# Load
-agent = FixedRAGAgent.load("fixed_rag_v1", model)
-```
-
----
-
-### 3. BanditRAGAgent
-
-**Adaptive RAG** - Uses bandit algorithms to learn optimal parameters.
-
-```python
-from ragicamp.agents.bandit_rag import BanditRAGAgent
-from ragicamp.policies.bandits import EpsilonGreedyBandit
-
-# Define possible actions (parameter configurations)
-actions = [
-    {"top_k": 3},
-    {"top_k": 5},
-    {"top_k": 10},
-]
-
-# Create policy
-policy = EpsilonGreedyBandit(
-    name="param_selector",
-    actions=actions,
-    epsilon=0.1  # 10% exploration
-)
-
-# Create agent
-agent = BanditRAGAgent(
-    name="bandit_rag",
-    model=model,
-    retriever=retriever,
-    policy=policy
-)
-
-# Use - policy selects best top_k automatically
-response = agent.answer("What is deep learning?")
-
-# Update policy based on reward
-reward = compute_reward(response.answer, gold_answer)
-agent.update_policy(query, params, reward)
-```
-
-**Use Cases:**
-- Optimizing retrieval parameters
-- A/B testing different strategies
-- Learning from user feedback
-
-**Training:** 
-1. Index documents
-2. Run training loop with rewards
-3. Policy learns optimal parameters
-
----
-
-### 4. MDPRAGAgent
-
-**Sequential decision-making** - Takes multiple steps to answer.
-
-```python
-from ragicamp.agents.mdp_rag import MDPRAGAgent
-from ragicamp.policies.mdp import QLearningMDPPolicy
-
-# Create policy
-policy = QLearningMDPPolicy(
-    name="mdp_policy",
-    action_types=["retrieve", "reformulate", "generate"],
-    learning_rate=0.1,
-    epsilon=0.1
-)
-
-# Create agent
-agent = MDPRAGAgent(
-    name="mdp_rag",
-    model=model,
-    retriever=retriever,
-    policy=policy,
-    max_steps=5  # Max 5 steps before forcing answer
-)
-
-# Use - agent decides sequence of actions
-response = agent.answer("Complex multi-hop question?")
-
-# See what it did
-for step in response.context.intermediate_steps:
-    print(f"Step {step['step']}: {step['action_type']}")
-```
-
-**Actions:**
-- `retrieve` - Get more documents
-- `reformulate` - Rephrase query
-- `generate` - Produce answer
-
-**Use Cases:**
-- Complex reasoning tasks
-- Multi-hop questions
-- When simple retrieval isn't enough
-
-**Training:**
-1. Index documents
-2. Run episodes with reward feedback
-3. Policy learns action sequences
-
----
-
-## Using Agents
-
-### Basic Usage Pattern
-
-```python
-# 1. Create/load agent
-agent = FixedRAGAgent.load("fixed_rag_v1", model)
-
-# 2. Answer single question
-response = agent.answer("What is RAG?")
-print(response.answer)
-
-# 3. Batch questions
-questions = ["Q1?", "Q2?", "Q3?"]
-for q in questions:
-    response = agent.answer(q)
-    print(f"Q: {q}\nA: {response.answer}\n")
-```
-
-### With Evaluation
-
-```python
-from ragicamp.evaluation.evaluator import Evaluator
-from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
-
-evaluator = Evaluator(
-    agent=agent,
-    dataset=dataset,
-    metrics=[ExactMatchMetric(), F1Metric()]
-)
-
-results = evaluator.evaluate(
-    num_examples=100,
-    save_predictions=True,
-    output_path="outputs/results.json"
-)
-
-print(f"Exact Match: {results['exact_match']:.4f}")
-print(f"F1 Score: {results['f1']:.4f}")
-```
-
-### With Training (Adaptive Agents)
-
-```python
-from ragicamp.training.trainer import Trainer
-
-trainer = Trainer(
-    agent=bandit_agent,
-    dataset=train_dataset,
-    metrics=[F1Metric()],
-    reward_metric="f1"  # Use F1 as reward
-)
-
-trainer.train(
-    num_epochs=1,
-    eval_interval=100
-)
-
-# Policy is now trained!
-# Save for later use
-bandit_agent.policy.save("trained_policy.json")
-```
-
----
-
-## Saving & Loading
-
-### Why Save/Load?
-
-- **Train once, use forever** - No need to recompute embeddings
-- **Share artifacts** - Collaborate across team
-- **Version control** - Track different model versions
-- **Production ready** - Fast startup, no training overhead
-
-### Workflow
-
-```python
-# ============================================
-# TRAINING (do once)
-# ============================================
-
-# 1. Index documents
-retriever = DenseRetriever(name="retriever", embedding_model="...")
-retriever.index_documents(documents)
-retriever.save_index("wikipedia_nq_v1")
-
-# 2. Create and save agent
-agent = FixedRAGAgent(name="agent", model=None, retriever=retriever, top_k=5)
-agent.save("fixed_rag_v1", "wikipedia_nq_v1")
-
-# ============================================
-# INFERENCE (use many times)
-# ============================================
-
-# Load model at runtime
-model = HuggingFaceModel('google/gemma-2-2b-it')
-
-# Load agent (automatically loads retriever)
-agent = FixedRAGAgent.load("fixed_rag_v1", model)
-
-# Use immediately
-response = agent.answer("Question?")
-```
-
-### Artifact Structure
-
-```
-artifacts/
-├── retrievers/
-│   └── wikipedia_nq_v1/
-│       ├── index.faiss        # Vector index
-│       ├── documents.pkl      # Document store
-│       └── config.json        # Metadata
-└── agents/
-    └── fixed_rag_v1/
-        └── config.json        # Agent config
-```
-
-### CLI Training
-
-```bash
-# Quick test (1000 docs)
-make train-fixed-rag-small
-
-# Full training
-make train-fixed-rag
-
-# List what you have
-make list-artifacts
-
-# Outputs:
-# Retrievers:
-#   wikipedia_nq_v1
-#   wikipedia_nq_small
-# Agents:
-#   fixed_rag_v1
-#   fixed_rag_small
-```
-
----
-
-## Creating Custom Agents
-
-### Minimal Example
-
-```python
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from ragicamp import ComponentFactory
 from ragicamp.models.base import LanguageModel
 
-class MyCustomAgent(RAGAgent):
-    def __init__(self, name: str, model: LanguageModel, **kwargs):
-        super().__init__(name, **kwargs)
-        self.model = model
+@ComponentFactory.register_model("anthropic")
+class AnthropicModel(LanguageModel):
+    def generate(self, prompt: str, **kwargs) -> str:
+        ...
     
-    def answer(self, query: str, **kwargs) -> RAGResponse:
-        # Your custom logic here
-        context = RAGContext(query=query)
-        
-        # Do something interesting
-        answer = self.model.generate(f"Answer: {query}")
-        
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            metadata={"agent_type": "custom"}
-        )
+    def unload(self) -> None:
+        # Clean up GPU memory
+        ...
+
+# Now usable in configs: {"type": "anthropic", "model_name": "claude-3"}
 ```
 
-### With Retrieval
-
+New Metric:
 ```python
-from ragicamp.retrievers.base import Retriever
-from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
-
-class MyRAGAgent(RAGAgent):
-    def __init__(
-        self,
-        name: str,
-        model: LanguageModel,
-        retriever: Retriever,
-        **kwargs
-    ):
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.retriever = retriever
-        self.prompt_builder = PromptBuilder.create_default()
+class MyMetric(Metric):
+    @property
+    def name(self) -> str:
+        return "my_metric"
     
-    def answer(self, query: str, **kwargs) -> RAGResponse:
-        # Retrieve documents
-        docs = self.retriever.retrieve(query, top_k=5)
-        
-        # Create context
-        context = RAGContext(query=query, retrieved_docs=docs)
-        
-        # Format context
-        context_text = ContextFormatter.format_numbered(docs)
-        
-        # Build prompt
-        prompt = self.prompt_builder.build_prompt(query, context_text)
-        
-        # Generate
-        answer = self.model.generate(prompt, **kwargs)
-        
-        return RAGResponse(answer=answer, context=context)
+    def compute(self, predictions: List[str], references: List[Any]) -> Dict[str, float]:
+        ...
 ```
 
-### With Custom State
-
+New Dataset:
 ```python
-class StatefulAgent(RAGAgent):
-    def __init__(self, name: str, model: LanguageModel):
-        super().__init__(name)
-        self.model = model
-        self.conversation_history = []  # Maintain state
-    
-    def answer(self, query: str, **kwargs) -> RAGResponse:
-        # Add to history
-        self.conversation_history.append(query)
-        
-        # Use history in prompt
-        history_text = "\n".join(self.conversation_history[-5:])  # Last 5
-        prompt = f"History:\n{history_text}\n\nCurrent: {query}\n\nAnswer:"
-        
-        answer = self.model.generate(prompt)
-        
-        return RAGResponse(
-            answer=answer,
-            context=RAGContext(
-                query=query,
-                metadata={"history_length": len(self.conversation_history)}
-            )
-        )
-    
-    def reset(self):
-        """Clear conversation history."""
-        self.conversation_history = []
+class MyDataset(QADataset):
+    def load(self) -> None:
+        # Load data into self.examples
+        ...
 ```
 
----
+### Using Callbacks for Monitoring
 
-## Best Practices
-
-### 1. Use Utilities
-
-✅ **DO** - Use formatting and prompt utilities:
 ```python
-from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
+from ragicamp import Experiment, ExperimentCallbacks
 
-context_text = ContextFormatter.format_numbered(docs)
-prompt = PromptBuilder.create_default().build_prompt(query, context_text)
-```
-
-❌ **DON'T** - Duplicate formatting logic:
-```python
-# Don't reimplement this in every agent
-context_text = "\n\n".join([f"[{i}] {doc.text}" for i, doc in enumerate(docs, 1)])
-```
-
-### 2. Return Proper Types
-
-✅ **DO** - Return RAGResponse with context:
-```python
-def answer(self, query: str, **kwargs) -> RAGResponse:
-    context = RAGContext(query=query, retrieved_docs=docs)
-    return RAGResponse(answer=answer, context=context)
-```
-
-❌ **DON'T** - Return just strings:
-```python
-def answer(self, query: str) -> str:  # ❌ Wrong type
-    return "answer"  # ❌ No context
-```
-
-### 3. Use Type Hints
-
-✅ **DO**:
-```python
-from typing import Any
-from ragicamp.retrievers.base import Document
-
-def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-    docs: List[Document] = self.retriever.retrieve(query)
-```
-
-### 4. Document Metadata
-
-✅ **DO** - Include useful metadata:
-```python
-return RAGResponse(
-    answer=answer,
-    context=context,
-    metadata={
-        "agent_type": "my_custom_agent",
-        "num_docs_used": len(docs),
-        "retrieval_time": elapsed_time,
-        "model_name": self.model.model_name
-    }
+callbacks = ExperimentCallbacks(
+    on_batch_start=lambda i, n: print(f"Batch {i}/{n}"),
+    on_complete=lambda r: send_slack_notification(f"Done! F1={r.f1:.3f}"),
 )
+
+result = exp.run(batch_size=8, callbacks=callbacks)
 ```
 
-### 5. Implement Save/Load
+### Configuration
+- **YAML for study configs** - Human readable, easy to version control
+- **Dict for component configs** - Passed to factories
+- **Use defaults** - Components should work with minimal config
 
-If your agent has configuration (not models), implement save/load:
+## Don'ts
+
+### Anti-patterns to Avoid
+
+1. **Don't over-abstract**
+   ```python
+   # Bad: AbstractFactoryBuilder pattern
+   # Good: Simple function that creates a thing
+   ```
+
+2. **Don't catch broad exceptions**
+   ```python
+   # Bad
+   except Exception as e:
+       print(f"Error: {e}")
+   
+   # Good
+   except FileNotFoundError:
+       logger.error("Index not found: %s", path)
+       raise
+   ```
+
+3. **Don't add dependencies for small features**
+   ```python
+   # Bad: Add rich for slightly nicer progress bars
+   # Good: Use tqdm which is already a dependency
+   ```
+
+4. **Don't duplicate code across scripts**
+   ```python
+   # Bad: Copy model loading code to every script
+   # Good: Use ComponentFactory.create_model()
+   ```
+
+5. **Don't optimize prematurely**
+   ```python
+   # Bad: Async everything "for performance"
+   # Good: Batch processing with existing sync code
+   ```
+
+### Things to Avoid
+- **Complex inheritance hierarchies** - Prefer composition
+- **Singleton patterns** - Use dependency injection instead
+- **Magic strings everywhere** - Use constants or enums
+- **Mutable default arguments** - `def f(x=[])`  is a bug waiting to happen
+
+## Logging vs Print
+
+**Use print() for:**
+- CLI output meant for users
+- Progress messages in scripts
+- Interactive feedback
+
+**Use logger for:**
+- Library code in `src/ragicamp/`
+- Debug information
+- Error context that should be in log files
 
 ```python
-def save(self, artifact_name: str, retriever_artifact: str) -> str:
-    manager = get_artifact_manager()
-    path = manager.get_agent_path(artifact_name)
-    
-    config = {
-        "agent_type": "my_custom",
-        "name": self.name,
-        "retriever_artifact": retriever_artifact,
-        # Your config here
-    }
-    manager.save_json(config, path / "config.json")
-    return str(path)
+# In CLI/scripts
+print(f"Running {len(experiments)} experiments...")
 
-@classmethod
-def load(cls, artifact_name: str, model: LanguageModel) -> 'MyAgent':
-    manager = get_artifact_manager()
-    path = manager.get_agent_path(artifact_name)
-    config = manager.load_json(path / "config.json")
-    
-    retriever = DenseRetriever.load_index(config["retriever_artifact"])
-    return cls(name=config["name"], model=model, retriever=retriever)
+# In library code
+logger = get_logger(__name__)
+logger.debug("Loading model: %s", model_name)
 ```
 
----
+## Resource Management
 
-## Comparison Table
-
-| Feature | DirectLLM | FixedRAG | BanditRAG | MDPRAG |
-|---------|-----------|----------|-----------|---------|
-| **Retrieval** | ❌ | ✅ | ✅ | ✅ |
-| **Training** | ❌ | Index only | RL training | RL training |
-| **Parameters** | Fixed | Fixed | Adaptive | Adaptive |
-| **Complexity** | Simple | Simple | Medium | Complex |
-| **Use Case** | Baseline | Production | Optimization | Complex reasoning |
-| **Speed** | Fast | Fast | Fast | Slower (multi-step) |
-| **Setup Time** | None | 5-10 min | 30+ min | 1+ hour |
-| **Performance** | Baseline | Good | Better | Best (with training) |
-
----
-
-## Quick Reference
+Always clean up GPU memory:
 
 ```python
-# DirectLLM - No retrieval
-agent = DirectLLMAgent(name="direct", model=model)
+from ragicamp.utils.resource_manager import ResourceManager
 
-# FixedRAG - Standard RAG
-agent = FixedRAGAgent(name="fixed", model=model, retriever=retriever, top_k=5)
-agent.save("fixed_rag_v1", "wikipedia_v1")
-agent = FixedRAGAgent.load("fixed_rag_v1", model)
+# After model use
+if hasattr(model, "unload"):
+    model.unload()
+ResourceManager.clear_gpu_memory()
 
-# BanditRAG - Adaptive parameters
-policy = EpsilonGreedyBandit(name="policy", actions=actions, epsilon=0.1)
-agent = BanditRAGAgent(name="bandit", model=model, retriever=retriever, policy=policy)
-agent.update_policy(query, params, reward)
+# Or use context manager
+from ragicamp.utils.resource_manager import managed_model
 
-# MDPRAG - Sequential decisions
-policy = QLearningMDPPolicy(name="mdp", action_types=["retrieve", "generate"])
-agent = MDPRAGAgent(name="mdp", model=model, retriever=retriever, policy=policy)
-
-# All agents
-response = agent.answer("Question?")
-print(response.answer)
+with managed_model(lambda: HuggingFaceModel(...)) as model:
+    result = model.generate(prompt)
+# Automatically cleaned up
 ```
 
----
+## Error Handling
 
-## 📊 Evaluating Agents
+```python
+# Specific exceptions
+from ragicamp.core.exceptions import ModelLoadError, EvaluationError
 
-### Modern Approach: Config-Based Evaluation ⭐ **RECOMMENDED**
+try:
+    model = load_model(path)
+except FileNotFoundError:
+    raise ModelLoadError(f"Model not found: {path}")
 
-The easiest and most robust way to evaluate agents is using YAML configs:
-
-```yaml
-# experiments/configs/my_evaluation.yaml
-agent:
-  type: direct_llm
-  name: "my_agent"
-  system_prompt: "You are a helpful assistant."
-
-model:
-  type: huggingface
-  model_name: "google/gemma-2-2b-it"
-  device: "cuda"
-  load_in_8bit: true
-
-dataset:
-  name: natural_questions
-  split: validation
-  num_examples: 100
-
-evaluation:
-  mode: both  # generate → evaluate (most robust!)
-  batch_size: 8
-
-metrics:
-  - exact_match
-  - f1
-  - bertscore
-  
-output:
-  save_predictions: true
-  output_path: "outputs/my_agent_results.json"
+# Let unexpected errors propagate - don't silence them
 ```
 
-**Run it:**
+## Testing
+
+- **Unit tests** - For individual components
+- **Skip GPU tests** - Use `@pytest.mark.skipif` for GPU-dependent tests
+- **Mock external services** - Don't hit real OpenAI API in tests
+
+```python
+@pytest.fixture
+def mock_model():
+    model = Mock(spec=LanguageModel)
+    model.generate.return_value = "answer"
+    return model
+```
+
+## File Organization
+
+```
+src/ragicamp/
+├── agents/          # RAG agents (base, direct_llm, fixed_rag)
+├── models/          # LLM backends (base, huggingface, openai)
+├── retrievers/      # Dense/Sparse retrieval
+├── datasets/        # QA datasets (base, nq, triviaqa, hotpotqa)
+├── metrics/         # Evaluation metrics (F1, EM, BERTScore, LLM-judge)
+├── corpus/          # Document corpus and chunking
+├── evaluation/      # Evaluator class (two-phase evaluation)
+├── experiment.py    # Experiment + ExperimentCallbacks + ExperimentResult
+├── factory.py       # ComponentFactory with plugin registration
+├── cli/             # Command-line interface (main.py, study.py)
+├── core/            # Logging, exceptions (3 classes), protocols
+├── config/          # Pydantic schemas only
+└── utils/           # ResourceManager, paths, prompts, formatting
+
+scripts/
+└── experiments/     # Standalone experiment scripts
+
+conf/
+├── study/           # Study configurations (comprehensive_baseline, etc.)
+├── prompts/         # Few-shot examples
+└── retriever/       # Retriever configs (pre-built indexes)
+```
+
+## Prompt Engineering
+
+### Key Principles
+
+1. **Explicit stop instructions** - Tell the model to give ONE answer only
+2. **Use "Question/Answer" format** - Avoid "Q:/A:" which models continue
+3. **Stop sequences in code** - Truncate at `\nQuestion:` etc.
+4. **Short, concrete examples** - Show exact answer format expected
+
+### What NOT to do in prompts
+
+```
+# BAD: Model will continue generating Q&A pairs
+Q: when did ww1 end
+A: 1918
+
+Q: who was president
+A: Wilson
+...
+
+# GOOD: Explicit instruction to stop
+Question: when did ww1 end
+Answer: 1918
+```
+
+### Current prompt structure
+
+```python
+# Direct (no context)
+"{style}
+{stop_instruction}
+
+{examples}
+Question: {question}
+Answer:"
+
+# RAG (with context)  
+"Use the context to answer. {style}
+{stop_instruction}
+
+{examples}
+Context: {context}
+
+Question: {query}
+Answer:"
+```
+
+Few-shot examples are in `conf/prompts/fewshot_examples.yaml`.
+
+## Adding a New Feature
+
+1. **Ask: Is this core functionality?**
+   - Yes → Add to `src/ragicamp/`
+   - No → Add as a script or separate tool
+
+2. **Ask: Does this need a new dependency?**
+   - If possible, use existing dependencies
+   - If new dep needed, make it optional
+
+3. **Ask: Can users do this themselves easily?**
+   - Yes → Don't build it, document how
+   - No → Build the minimum viable version
+
+4. **Implementation:**
+   - Write the simplest thing that works
+   - Add a test
+   - Add a docstring with example
+   - Update CHANGELOG
+
+## Running Experiments
+
+### Quick test
 ```bash
-uv run python experiments/scripts/run_experiment.py \
-  --config experiments/configs/my_evaluation.yaml
+uv run python scripts/experiments/run_study.py conf/study/simple_hf.yaml --dry-run
 ```
 
-**Benefits:**
-- ✅ **Two-phase evaluation** - Never lose progress to failures
-- ✅ **Automatic checkpointing** - Resume from where you left off
-- ✅ **Type validation** - Catches errors before running
-- ✅ **Reproducible** - Config files track all settings
-
-### Programmatic API (Advanced)
-
-For custom workflows, use the evaluator directly:
-
-```python
-from ragicamp.evaluation.evaluator import Evaluator
-from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
-
-# Phase 1: Generate predictions
-evaluator = Evaluator(agent, dataset)
-predictions_file = evaluator.generate_predictions(
-    output_path="outputs/predictions.json",
-    num_examples=100,
-    batch_size=8
-)
-
-# Phase 2: Compute metrics (can retry if it fails!)
-results = evaluator.compute_metrics(
-    predictions_file=predictions_file,
-    metrics=[ExactMatchMetric(), F1Metric()],
-    output_path="outputs/results.json"
-)
-
-print(f"Exact Match: {results['exact_match']:.4f}")
-print(f"F1 Score: {results['f1']:.4f}")
-```
-
-### Advanced: LLM-as-a-Judge
-
-For high-quality correctness judgments with automatic checkpointing:
-
-```yaml
-# In your config:
-judge_model:
-  type: openai
-  model_name: "gpt-4o-mini"  # Budget-friendly
-  temperature: 0.0
-
-metrics:
-  - exact_match
-  - f1
-  - name: llm_judge_qa
-    params:
-      judgment_type: "binary"  # correct/incorrect
-      batch_size: 16           # Process 16 judgments at once
-      # Checkpoint auto-configured by system!
-```
-
-**Features:**
-- ✅ **Saves progress every 5 batches** automatically
-- ✅ **Resumes from checkpoint** if API fails
-- ✅ **Batch processing** for speed (16 judgments at once)
-- ✅ **Budget-friendly** using gpt-4o-mini
-
-**Example:**
+### Full study
 ```bash
-# Run with LLM judge
-make eval-baseline-llm-judge
-
-# If it fails at batch 35/57? Just run again!
-# It automatically resumes from checkpoint
+uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing
 ```
 
-**See:** 
-- [Two-Phase Evaluation Guide](guides/TWO_PHASE_EVALUATION.md) - Robust evaluation workflow
-- [Metrics Guide](guides/METRICS.md) - Choosing evaluation metrics
-- [LLM Judge Guide](guides/LLM_JUDGE.md) - Using GPT-4 for evaluation
-- [Config Guide](guides/CONFIG_BASED_EVALUATION.md) - Config-driven experiments
+### With MLflow tracking
+```bash
+uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --mlflow
+```
 
----
+## Analyzing Results
 
-## Next Steps
+### CLI comparison
+```bash
+# Basic comparison by model
+uv run ragicamp compare outputs/comprehensive_baseline
 
-- **[Metrics Guide](guides/METRICS.md)** - Choosing evaluation metrics
-- **[LLM Judge Guide](guides/LLM_JUDGE.md)** - Using GPT-4 for evaluation
-- **[Config Guide](guides/CONFIG_BASED_EVALUATION.md)** - Config-driven experiments
-- **[Architecture](ARCHITECTURE.md)** - System design
-- **[Usage Guide](USAGE.md)** - Detailed examples
+# Compare by different dimensions
+uv run ragicamp compare outputs/comprehensive_baseline --group-by retriever
 
-**Ready to build?** Start with FixedRAGAgent for production, then explore adaptive agents for optimization! 🚀
+# Pivot table: model performance across datasets
+uv run ragicamp compare outputs/comprehensive_baseline --pivot model dataset
+
+# Export to CSV
+uv run python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --csv results.csv
+```
+
+### Python API
+```python
+from ragicamp.analysis import ResultsLoader, compare_results, best_by, pivot_results
+
+# Load results
+loader = ResultsLoader("outputs/comprehensive_baseline")
+results = loader.load_all()
+
+# Compare by model
+stats = compare_results(results, group_by="model", metric="f1")
+
+# Get top 10 by exact match
+top = best_by(results, metric="exact_match", n=10)
+
+# Pivot table: rows=model, cols=dataset
+pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
+```
+
+### MLflow tracking
+```python
+from ragicamp.analysis import MLflowTracker
+
+# Backfill existing results
+tracker = MLflowTracker("my_study")
+tracker.backfill_from_results(results)
+
+# View in MLflow UI
+# $ mlflow ui
+# Open http://localhost:5000
+```
+
+### Using Python API
+```python
+from ragicamp import Experiment
+from ragicamp.agents import DirectLLMAgent
+from ragicamp.models import HuggingFaceModel
+from ragicamp.datasets import NaturalQuestionsDataset
+from ragicamp.metrics import F1Metric, ExactMatchMetric
+
+model = HuggingFaceModel("google/gemma-2b-it", load_in_4bit=True)
+agent = DirectLLMAgent("baseline", model)
+dataset = NaturalQuestionsDataset(split="validation")
+
+exp = Experiment(
+    name="my_exp",
+    agent=agent,
+    dataset=dataset,
+    metrics=[F1Metric(), ExactMatchMetric()],
+)
+
+result = exp.run(batch_size=8)
+print(f"F1: {result.f1:.3f}")
+```
+
+## Common Issues
+
+### OOM (Out of Memory)
+- Reduce `batch_size`
+- Use `load_in_4bit=True`
+- Clear cache between experiments: `ResourceManager.clear_gpu_memory()`
+
+### Slow experiments
+- Use batch processing: `batch_size=8`
+- Use `--skip-existing` to resume
+- Reduce `num_questions` for testing
+
+### Config errors
+- Run with `--dry-run` first
+- Check model spec format: `hf:model/name` or `openai:model-name`
 

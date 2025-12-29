@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragicamp"
-version = "0.1.0"
+version = "0.3.0"
 description = "A modular framework for experimenting with RAG approaches"
 readme = "README.md"
-requires-python = ">=3.9"  # Tested on Python 3.12, compatible with 3.9+
+requires-python = ">=3.9"
 authors = [
     {name = "RAGiCamp Team"}
 ]
@@ -30,7 +30,17 @@ dependencies = [
     "bert-score>=0.3.13",
     "bleurt",
     "keras<3",
+    # Experiment tracking and optimization
+    "mlflow>=2.8.0",  # Experiment tracking and model registry
+    "ragas>=0.1.0",  # RAG-specific evaluation metrics
+    "optuna>=3.0.0",  # Hyperparameter optimization
+    # Configuration management
+    "hydra-core>=1.3.0",  # Composable config system
+    "omegaconf>=2.3.0",  # Config management for Hydra
 ]
+
+[project.scripts]
+ragicamp = "ragicamp.cli.main:main"
 
 [project.optional-dependencies]
 dev = [

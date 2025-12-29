@@ -1,6 +1,5 @@
-"""Configuration management for experiments."""
+"""Configuration schemas for experiments."""
 
-from ragicamp.config.loader import ConfigLoader, create_config_template
 from ragicamp.config.schemas import (
     AgentConfig,
     DatasetConfig,
@@ -14,7 +13,6 @@ from ragicamp.config.schemas import (
 )
 
 __all__ = [
-    "ConfigLoader",
     "ExperimentConfig",
     "ModelConfig",
     "DatasetConfig",
@@ -24,5 +22,4 @@ __all__ = [
     "EvaluationConfig",
     "OutputConfig",
     "TrainingConfig",
-    "create_config_template",
 ]

@@ -1,0 +1,36 @@
+# RAGiCamp Default Configuration
+# Override any setting via CLI: python -m ragicamp.cli.run model=phi3 dataset.num_examples=50
+
+defaults:
+  - model: gemma_2b_4bit      # Default model
+  - dataset: nq               # Default dataset
+  - agent: direct_llm         # Default agent type
+  - metrics: fast             # Default metric set
+  - evaluation: standard      # Default evaluation settings
+  - prompt: concise           # Default prompt style
+  - optional retriever: null  # Only loaded for RAG agents
+  - optional judge: gpt4_mini # LLM judge (optional)
+  - optional mlflow: default  # MLflow tracking (optional)
+  - optional experiment: null # Experiment presets (optional)
+  - _self_
+
+# Output configuration
+output:
+  save_predictions: true
+  output_dir: outputs
+  # Hydra will create: outputs/YYYY-MM-DD/HH-MM-SS/
+  
+# Hydra configuration
+hydra:
+  run:
+    # Output directory pattern
+    dir: ${output.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    # Multi-run output directory  
+    dir: ${output.output_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  job:
+    # Change working directory to output dir
+    chdir: false
+  # Save config to output directory
+  output_subdir: .hydra

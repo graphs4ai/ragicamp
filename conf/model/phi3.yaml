@@ -1,0 +1,19 @@
+# Microsoft Phi-3 Mini (4-bit)
+# Excellent reasoning for its size
+#
+# ⚠️ KNOWN ISSUE: Phi-3's remote code may have compatibility issues with
+# some transformers versions. If you get "DynamicCache has no attribute 
+# 'seen_tokens'", run:
+#   rm -rf ~/.cache/huggingface/modules/transformers_modules/microsoft/Phi*
+# Then re-run the experiment.
+
+type: huggingface
+model_name: "microsoft/Phi-3-mini-4k-instruct"
+device: cuda
+load_in_8bit: false
+load_in_4bit: true
+max_tokens: 256
+temperature: 0.7
+trust_remote_code: true
+# Use a specific revision if you encounter issues
+# revision: "main"

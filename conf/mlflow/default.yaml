@@ -1,0 +1,9 @@
+# MLflow Tracking Configuration
+
+enabled: true
+experiment_name: ragicamp_experiments
+tracking_uri: ./mlruns
+log_artifacts: true
+log_models: false
+tags:
+  framework: ragicamp

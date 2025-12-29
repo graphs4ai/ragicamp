@@ -1,0 +1,8 @@
+# TriviaQA Dataset
+# Trivia questions with evidence documents
+
+name: triviaqa
+split: validation
+num_examples: 100
+filter_no_answer: true
+cache_dir: data/datasets

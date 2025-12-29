@@ -1,110 +1,215 @@
-# GitHub Actions CI/CD
+# GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows for continuous integration and deployment.
+This directory contains CI/CD workflows for RAGiCamp.
 
-## Workflows
+## Workflows Overview
 
-### `ci.yml` - Continuous Integration
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | Push/PR to main/develop | Main CI pipeline |
+| `pr-check.yml` | Pull requests | Quick PR validation (conditional) |
+| `release.yml` | Tags (v*) | Create releases |
 
-Runs on every push and pull request to `main` or `develop` branches.
+---
 
-**Jobs:**
+## `ci.yml` - Continuous Integration
 
-1. **Tests** - Run test suite on Python 3.12
-   - Runs all unit tests with pytest
-   - Continues on test failures to see all results
-   - Uploads test results as artifacts
+**Runs on:** Every push and PR to `main` or `develop`
 
-2. **Lint** - Code quality checks
-   - Black formatting check
-   - isort import sorting check
-   
-3. **Coverage** - Test coverage reporting
-   - Generates coverage reports (XML, HTML, terminal)
-   - Uploads coverage to Codecov (optional)
-   - Uploads HTML report as artifact
+### Job Flow
 
-4. **Config Validation** - Validate all YAML configs
-   - Tests all config files in `experiments/configs/`
-   - Ensures configs are valid before merge
+```
+┌─────────────────────────────────────────────────────┐
+│                   PARALLEL (fast)                   │
+│  ┌─────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │  lint   │  │ import-check │  │validate-configs│  │
+│  └────┬────┘  └──────┬───────┘  └───────┬────────┘  │
+│       │              │                  │           │
+└───────┼──────────────┼──────────────────┼───────────┘
+        │              │                  │
+        └──────────────┼──────────────────┘
+                       │
+                       ▼
+              ┌────────────────┐
+              │     test       │
+              └────────┬───────┘
+                       │
+                       ▼
+              ┌────────────────┐
+              │   ci-success   │
+              └────────────────┘
+```
 
-5. **Summary** - Overall CI status
-   - Aggregates all job results
-   - Fails if any check fails
+### Jobs
+
+| Job | Duration | What it does |
+|-----|----------|--------------|
+| **lint** | ~1 min | Black, isort, mypy checks |
+| **import-check** | ~1 min | Verify package imports |
+| **validate-configs** | ~1 min | Validate YAML configs |
+| **test** | ~3-5 min | Full test suite with coverage |
+| **ci-success** | - | Final status check |
+
+### Features
+
+- ✅ **UV caching** - Uses `enable-cache: true` for fast installs
+- ✅ **Parallel fast checks** - lint, import-check, validate-configs run in parallel
+- ✅ **Concurrency control** - Cancels in-progress runs on new push
+- ✅ **Coverage reports** - Uploaded to Codecov on main
+- ✅ **Test artifacts** - JUnit XML for GitHub integration
+
+### Fail Conditions
+
+The CI **fails** if:
+- Formatting is wrong (black/isort)
+- Tests fail
+- Configs are invalid
+- Package won't import
+
+---
+
+## `pr-check.yml` - Pull Request Checks
+
+**Runs on:** All pull requests
+
+### Smart Detection
+
+Only runs relevant checks based on what changed:
+
+| Changed Path | Triggered Job |
+|--------------|---------------|
+| `src/**` | smoke-test |
+| `tests/**` | smoke-test |
+| `pyproject.toml`, `uv.lock` | smoke-test |
+| `docs/**`, `*.md` | docs-check |
+| `conf/**`, `experiments/configs/**` | config-check |
+
+### Jobs
+
+| Job | Purpose |
+|-----|---------|
+| **changes** | Detect what files changed |
+| **pr-size** | Warns on large PRs |
+| **smoke-test** | Quick import test (conditional) |
+| **docs-check** | Link validation (conditional) |
+| **config-check** | Config validation (conditional) |
+
+---
+
+## `release.yml` - Releases
+
+**Runs on:** Git tags matching `v*` (e.g., `v0.2.0`)
+
+### Steps
+
+1. **Build** - Creates wheel and sdist
+2. **Test Install** - Tests on Python 3.9-3.12
+3. **Release** - Creates GitHub release with artifacts
+
+### Creating a Release
+
+```bash
+# Tag and push
+git tag v0.2.0
+git push origin v0.2.0
+
+# Or manually trigger in GitHub Actions
+```
+
+---
 
 ## Local Testing
 
 Before pushing, run these locally:
 
 ```bash
-# Run all tests
-make test
-
-# Check formatting
+# Auto-fix formatting
 make format
 
-# Run with coverage
-make test-coverage
+# Check linting (without fixing)
+make lint
+
+# Run tests
+make test
+
+# Run tests with coverage
+make test-cov
 
 # Validate configs
-for config in experiments/configs/*.yaml; do
-  python scripts/validate_config.py "$config"
-done
+make validate-all-configs
+
+# Full pre-push check (recommended!)
+make pre-push
 ```
 
-## CI Status Badge
+---
 
-Add this to your README.md:
+## Configuration
 
-```markdown
-![CI Status](https://github.com/YOUR_USERNAME/ragicamp/workflows/CI/badge.svg)
-```
+### Required Secrets
 
-## Secrets Configuration
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `CODECOV_TOKEN` | Optional | Coverage uploads |
+| `PYPI_API_TOKEN` | Optional | PyPI publishing |
 
-For Codecov integration (optional), add these secrets to your GitHub repository:
+### Adding Secrets
 
-- `CODECOV_TOKEN` - Your Codecov upload token
+1. Go to Repository → Settings → Secrets
+2. Add new repository secret
+
+---
 
 ## Troubleshooting
 
-### Tests fail locally but pass in CI
+### Tests pass locally but fail in CI
 
-- Check Python version (CI runs 3.12)
-- Ensure all dependencies are installed: `uv sync --extra dev`
-- Make sure you're using the same Python version: `python --version`
+1. Check Python version matches (3.12)
+2. Ensure `uv.lock` is committed
+3. Run `make format` before pushing
 
-### Formatting fails
+### Lint fails
 
 ```bash
 # Auto-fix formatting
 make format
+
+# Commit the changes
+git add -A && git commit -m "fix: formatting"
 ```
 
-### Coverage is too low
-
-Run locally to see what's not covered:
+### Config validation fails
 
 ```bash
-make test-coverage
-# Open htmlcov/index.html in browser
+# Check specific config
+uv run python scripts/utils/validate_config.py experiments/configs/my_config.yaml
+
+# Check Hydra configs
+uv run python -c "from hydra import compose, initialize_config_dir; ..."
 ```
 
-## Customization
-
-To modify CI behavior:
-
-1. **Change Python version**: Edit `python-version` in each job
-2. **Change test command**: Edit the `Run tests` step
-3. **Add new checks**: Add a new job following existing patterns
-4. **Skip CI**: Add `[skip ci]` to commit message
+---
 
 ## Performance
 
-Current CI run time: ~8-12 minutes
+Typical CI run times:
 
-- Tests: ~5-7 minutes
-- Lint: ~1-2 minutes
-- Coverage: ~2-3 minutes
-- Config validation: ~1 minute
+| Job | Duration |
+|-----|----------|
+| Lint | ~1 min |
+| Import Check | ~1 min |
+| Config Validation | ~1 min |
+| Tests | ~3-5 min |
+| **Total** | **~5-7 min** |
 
+With UV caching, subsequent runs are significantly faster.
+
+---
+
+## Skip CI
+
+Add `[skip ci]` to commit message:
+
+```bash
+git commit -m "docs: update readme [skip ci]"
+```

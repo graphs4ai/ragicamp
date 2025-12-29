@@ -1,0 +1,14 @@
+# Fixed RAG Agent
+# Standard RAG with fixed top-k retrieval
+
+type: fixed_rag
+name: fixed_rag_agent
+top_k: 5
+system_prompt: "You are a helpful assistant. Use the provided context to answer questions accurately and concisely."
+context_template: |
+  Context:
+  {context}
+  
+  Question: {query}
+  
+  Answer:
