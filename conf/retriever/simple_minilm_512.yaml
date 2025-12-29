@@ -1,8 +1,0 @@
-# Dense Retriever: Simple Wikipedia + MiniLM + 512 chunks
-# Fast embedding model, good for development/testing
-
-type: dense
-name: simple_minilm_512
-embedding_model: "all-MiniLM-L6-v2"
-index_type: flat
-artifact_path: simple_minilm_512

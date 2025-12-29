@@ -26,7 +26,7 @@ except ImportError:
     _has_bleurt = False
 
 try:
-    from ragicamp.metrics.llm_judge import LLMJudgeMetric
+    from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
 
     _has_llm_judge = True
 except ImportError:
@@ -64,7 +64,7 @@ if _has_bertscore:
 if _has_bleurt:
     __all__.append("BLEURTMetric")
 if _has_llm_judge:
-    __all__.append("LLMJudgeMetric")
+    __all__.append("LLMJudgeQAMetric")
 if _has_faithfulness:
     __all__.append("FaithfulnessMetric")
 if _has_hallucination:

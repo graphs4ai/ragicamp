@@ -15,29 +15,21 @@ from ragicamp.core.constants import (
     RetrieverType,
 )
 from ragicamp.core.exceptions import (
-    CheckpointError,
-    ComponentNotFoundError,
+    ConfigError,
     ConfigurationError,
-    DatasetError,
     EvaluationError,
-    MetricError,
     ModelError,
     RAGiCampError,
-    RetrieverError,
 )
 from ragicamp.core.logging import configure_logging, get_logger
 
 __all__ = [
     # Exceptions
     "RAGiCampError",
-    "ConfigurationError",
-    "ComponentNotFoundError",
-    "EvaluationError",
-    "CheckpointError",
-    "RetrieverError",
+    "ConfigError",
+    "ConfigurationError",  # Alias for ConfigError
     "ModelError",
-    "MetricError",
-    "DatasetError",
+    "EvaluationError",
     # Logging
     "get_logger",
     "configure_logging",

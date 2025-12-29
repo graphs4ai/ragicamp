@@ -3,23 +3,36 @@
 #
 # Run: python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
 #
-# Experiment matrix:
-#   DirectLLM: 6 models × 3 prompts × 3 datasets = 54 experiments
-#   RAG: 2 models × 6 retrievers × 3 top_k × 3 datasets = 108 experiments
-#   Total: ~162 experiments
+# Experiment matrix (with quantization variations):
+#   DirectLLM: 4 HF models × 4 prompts × 2 quant × 3 datasets = 96 experiments
+#   RAG: 1 HF model × 6 retrievers × 3 top_k × 2 prompts × 2 quant × 3 datasets = 216 experiments
+#        + 1 OpenAI × 6 retrievers × 3 top_k × 2 prompts × 3 datasets = 108 experiments
+#   Total: ~420 experiments
 #
-# Estimated time: 10-20 hours (depending on models/hardware)
+# Prompt types:
+#   - default: Standard QA prompt
+#   - concise: Short answer format
+#   - fewshot: 5 dataset-specific in-context examples
+#   - fewshot_3: 3 dataset-specific in-context examples
+#
+# Quantization options (HF models only):
+#   - 4bit: Faster, less VRAM (~6GB for 7B model)
+#   - none: Full precision, slower, more VRAM (~14GB for 7B model)
+#
+# With 100 questions per dataset:
+#   - 100 questions × ~420 experiments = ~42,000 total inferences
+#   - Estimated time: 4-8 hours (depending on models/hardware)
 
 name: comprehensive_baseline
 description: "Full baseline study with HF + OpenAI models and multiple retrieval configurations"
 
-# Full datasets (set to null for complete dataset, or cap for testing)
-num_questions: null  # null = full dataset
+# Limit to 100 examples per dataset for faster iteration
+num_questions: 100  # null = full dataset, or set a cap for testing
 
 # All three QA datasets
 datasets:
   - nq
-  - triviaqa
+  #- triviaqa
   - hotpotqa
 
 # ============================================================================
@@ -29,8 +42,8 @@ direct:
   enabled: true
   models:
     # --- OpenAI (high quality, costs money) ---
-    - openai:gpt-4o-mini       # Fast, cheap, good baseline
-    - openai:gpt-4o            # SOTA, expensive but comprehensive
+    #- openai:gpt-4o-mini       # Fast, cheap, good baseline
+    #- openai:gpt-4o            # SOTA, expensive but comprehensive
     
     # --- HuggingFace models (local, free) ---
     # Small models (fast, good for baseline)
@@ -48,7 +61,13 @@ direct:
   prompts:
     - default    # Standard QA prompt
     - concise    # "Answer briefly"
-    - detailed   # "Explain your reasoning"
+    - fewshot    # 5 dataset-specific examples (few-shot learning)
+    #- fewshot_3  # 3 dataset-specific examples
+  
+  # Quantization options for HF models (OpenAI is unaffected)
+  quantization:
+    - 4bit       # 4-bit quantization (faster, less VRAM)
+    - none       # Full precision (slower, more VRAM, potentially better quality)
 
 # ============================================================================
 # RAG Experiments (with retrieval)
@@ -58,31 +77,39 @@ rag:
   
   # Models for RAG (keep this smaller - focus on best models)
   models:
-    - openai:gpt-4o-mini   # Good balance of quality/cost
+    #- openai:gpt-4o-mini   # Good balance of quality/cost
     - hf:google/gemma-2b-it  # Representative local model
   
-  # Retriever variations (6 indexes)
+  # Retriever variations (6 indexes on Simple Wikipedia)
   # Format: {corpus}_{embedding}_{strategy}_{chunk_size}
   retrievers:
-    # Simple Wikipedia corpus (faster, good for dev)
-    - simple_minilm_recursive_512      # MiniLM, small chunks
-    - simple_minilm_recursive_1024     # MiniLM, larger chunks
-    - simple_mpnet_recursive_512       # MPNet (better embeddings)
+    # MiniLM embeddings (fast, 384 dims)
+    #- simple_minilm_recursive_512      # Small chunks
+    - simple_minilm_recursive_1024     # Larger chunks
     
-    # Full English Wikipedia (production, higher coverage)
-    - en_minilm_recursive_512
-    - en_mpnet_recursive_512
-    - en_e5_recursive_512              # E5 embeddings (SOTA)
+    # MPNet embeddings (better quality, 768 dims)
+    - simple_mpnet_recursive_512       # Small chunks
+    #- simple_mpnet_recursive_1024      # Larger chunks
+    
+    # E5 embeddings (SOTA, 384 dims)
+    - simple_e5_recursive_512          # Small chunks
+    #- simple_e5_recursive_1024         # Larger chunks
   
   # How many docs to retrieve
   top_k_values:
     - 3    # Minimal context
     - 5    # Balanced
-    - 10   # Rich context
+    #- 10   # Rich context
   
   # RAG-specific prompts
   prompts:
     - default
+    - fewshot    # 5 dataset-specific examples
+  
+  # Quantization for RAG (only affects HF models)
+  quantization:
+    - 4bit       # 4-bit quantization
+    - none       # Full precision
 
 # ============================================================================
 # Metrics
@@ -112,8 +139,9 @@ output_dir: outputs/comprehensive_baseline
 # Execution options
 # ============================================================================
 options:
-  # Batch size for HF models
-  batch_size: 4
+  # Batch size for HF models (not yet implemented in runner - TODO)
+  # Keep low for non-quantized models which use more VRAM
+  batch_size: 8
   
   # Save predictions after each experiment (for recovery)
   save_intermediate: true
@@ -123,4 +151,7 @@ options:
   
   # GPU memory optimization for HF models
   quantization: 4bit  # 4bit, 8bit, or none
+
+# Note: To actually use batch inference, run_study.py needs to be updated
+# to use model.batch_generate() instead of processing one question at a time.
 

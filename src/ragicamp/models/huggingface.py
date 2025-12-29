@@ -6,7 +6,10 @@ from typing import Any, List, Optional, Union
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
+
+logger = get_logger(__name__)
 
 
 class HuggingFaceModel(LanguageModel):
@@ -102,7 +105,7 @@ class HuggingFaceModel(LanguageModel):
         gc.collect()
 
         self._is_loaded = False
-        print(f"🗑️  Model {self.model_name} unloaded from GPU")
+        logger.info("Model %s unloaded from GPU", self.model_name)
 
     def is_loaded(self) -> bool:
         """Check if model is currently loaded."""
@@ -147,12 +150,23 @@ class HuggingFaceModel(LanguageModel):
         # Decode
         generated_texts = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
+        # Default stop sequences to prevent runaway generation
+        stop_sequences = stop or []
+        # Always stop at new questions or common continuation patterns
+        stop_sequences.extend(["\nQ:", "\nQuestion:", "\n\nQ:", "\n\nQuestion:", "\n\n\n"])
+
         # Remove input prompt from output
         results = []
         for prompt_text, generated in zip(prompts, generated_texts):
             # Remove the prompt from the generated text
             if generated.startswith(prompt_text):
                 generated = generated[len(prompt_text) :].strip()
+
+            # Truncate at stop sequences
+            for stop_seq in stop_sequences:
+                if stop_seq in generated:
+                    generated = generated.split(stop_seq)[0].strip()
+
             results.append(generated)
 
         return results if is_batch else results[0]

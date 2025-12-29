@@ -1,6 +1,0 @@
-# Evaluate Only Mode
-# Only compute metrics on existing predictions
-# Requires predictions_path
-
-mode: evaluate
-predictions_path: null  # Must be set via CLI or experiment config

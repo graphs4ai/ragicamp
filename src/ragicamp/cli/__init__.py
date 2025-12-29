@@ -1,8 +1,12 @@
-"""RAGiCamp CLI module.
+"""RAGiCamp CLI - Unified command-line interface.
 
-Provides command-line interfaces for running experiments.
+Usage:
+    ragicamp run conf/study/comprehensive_baseline.yaml
+    ragicamp index --corpus simple --embedding minilm
+    ragicamp compare outputs/
+    ragicamp evaluate predictions.json --metrics f1 exact_match
 """
 
-from ragicamp.cli.run import main as run_experiment
+from ragicamp.cli.main import main
 
-__all__ = ["run_experiment"]
+__all__ = ["main"]

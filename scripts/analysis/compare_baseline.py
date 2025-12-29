@@ -1,218 +1,255 @@
 #!/usr/bin/env python3
 """
-Compare baseline study results and generate visualizations.
+Compare baseline study results and generate analysis.
 
 Usage:
-    python scripts/analysis/compare_baseline.py outputs/multirun/2025-12-10/
-    python scripts/analysis/compare_baseline.py --output report.html
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline
+    python scripts/analysis/compare_baseline.py --csv results.csv
+    python scripts/analysis/compare_baseline.py --mlflow  # Log to MLflow
+    python scripts/analysis/compare_baseline.py --pivot model dataset  # Pivot table
+
+Examples:
+    # Basic comparison by model
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline
+
+    # Compare by different dimensions
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --group-by prompt
+
+    # Export to CSV
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --csv results.csv
+
+    # Log to MLflow for tracking
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --mlflow
+
+    # Create pivot table: rows=model, cols=dataset
+    python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --pivot model dataset
 """
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from ragicamp.analysis import (
+    ResultsLoader,
+    compare_results,
+    best_by,
+    pivot_results,
+    summarize_results,
+    format_comparison_table,
+)
 
 
-def find_summary_files(base_dir: Path) -> List[Path]:
-    """Find all summary JSON files in the output directory."""
-    summaries = []
-    for path in base_dir.rglob("*_summary.json"):
-        summaries.append(path)
-    return sorted(summaries)
+def print_summary(results):
+    """Print high-level summary."""
+    summary = summarize_results(results)
+
+    print("\n" + "=" * 70)
+    print(" EXPERIMENT SUMMARY")
+    print("=" * 70)
+    print(f"  Total experiments: {summary['count']}")
+    print(f"  Models: {', '.join(summary['models'])}")
+    print(f"  Datasets: {', '.join(summary['datasets'])}")
+    print(f"  Prompts: {', '.join(summary['prompts'])}")
+    print(f"  Types: {', '.join(summary['types'])}")
+    print(f"  Total duration: {summary['total_duration_hours']:.1f} hours")
+    print()
+    print(f"  Average F1: {summary['avg_f1']:.4f}")
+    print(f"  Average EM: {summary['avg_exact_match']:.4f}")
+    print(f"  Average Throughput: {summary['avg_throughput_qps']:.2f} QPS")
+
+    print("\n" + "-" * 70)
+    print(" BEST CONFIGURATIONS")
+    print("-" * 70)
+    for metric in ["f1", "exact_match", "bertscore_f1"]:
+        best = summary.get(f"best_{metric}", {})
+        print(
+            f"  {metric:<15}: {best.get('value', 0):.4f} "
+            f"({best.get('model', '?')}, {best.get('dataset', '?')}, {best.get('prompt', '?')})"
+        )
 
 
-def load_results(summary_files: List[Path]) -> List[Dict[str, Any]]:
-    """Load and parse all summary files."""
-    results = []
-    for path in summary_files:
-        try:
-            with open(path) as f:
-                data = json.load(f)
-
-            # Extract experiment info from Hydra config if available
-            hydra_dir = path.parent / ".hydra"
-            config = {}
-            if hydra_dir.exists():
-                config_file = hydra_dir / "config.yaml"
-                if config_file.exists():
-                    import yaml
-
-                    with open(config_file) as f:
-                        config = yaml.safe_load(f)
-
-            results.append(
-                {
-                    "path": str(path),
-                    "run_dir": str(path.parent),
-                    "model": config.get("model", {}).get("model_name", "unknown"),
-                    "dataset": config.get("dataset", {}).get("name", "unknown"),
-                    "prompt": config.get("prompt", {}).get("style", "unknown"),
-                    "agent": config.get("agent", {}).get("type", "unknown"),
-                    **data,
-                }
-            )
-        except Exception as e:
-            print(f"⚠️  Error loading {path}: {e}")
-
-    return results
+def print_comparison(results, group_by, metric):
+    """Print comparison table."""
+    stats = compare_results(results, group_by=group_by, metric=metric)
+    print(format_comparison_table(stats, title=f"Comparison by {group_by.upper()}", metric=metric))
 
 
-def print_comparison_table(results: List[Dict[str, Any]]):
-    """Print results as a formatted table."""
-    if not results:
-        print("No results found.")
-        return
+def print_pivot_table(results, rows, cols, metric):
+    """Print pivot table."""
+    pivot = pivot_results(results, rows=rows, cols=cols, metric=metric)
 
-    # Determine available metrics
-    metric_keys = set()
-    for r in results:
-        for key in r.keys():
-            if key in ["exact_match", "f1", "llm_judge_qa", "bertscore_f1", "bleurt"]:
-                metric_keys.add(key)
+    # Get all column values
+    all_cols = set()
+    for row_data in pivot.values():
+        all_cols.update(row_data.keys())
+    all_cols = sorted(all_cols)
 
-    metric_keys = sorted(metric_keys)
+    print("\n" + "=" * 80)
+    print(f" PIVOT TABLE: {rows} x {cols} ({metric})")
+    print("=" * 80)
 
     # Header
-    print("\n" + "=" * 100)
-    print("BASELINE STUDY RESULTS")
-    print("=" * 100)
-
-    # Table header
-    header = f"{'Model':<30} {'Dataset':<15} {'Prompt':<12}"
-    for m in metric_keys:
-        header += f" {m:<12}"
+    header = f"{'':25}"
+    for col in all_cols:
+        header += f" {col[:12]:>12}"
     print(header)
-    print("-" * 100)
+    print("-" * 80)
 
-    # Sort results
-    results_sorted = sorted(
-        results, key=lambda x: (x.get("model", ""), x.get("dataset", ""), x.get("prompt", ""))
-    )
-
-    # Table rows
-    for r in results_sorted:
-        model_short = r.get("model", "unknown").split("/")[-1][:28]
-        row = f"{model_short:<30} {r.get('dataset', '?'):<15} {r.get('prompt', '?'):<12}"
-        for m in metric_keys:
-            val = r.get(m, None)
+    # Rows
+    for row_name, row_data in sorted(pivot.items()):
+        row = f"{row_name[:24]:25}"
+        for col in all_cols:
+            val = row_data.get(col, None)
             if val is not None:
-                row += f" {val:.4f}      "
+                row += f" {val:>12.4f}"
             else:
-                row += f" {'N/A':<12}"
+                row += f" {'—':>12}"
         print(row)
 
+    print("=" * 80)
+
+
+def print_top_n(results, n, metric):
+    """Print top N results."""
+    top = best_by(results, metric=metric, n=n)
+
+    print("\n" + "=" * 100)
+    print(f" TOP {n} BY {metric.upper()}")
+    print("=" * 100)
+    print(f"{'Rank':<5} {'Name':<50} {metric:>10} {'Model':>15} {'Dataset':>10}")
+    print("-" * 100)
+
+    for i, r in enumerate(top, 1):
+        val = getattr(r, metric, 0)
+        print(f"{i:<5} {r.name[:49]:<50} {val:>10.4f} {r.model_short[:14]:>15} {r.dataset:>10}")
+
     print("=" * 100)
 
 
-def generate_summary_stats(results: List[Dict[str, Any]]):
-    """Print summary statistics."""
-    if not results:
-        return
+def export_csv(results, path):
+    """Export results to CSV."""
+    fieldnames = [
+        "name",
+        "type",
+        "model",
+        "dataset",
+        "prompt",
+        "quantization",
+        "retriever",
+        "top_k",
+        "f1",
+        "exact_match",
+        "bertscore_f1",
+        "bleurt",
+        "duration",
+        "throughput_qps",
+    ]
 
-    print("\n" + "=" * 60)
-    print("SUMMARY STATISTICS")
-    print("=" * 60)
-
-    # Group by model
-    by_model = {}
-    for r in results:
-        model = r.get("model", "unknown").split("/")[-1]
-        if model not in by_model:
-            by_model[model] = []
-        by_model[model].append(r)
-
-    for model, runs in by_model.items():
-        print(f"\n📊 {model}")
-
-        # Compute averages for key metrics
-        for metric in ["exact_match", "f1", "llm_judge_qa"]:
-            values = [r.get(metric) for r in runs if r.get(metric) is not None]
-            if values:
-                avg = sum(values) / len(values)
-                max_val = max(values)
-                min_val = min(values)
-                print(f"   {metric}: avg={avg:.4f}, min={min_val:.4f}, max={max_val:.4f}")
-
-    # Best configurations
-    print("\n🏆 BEST CONFIGURATIONS")
-
-    for metric in ["exact_match", "f1", "llm_judge_qa"]:
-        values = [(r, r.get(metric)) for r in results if r.get(metric) is not None]
-        if values:
-            best = max(values, key=lambda x: x[1])
-            r, val = best
-            print(
-                f"   {metric}: {val:.4f} ({r.get('model', '?').split('/')[-1]}, {r.get('dataset')}, {r.get('prompt')})"
-            )
-
-
-def save_csv(results: List[Dict[str, Any]], output_path: Path):
-    """Save results to CSV."""
-    import csv
-
-    if not results:
-        return
-
-    # Collect all keys
-    all_keys = set()
-    for r in results:
-        all_keys.update(r.keys())
-
-    # Remove path-like keys for cleaner CSV
-    skip_keys = {"path", "run_dir", "per_question_scores"}
-    keys = sorted([k for k in all_keys if k not in skip_keys])
-
-    with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in results:
-            # Shorten model names
-            if "model" in r:
-                r = dict(r)
-                r["model"] = r["model"].split("/")[-1]
-            writer.writerow(r)
+            writer.writerow(r.to_dict())
 
-    print(f"\n✓ CSV saved to: {output_path}")
+    print(f"\n✓ Exported {len(results)} results to: {path}")
+
+
+def log_to_mlflow(results, experiment_name):
+    """Log results to MLflow."""
+    try:
+        from ragicamp.analysis import MLflowTracker
+    except ImportError:
+        print("❌ MLflow not installed. Run: pip install mlflow")
+        return
+
+    tracker = MLflowTracker(experiment_name)
+    logged = tracker.backfill_from_results(results, skip_existing=True)
+    print(f"\n✓ Logged {logged} experiments to MLflow")
+    print(f"  View at: mlflow ui  (then open http://localhost:5000)")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare baseline study results")
-    parser.add_argument("results_dir", nargs="?", default="outputs", help="Directory with results")
-    parser.add_argument("--csv", type=str, help="Save results to CSV")
-    parser.add_argument("--json", type=str, help="Save results to JSON")
+    parser = argparse.ArgumentParser(
+        description="Compare and analyze RAGiCamp experiment results",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "results_dir",
+        nargs="?",
+        default="outputs/comprehensive_baseline",
+        help="Directory with results (default: outputs/comprehensive_baseline)",
+    )
+    parser.add_argument(
+        "--group-by",
+        "-g",
+        default="model",
+        choices=["model", "dataset", "prompt", "retriever", "quantization", "type"],
+        help="Dimension to group by",
+    )
+    parser.add_argument("--metric", "-m", default="f1", help="Metric to compare (default: f1)")
+    parser.add_argument("--top", "-n", type=int, default=10, help="Show top N results")
+    parser.add_argument(
+        "--pivot",
+        nargs=2,
+        metavar=("ROWS", "COLS"),
+        help="Create pivot table with ROWS and COLS dimensions",
+    )
+    parser.add_argument("--csv", type=str, help="Export to CSV file")
+    parser.add_argument("--json", type=str, help="Export to JSON file")
+    parser.add_argument("--mlflow", action="store_true", help="Log results to MLflow")
+    parser.add_argument(
+        "--mlflow-experiment",
+        default="ragicamp",
+        help="MLflow experiment name (default: ragicamp)",
+    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
+
     args = parser.parse_args()
 
+    # Load results
     results_dir = Path(args.results_dir)
     if not results_dir.exists():
         print(f"❌ Directory not found: {results_dir}")
         sys.exit(1)
 
-    print(f"🔍 Searching for results in: {results_dir}")
+    print(f"🔍 Loading results from: {results_dir}")
+    loader = ResultsLoader(results_dir)
+    results = loader.load_all()
 
-    summary_files = find_summary_files(results_dir)
-    print(f"📁 Found {len(summary_files)} result files")
-
-    if not summary_files:
-        print("No summary files found. Run experiments first.")
+    if not results:
+        print("❌ No results found.")
         sys.exit(1)
 
-    results = load_results(summary_files)
-    print(f"📊 Loaded {len(results)} results")
+    print(f"📊 Loaded {len(results)} experiments")
 
-    # Display results
-    print_comparison_table(results)
-    generate_summary_stats(results)
+    # Generate output
+    if not args.quiet:
+        print_summary(results)
+        print_comparison(results, args.group_by, args.metric)
 
-    # Save outputs
+        if args.pivot:
+            print_pivot_table(results, args.pivot[0], args.pivot[1], args.metric)
+
+        print_top_n(results, args.top, args.metric)
+
+    # Exports
     if args.csv:
-        save_csv(results, Path(args.csv))
+        export_csv(results, args.csv)
 
     if args.json:
-        output_path = Path(args.json)
-        with open(output_path, "w") as f:
-            json.dump(results, f, indent=2, default=str)
-        print(f"\n✓ JSON saved to: {output_path}")
+        data = [r.to_dict() for r in results]
+        with open(args.json, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"\n✓ Exported to JSON: {args.json}")
+
+    if args.mlflow:
+        log_to_mlflow(results, args.mlflow_experiment)
 
 
 if __name__ == "__main__":

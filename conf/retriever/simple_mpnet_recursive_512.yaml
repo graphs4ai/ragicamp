@@ -1,0 +1,11 @@
+# Dense Retriever: simple_mpnet_recursive_512
+# Simple Wikipedia + MPNet embeddings + 512 char chunks
+
+type: dense
+name: simple_mpnet_recursive_512
+embedding_model: "all-mpnet-base-v2"
+index_type: flat
+artifact_path: simple_mpnet_recursive_512
+
+
+

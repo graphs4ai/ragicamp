@@ -97,19 +97,13 @@ index-simple-wiki:
 run-comprehensive:
 	@echo "🚀 Running comprehensive baseline (full study)..."
 	@echo "This will take 10-20 hours with all models..."
-	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
+	@echo "Using --skip-existing to resume safely..."
+	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing
 
-# Run just DirectLLM experiments (no RAG)
-run-comprehensive-direct:
-	@echo "🚀 Running DirectLLM experiments only..."
-	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml \
-		--override rag.enabled=false
-
-# Run just RAG experiments
-run-comprehensive-rag:
-	@echo "🚀 Running RAG experiments only..."
-	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml \
-		--override direct.enabled=false
+# Run with timeout per experiment (e.g. 2 hours max)
+run-comprehensive-safe:
+	@echo "🚀 Running comprehensive baseline with 2h timeout per experiment..."
+	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing --timeout 7200
 
 # ============================================================================
 # EVALUATION (re-run metrics on existing predictions)

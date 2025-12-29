@@ -210,6 +210,22 @@ class HasLoad(Protocol):
         ...
 
 
+@runtime_checkable
+class HasUnload(Protocol):
+    """Protocol for objects that can be unloaded to free resources.
+
+    Implemented by: HuggingFaceModel
+    """
+
+    def unload(self) -> None:
+        """Unload from memory/GPU."""
+        ...
+
+    def is_loaded(self) -> bool:
+        """Check if currently loaded."""
+        ...
+
+
 # === State Protocols ===
 
 

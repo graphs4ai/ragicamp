@@ -8,8 +8,11 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from ragicamp.core.logging import get_logger
 from ragicamp.retrievers.base import Document, Retriever
 from ragicamp.utils.artifacts import get_artifact_manager
+
+logger = get_logger(__name__)
 
 
 class DenseRetriever(Retriever):
@@ -91,7 +94,7 @@ class DenseRetriever(Retriever):
 
         return results
 
-    def save_index(self, artifact_name: str) -> str:
+    def save(self, artifact_name: str) -> str:
         """Save the indexed documents and FAISS index.
 
         Args:
@@ -120,13 +123,14 @@ class DenseRetriever(Retriever):
         }
         manager.save_json(config, artifact_path / "config.json")
 
-        print(f"✓ Saved retriever to: {artifact_path}")
+        logger.info("Saved retriever to: %s", artifact_path)
         return str(artifact_path)
 
+    # Alias for backward compatibility
+    save_index = save
+
     @classmethod
-    def load_index(
-        cls, artifact_name: str, embedding_model: Optional[str] = None
-    ) -> "DenseRetriever":
+    def load(cls, artifact_name: str, embedding_model: Optional[str] = None) -> "DenseRetriever":
         """Load a previously saved retriever index.
 
         Args:
@@ -158,7 +162,9 @@ class DenseRetriever(Retriever):
         with open(artifact_path / "documents.pkl", "rb") as f:
             retriever.documents = pickle.load(f)
 
-        print(f"✓ Loaded retriever from: {artifact_path}")
-        print(f"  - {len(retriever.documents)} documents indexed")
+        logger.info("Loaded retriever from: %s (%d docs)", artifact_path, len(retriever.documents))
 
         return retriever
+
+    # Alias for backward compatibility
+    load_index = load

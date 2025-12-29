@@ -89,6 +89,56 @@ class FixedRAGAgent(RAGAgent):
             metadata={"agent_type": "fixed_rag", "num_docs_used": len(retrieved_docs)},
         )
 
+    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+        """Generate answers for multiple queries using batch processing.
+
+        Retrieval is done sequentially (CPU-bound), but generation is batched
+        for much faster GPU throughput.
+
+        Args:
+            queries: List of input questions
+            **kwargs: Additional generation parameters
+
+        Returns:
+            List of RAGResponse objects, one per query
+        """
+        # Retrieve documents for all queries (parallelizable in future)
+        all_docs = [self.retriever.retrieve(q, top_k=self.top_k) for q in queries]
+
+        # Format contexts and build prompts
+        prompts = []
+        contexts = []
+        for query, docs in zip(queries, all_docs):
+            context_text = ContextFormatter.format_numbered(docs)
+            prompt = self.prompt_builder.build_prompt(query=query, context=context_text)
+            prompts.append(prompt)
+            contexts.append(
+                RAGContext(
+                    query=query,
+                    retrieved_docs=docs,
+                    metadata={"top_k": self.top_k, "prompt": prompt, "context_text": context_text},
+                )
+            )
+
+        # Batch generate (single forward pass for all prompts!)
+        answers = self.model.generate(prompts, **kwargs)
+
+        # Create responses
+        responses = []
+        for query, answer, context, docs in zip(queries, answers, contexts, all_docs):
+            response = RAGResponse(
+                answer=answer,
+                context=context,
+                metadata={
+                    "agent_type": "fixed_rag",
+                    "num_docs_used": len(docs),
+                    "batch_processing": True,
+                },
+            )
+            responses.append(response)
+
+        return responses
+
     def save(self, artifact_name: str, retriever_artifact_name: str) -> str:
         """Save agent configuration.
 
