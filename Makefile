@@ -141,12 +141,7 @@ format:
 	uv run black src/ tests/ scripts/ --line-length 100
 	uv run isort src/ tests/ scripts/ --profile black
 
-validate-all-configs:
-	@echo "Validating legacy configs..."
-	@for config in experiments/configs/*.yaml; do \
-		echo "  → $$config"; \
-		uv run python scripts/utils/validate_config.py "$$config"; \
-	done
+validate-configs:
 	@echo "Validating Hydra configs..."
 	uv run python -c "from hydra import compose, initialize_config_dir; from pathlib import Path; conf_dir = Path('conf').absolute(); initialize_config_dir(version_base=None, config_dir=str(conf_dir)).__enter__(); cfg = compose(config_name='config'); print('✅ All configs valid!')"
 
