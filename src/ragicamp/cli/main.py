@@ -154,6 +154,8 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
     """Compute metrics on predictions file."""
+    import os
+
     from ragicamp.evaluation import Evaluator
     from ragicamp.metrics import ExactMatchMetric, F1Metric
 
@@ -163,10 +165,42 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             metrics.append(F1Metric())
         elif name == "exact_match":
             metrics.append(ExactMatchMetric())
+        elif name in ("llm_judge", "llm_judge_qa"):
+            # LLM Judge requires OpenAI
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
+                print("Set it with: export OPENAI_API_KEY='your-key'")
+                return 1
+
+            from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
+            from ragicamp.models.openai import OpenAIModel
+
+            judge_model_name = args.judge_model
+            print(f"Using judge model: {judge_model_name} (max_concurrent={args.max_concurrent})")
+            judge_model = OpenAIModel(judge_model_name, temperature=0.0)
+            metrics.append(
+                LLMJudgeQAMetric(
+                    judge_model=judge_model,
+                    judgment_type=args.judgment_type,
+                    max_concurrent=args.max_concurrent,
+                )
+            )
+        elif name == "bertscore":
+            from ragicamp.metrics import BertScoreMetric
+
+            metrics.append(BertScoreMetric())
+        elif name == "bleurt":
+            from ragicamp.metrics import BLEURTMetric
+
+            metrics.append(BLEURTMetric())
 
     if not metrics:
-        print("No valid metrics specified")
+        print("No valid metrics specified. Available: f1, exact_match, llm_judge_qa, bertscore, bleurt")
         return 1
+
+    print(f"Computing metrics: {[m.name for m in metrics]}")
+    print(f"Predictions file: {args.predictions}")
 
     results = Evaluator.compute_metrics_from_file(
         predictions_path=str(args.predictions),
@@ -239,8 +273,30 @@ def create_parser() -> argparse.ArgumentParser:
     # Evaluate command
     eval_parser = subparsers.add_parser("evaluate", help="Compute metrics")
     eval_parser.add_argument("predictions", type=Path, help="Predictions JSON")
-    eval_parser.add_argument("--metrics", nargs="+", default=["f1", "exact_match"], help="Metrics")
+    eval_parser.add_argument(
+        "--metrics",
+        nargs="+",
+        default=["f1", "exact_match"],
+        help="Metrics: f1, exact_match, llm_judge_qa, bertscore, bleurt",
+    )
     eval_parser.add_argument("--output", type=Path, help="Output file")
+    eval_parser.add_argument(
+        "--judge-model",
+        default="gpt-4o-mini",
+        help="Model for LLM judge (default: gpt-4o-mini)",
+    )
+    eval_parser.add_argument(
+        "--judgment-type",
+        choices=["binary", "ternary"],
+        default="binary",
+        help="LLM judge type: binary or ternary",
+    )
+    eval_parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=20,
+        help="Max concurrent API calls for LLM judge (default: 20)",
+    )
     eval_parser.set_defaults(func=cmd_evaluate)
 
     return parser

@@ -168,9 +168,10 @@ def get_rag_template(key: str, dataset: str) -> str:
         examples = data.get("examples", [])[:n]
         style = data.get("style", "")
         stop_inst = data.get("stop_instruction", "")
+        knowledge_inst = data.get("knowledge_instruction", "")
         ex = "".join(f"Question: {e['question']}\nAnswer: {e['answer']}\n\n" for e in examples)
-        return f"Use the context to answer. {style}\n{stop_inst}\n\n{ex}Context:\n{{context}}\n\nQuestion: {{query}}\nAnswer:"
-    return "Use the context to answer. Give ONLY the answer, nothing else.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
+        return f"Use the context to answer. {knowledge_inst} {style}\n{stop_inst}\n\n{ex}Context:\n{{context}}\n\nQuestion: {{query}}\nAnswer:"
+    return "Use the context to answer, but you may also use your own knowledge. Give ONLY the answer, nothing else.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
 
 
 # ============================================================================

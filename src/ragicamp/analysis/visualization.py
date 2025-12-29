@@ -43,6 +43,20 @@ def _check_matplotlib():
         raise ImportError("matplotlib required. Install with: pip install matplotlib")
 
 
+def _pivot_to_matrix(pivot):
+    """Convert pivot result (DataFrame or dict) to matrix for plotting."""
+    import pandas as pd
+
+    if isinstance(pivot, pd.DataFrame):
+        return pivot.fillna(0).values, list(pivot.index), list(pivot.columns)
+    else:
+        # Dict format
+        row_keys = sorted(pivot.keys())
+        col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
+        matrix = [[pivot.get(r, {}).get(c, 0) for c in col_keys] for r in row_keys]
+        return matrix, row_keys, col_keys
+
+
 def plot_comparison(
     results: List[ExperimentResult],
     group_by: str = "model",
@@ -145,40 +159,43 @@ def plot_heatmap(
         matplotlib Figure
     """
     _check_matplotlib()
+    import pandas as pd
 
     pivot = pivot_results(results, rows=rows, cols=cols, metric=metric)
 
-    # Convert to matrix
-    row_keys = sorted(pivot.keys())
-    col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
-
-    matrix = []
-    for row_key in row_keys:
-        row_data = pivot.get(row_key, {})
-        matrix.append([row_data.get(col, 0) for col in col_keys])
+    # Handle both DataFrame and dict returns
+    if isinstance(pivot, pd.DataFrame):
+        df = pivot.fillna(0)
+    else:
+        # Convert dict to DataFrame
+        row_keys = sorted(pivot.keys())
+        col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
+        matrix = []
+        for row_key in row_keys:
+            row_data = pivot.get(row_key, {})
+            matrix.append([row_data.get(col, 0) for col in col_keys])
+        df = pd.DataFrame(matrix, index=row_keys, columns=col_keys)
 
     fig, ax = plt.subplots(figsize=figsize)
 
     if SEABORN_AVAILABLE:
-        import pandas as pd
-
-        df = pd.DataFrame(matrix, index=row_keys, columns=col_keys)
         sns.heatmap(df, annot=annotate, fmt=".3f", cmap=cmap, ax=ax)
     else:
-        im = ax.imshow(matrix, cmap=cmap, aspect="auto")
-        ax.set_xticks(range(len(col_keys)))
-        ax.set_yticks(range(len(row_keys)))
-        ax.set_xticklabels(col_keys)
-        ax.set_yticklabels(row_keys)
+        im = ax.imshow(df.values, cmap=cmap, aspect="auto")
+        ax.set_xticks(range(len(df.columns)))
+        ax.set_yticks(range(len(df.index)))
+        ax.set_xticklabels(df.columns)
+        ax.set_yticklabels(df.index)
         plt.colorbar(im, ax=ax)
 
         if annotate:
-            for i, row in enumerate(matrix):
-                for j, val in enumerate(row):
+            for i in range(len(df.index)):
+                for j in range(len(df.columns)):
+                    val = df.iloc[i, j]
                     ax.text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=9)
 
-    ax.set_xlabel(cols.title(), fontsize=12)
-    ax.set_ylabel(rows.title(), fontsize=12)
+    ax.set_xlabel(cols.replace("_", " ").title(), fontsize=12)
+    ax.set_ylabel(rows.replace("_", " ").title(), fontsize=12)
     ax.set_title(title or f"{metric.upper()}: {rows.title()} × {cols.title()}", fontsize=14)
 
     plt.tight_layout()
@@ -254,9 +271,9 @@ def plot_scatter(
 
     Args:
         results: List of experiment results
-        x_metric: Metric for x-axis
-        y_metric: Metric for y-axis
-        color_by: Dimension to color by
+        x_metric: Metric for x-axis (f1, exact_match, bertscore_f1, bleurt, llm_judge, etc.)
+        y_metric: Metric for y-axis (throughput_qps, duration, or any metric)
+        color_by: Dimension to color by (model, embedding_model, chunk_size, top_k, etc.)
         figsize: Figure size
         title: Plot title
 
@@ -270,7 +287,16 @@ def plot_scatter(
     # Group by color dimension
     groups = {}
     for r in results:
-        key = r.model_short if color_by == "model" else str(getattr(r, color_by, "unknown"))
+        if color_by == "model":
+            key = r.model_short
+        elif color_by == "embedding_model":
+            key = r.embedding_model if r.embedding_model != "unknown" else "none"
+        elif color_by == "chunk_size":
+            key = str(r.chunk_size) if r.chunk_size > 0 else "none"
+        elif color_by == "top_k":
+            key = str(r.top_k) if r.top_k else "none"
+        else:
+            key = str(getattr(r, color_by, "unknown"))
         if key not in groups:
             groups[key] = {"x": [], "y": [], "names": []}
         groups[key]["x"].append(getattr(r, x_metric, 0))
@@ -301,8 +327,8 @@ def plot_distribution(
 
     Args:
         results: List of experiment results
-        metric: Metric to plot
-        group_by: Optional grouping dimension
+        metric: Metric to plot (f1, exact_match, bertscore_f1, bleurt, llm_judge, etc.)
+        group_by: Optional grouping dimension (model, embedding_model, chunk_size, top_k, etc.)
         figsize: Figure size
         title: Plot title
 
@@ -317,10 +343,21 @@ def plot_distribution(
         # Group data
         groups = {}
         for r in results:
-            key = r.model_short if group_by == "model" else str(getattr(r, group_by, "unknown"))
+            if group_by == "model":
+                key = r.model_short
+            elif group_by == "embedding_model":
+                key = r.embedding_model if r.embedding_model != "unknown" else "none"
+            elif group_by == "chunk_size":
+                key = str(r.chunk_size) if r.chunk_size > 0 else "none"
+            elif group_by == "top_k":
+                key = str(r.top_k) if r.top_k else "none"
+            else:
+                key = str(getattr(r, group_by, "unknown"))
             if key not in groups:
                 groups[key] = []
-            groups[key].append(getattr(r, metric, 0))
+            val = getattr(r, metric, None)
+            if val is not None:
+                groups[key].append(val)
 
         if SEABORN_AVAILABLE:
             import pandas as pd
@@ -379,18 +416,17 @@ def create_summary_dashboard(
 
     # 2. Heatmap: model x dataset
     pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
-    row_keys = sorted(pivot.keys())
-    col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
-    matrix = [[pivot.get(r, {}).get(c, 0) for c in col_keys] for r in row_keys]
+    matrix, row_keys, col_keys = _pivot_to_matrix(pivot)
 
     im = axes[0, 1].imshow(matrix, cmap="YlGnBu", aspect="auto")
     axes[0, 1].set_xticks(range(len(col_keys)))
     axes[0, 1].set_yticks(range(len(row_keys)))
     axes[0, 1].set_xticklabels(col_keys)
-    axes[0, 1].set_yticklabels([r[:15] for r in row_keys])
+    axes[0, 1].set_yticklabels([str(r)[:15] for r in row_keys])
     axes[0, 1].set_title("F1: Model × Dataset", fontsize=12)
-    for i, row in enumerate(matrix):
-        for j, val in enumerate(row):
+    for i in range(len(row_keys)):
+        for j in range(len(col_keys)):
+            val = matrix[i][j] if isinstance(matrix, list) else matrix[i, j]
             axes[0, 1].text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=9)
 
     # 3. Prompt comparison
@@ -412,6 +448,117 @@ def create_summary_dashboard(
         axes[1, 1].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom")
 
     plt.suptitle("Experiment Summary Dashboard", fontsize=16, y=1.02)
+    plt.tight_layout()
+    return fig
+
+
+def create_rag_breakdown_dashboard(
+    results: List[ExperimentResult],
+    metric: str = "f1",
+    figsize: Tuple[int, int] = (16, 12),
+) -> "plt.Figure":
+    """Create a dashboard breaking down RAG performance by retrieval configurations.
+
+    Args:
+        results: List of experiment results
+        metric: Metric to analyze (f1, exact_match, bertscore_f1, bleurt, etc.)
+        figsize: Figure size
+
+    Returns:
+        matplotlib Figure with 6 subplots
+    """
+    _check_matplotlib()
+
+    # Filter to RAG results only
+    rag_results = [r for r in results if r.type == "rag"]
+    if not rag_results:
+        raise ValueError("No RAG results found in input")
+
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    axes = axes.flatten()
+
+    # 1. By Embedding Model
+    stats = compare_results(rag_results, group_by="embedding_model", metric=metric)
+    groups = list(stats.keys())
+    means = [stats[g]["mean"] for g in groups]
+    stds = [stats[g]["std"] for g in groups]
+    axes[0].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set2.colors[:len(groups)])
+    axes[0].set_title(f"{metric.upper()} by Embedding Model", fontsize=11, fontweight="bold")
+    axes[0].set_ylabel(metric.upper())
+    for i, m in enumerate(means):
+        axes[0].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom", fontsize=9)
+
+    # 2. By Chunk Size
+    stats = compare_results(rag_results, group_by="chunk_size", metric=metric)
+    groups = list(stats.keys())
+    means = [stats[g]["mean"] for g in groups]
+    stds = [stats[g]["std"] for g in groups]
+    axes[1].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set3.colors[:len(groups)])
+    axes[1].set_title(f"{metric.upper()} by Chunk Size", fontsize=11, fontweight="bold")
+    axes[1].set_ylabel(metric.upper())
+    for i, m in enumerate(means):
+        axes[1].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom", fontsize=9)
+
+    # 3. By top_k
+    stats = compare_results(rag_results, group_by="top_k", metric=metric)
+    groups = list(stats.keys())
+    means = [stats[g]["mean"] for g in groups]
+    stds = [stats[g]["std"] for g in groups]
+    axes[2].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Pastel1.colors[:len(groups)])
+    axes[2].set_title(f"{metric.upper()} by top_k", fontsize=11, fontweight="bold")
+    axes[2].set_ylabel(metric.upper())
+    for i, m in enumerate(means):
+        axes[2].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom", fontsize=9)
+
+    # 4. Heatmap: Embedding × Chunk Size
+    pivot = pivot_results(rag_results, rows="embedding_model", cols="chunk_size", metric=metric)
+    matrix, row_keys, col_keys = _pivot_to_matrix(pivot)
+    im = axes[3].imshow(matrix, cmap="YlGnBu", aspect="auto")
+    axes[3].set_xticks(range(len(col_keys)))
+    axes[3].set_yticks(range(len(row_keys)))
+    axes[3].set_xticklabels(col_keys)
+    axes[3].set_yticklabels(row_keys)
+    axes[3].set_title(f"{metric.upper()}: Embedding × Chunk Size", fontsize=11, fontweight="bold")
+    axes[3].set_xlabel("Chunk Size")
+    axes[3].set_ylabel("Embedding Model")
+    for i in range(len(row_keys)):
+        for j in range(len(col_keys)):
+            val = matrix[i][j] if isinstance(matrix, list) else matrix[i, j]
+            if val > 0:
+                axes[3].text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=9)
+    plt.colorbar(im, ax=axes[3])
+
+    # 5. Heatmap: Embedding × top_k
+    pivot = pivot_results(rag_results, rows="embedding_model", cols="top_k", metric=metric)
+    matrix, row_keys, col_keys = _pivot_to_matrix(pivot)
+    im = axes[4].imshow(matrix, cmap="YlGnBu", aspect="auto")
+    axes[4].set_xticks(range(len(col_keys)))
+    axes[4].set_yticks(range(len(row_keys)))
+    axes[4].set_xticklabels(col_keys)
+    axes[4].set_yticklabels(row_keys)
+    axes[4].set_title(f"{metric.upper()}: Embedding × top_k", fontsize=11, fontweight="bold")
+    axes[4].set_xlabel("top_k")
+    axes[4].set_ylabel("Embedding Model")
+    for i in range(len(row_keys)):
+        for j in range(len(col_keys)):
+            val = matrix[i][j] if isinstance(matrix, list) else matrix[i, j]
+            if val > 0:
+                axes[4].text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=9)
+    plt.colorbar(im, ax=axes[4])
+
+    # 6. By Model (LLM)
+    stats = compare_results(rag_results, group_by="model", metric=metric)
+    groups = list(stats.keys())
+    means = [stats[g]["mean"] for g in groups]
+    stds = [stats[g]["std"] for g in groups]
+    axes[5].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.tab10.colors[:len(groups)])
+    axes[5].set_title(f"{metric.upper()} by LLM", fontsize=11, fontweight="bold")
+    axes[5].set_ylabel(metric.upper())
+    axes[5].tick_params(axis="x", rotation=45)
+    for i, m in enumerate(means):
+        axes[5].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom", fontsize=9)
+
+    plt.suptitle(f"RAG Configuration Analysis: {metric.upper()}", fontsize=16, fontweight="bold", y=1.02)
     plt.tight_layout()
     return fig
 

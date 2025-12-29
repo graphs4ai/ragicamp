@@ -158,16 +158,34 @@ class ExperimentSpec:
     batch_size: int = 8
 
 
+def _get_batch_size(model_spec: str, config: Dict[str, Any]) -> int:
+    """Get batch size for a model, checking model_batch_sizes mapping first."""
+    default_batch_size = config.get("batch_size", 8)
+    model_batch_sizes = config.get("model_batch_sizes", {})
+    
+    # Check for exact match first
+    if model_spec in model_batch_sizes:
+        return model_batch_sizes[model_spec]
+    
+    # Check for partial matches (model name without prefix)
+    model_name = model_spec.split(":")[-1] if ":" in model_spec else model_spec
+    for pattern, bs in model_batch_sizes.items():
+        if pattern in model_name or pattern in model_spec:
+            return bs
+    
+    return default_batch_size
+
+
 def build_experiments(config: Dict[str, Any]) -> List[ExperimentSpec]:
     """Build experiment list from study config."""
     experiments = []
     datasets = config.get("datasets", ["nq"])
-    batch_size = config.get("batch_size", 8)
 
     # Direct experiments
     direct = config.get("direct", {})
     if direct.get("enabled", False):
         for model in direct.get("models", []):
+            batch_size = _get_batch_size(model, config)
             for prompt in direct.get("prompts", ["default"]):
                 for quant in direct.get("quantization", ["4bit"]):
                     if model.startswith("openai:") and quant != "4bit":
@@ -190,6 +208,7 @@ def build_experiments(config: Dict[str, Any]) -> List[ExperimentSpec]:
     rag = config.get("rag", {})
     if rag.get("enabled", False):
         for model in rag.get("models", []):
+            batch_size = _get_batch_size(model, config)
             for retriever in rag.get("retrievers", []):
                 for k in rag.get("top_k_values", [5]):
                     for prompt in rag.get("prompts", ["default"]):

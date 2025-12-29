@@ -383,8 +383,34 @@ class Evaluator:
 
         preds = data.get("predictions", [])
         predictions = [p["prediction"] for p in preds]
-        references = [p["expected"] for p in preds]
         questions = [p["question"] for p in preds]
+
+        # Try to get references from predictions file
+        if preds and "expected" in preds[0]:
+            references = [p["expected"] for p in preds]
+        else:
+            # Look for questions file in same directory
+            pred_path = Path(predictions_path)
+            questions_files = list(pred_path.parent.glob("*_questions.json"))
+
+            if questions_files:
+                logger.info("Loading expected answers from: %s", questions_files[0])
+                with open(questions_files[0]) as f:
+                    q_data = json.load(f)
+
+                # Build lookup by question_id
+                q_lookup = {}
+                for q in q_data.get("questions", []):
+                    q_lookup[q["id"]] = q.get("expected_answer", q.get("answer", ""))
+
+                # Match predictions to expected answers
+                references = []
+                for p in preds:
+                    qid = p.get("question_id", "")
+                    references.append(q_lookup.get(qid, ""))
+            else:
+                logger.warning("No expected answers found - metrics may be inaccurate")
+                references = [""] * len(predictions)
 
         logger.info("Computing %d metrics on %d predictions...", len(metrics), len(predictions))
 
@@ -405,10 +431,45 @@ class Evaluator:
         results["num_examples"] = len(predictions)
         results["predictions_file"] = predictions_path
 
+        # Update per-item metrics in predictions file if metric supports it
+        updated_predictions = False
+        for metric in metrics:
+            if hasattr(metric, "get_per_item_scores"):
+                per_item_scores = metric.get_per_item_scores()
+                if len(per_item_scores) == len(preds):
+                    for i, score in enumerate(per_item_scores):
+                        if "metrics" not in preds[i]:
+                            preds[i]["metrics"] = {}
+                        preds[i]["metrics"][metric.name] = score
+                    updated_predictions = True
+
+        # Save updated predictions back to original file
+        if updated_predictions:
+            with open(predictions_path, "w") as f:
+                json.dump(data, f, indent=2)
+            logger.info("Updated predictions file with new metrics: %s", predictions_path)
+
+            # Also update summary file if it exists
+            pred_path = Path(predictions_path)
+            summary_path = pred_path.parent / pred_path.name.replace("_predictions.json", "_summary.json")
+            if summary_path.exists():
+                try:
+                    with open(summary_path) as f:
+                        summary_data = json.load(f)
+                    if "overall_metrics" in summary_data:
+                        summary_data["overall_metrics"].update(results)
+                    else:
+                        summary_data.update(results)
+                    with open(summary_path, "w") as f:
+                        json.dump(summary_data, f, indent=2)
+                    logger.info("Updated summary file: %s", summary_path)
+                except Exception as e:
+                    logger.warning("Could not update summary: %s", e)
+
         if output_path:
             ensure_dir(output_path)
             with open(output_path, "w") as f:
                 json.dump(results, f, indent=2)
-            logger.debug("Results saved: %s", output_path)
+            logger.debug("Summary saved: %s", output_path)
 
         return results

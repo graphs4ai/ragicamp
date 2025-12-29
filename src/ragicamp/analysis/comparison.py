@@ -23,30 +23,43 @@ def compare_results(
 
     Args:
         results: List of experiment results
-        group_by: Dimension to group by (model, dataset, prompt, retriever, quantization, type)
-        metric: Metric to compare (f1, exact_match, bertscore_f1, bleurt)
+        group_by: Dimension to group by. Options:
+            - model, dataset, prompt, type, quantization (basic)
+            - retriever (full retriever name)
+            - embedding_model, corpus, chunk_size, chunk_strategy (parsed from retriever)
+            - top_k (number of retrieved docs)
+        metric: Metric to compare. Options:
+            - f1, exact_match, bertscore_f1, bleurt (always available)
+            - bertscore_precision, bertscore_recall
+            - llm_judge (if computed)
+            - throughput_qps, duration
         sort: Sort by metric value descending
 
     Returns:
-        Dict mapping group values to stats: {group: {mean, min, max, count, values}}
+        Dict mapping group values to stats: {group: {mean, min, max, count, std}}
 
     Example:
-        >>> compare_results(results, group_by="model", metric="f1")
-        {
-            "gemma-2b-it": {"mean": 0.15, "min": 0.07, "max": 0.21, "count": 24},
-            "Llama-3.2-3B": {"mean": 0.18, "min": 0.10, "max": 0.25, "count": 24},
-        }
+        >>> compare_results(results, group_by="embedding_model", metric="f1")
+        >>> compare_results(results, group_by="chunk_size", metric="bleurt")
     """
     groups: Dict[str, List[float]] = defaultdict(list)
 
     for r in results:
-        # Get group key
+        # Get group key based on dimension
         if group_by == "model":
             key = r.model_short
         elif group_by == "retriever":
-            key = r.retriever_short
+            key = r.retriever_short if r.retriever else "none"
         elif group_by == "model_full":
             key = r.model
+        elif group_by == "embedding_model":
+            key = r.embedding_model if r.embedding_model != "unknown" else "none"
+        elif group_by == "chunk_size":
+            key = str(r.chunk_size) if r.chunk_size > 0 else "none"
+        elif group_by == "corpus":
+            key = r.corpus if r.corpus != "unknown" else "none"
+        elif group_by == "top_k":
+            key = str(r.top_k) if r.top_k else "none"
         else:
             key = str(getattr(r, group_by, "unknown"))
 
@@ -110,47 +123,81 @@ def pivot_results(
     cols: str = "dataset",
     metric: str = "f1",
     agg: str = "mean",
-) -> Dict[str, Dict[str, float]]:
+) -> Any:
     """Create a pivot table of results.
 
     Args:
         results: List of experiment results
-        rows: Dimension for rows (model, prompt, quantization, etc.)
-        cols: Dimension for columns (dataset, retriever, etc.)
+        rows: Dimension for rows (model, prompt, quantization, embedding_model, etc.)
+        cols: Dimension for columns (dataset, retriever, chunk_size, top_k, etc.)
         metric: Metric to aggregate
         agg: Aggregation function (mean, max, min)
 
     Returns:
-        Nested dict: {row_key: {col_key: value}}
+        pandas DataFrame if pandas available, else nested dict
 
     Example:
         >>> pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
-        >>> # Pretty print as table
-        >>> for model, datasets in pivot.items():
-        ...     print(f"{model}: NQ={datasets.get('nq', 0):.2f}, HotpotQA={datasets.get('hotpotqa', 0):.2f}")
+        >>> print(pivot)  # Nice DataFrame output
     """
     # Collect values per cell
     cells: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
 
     for r in results:
-        row_key = r.model_short if rows == "model" else str(getattr(r, rows, "unknown"))
-        col_key = str(getattr(r, cols, "unknown"))
-        value = getattr(r, metric, None)
+        # Get row key
+        if rows == "model":
+            row_key = r.model_short
+        elif rows == "embedding_model":
+            row_key = r.embedding_model if r.embedding_model != "unknown" else "none"
+        elif rows == "chunk_size":
+            row_key = str(r.chunk_size) if r.chunk_size > 0 else "none"
+        else:
+            row_key = str(getattr(r, rows, "unknown"))
 
+        # Get col key
+        if cols == "model":
+            col_key = r.model_short
+        elif cols == "embedding_model":
+            col_key = r.embedding_model if r.embedding_model != "unknown" else "none"
+        elif cols == "chunk_size":
+            col_key = str(r.chunk_size) if r.chunk_size > 0 else "none"
+        elif cols == "top_k":
+            col_key = str(r.top_k) if r.top_k else "none"
+        else:
+            col_key = str(getattr(r, cols, "unknown"))
+
+        value = getattr(r, metric, None)
         if value is not None:
             cells[row_key][col_key].append(value)
 
     # Aggregate
     agg_fn = {"mean": lambda x: sum(x) / len(x), "max": max, "min": min}.get(agg, lambda x: x[0])
 
-    pivot = {}
+    pivot_dict = {}
     for row_key, col_dict in cells.items():
-        pivot[row_key] = {}
+        pivot_dict[row_key] = {}
         for col_key, values in col_dict.items():
             if values:
-                pivot[row_key][col_key] = agg_fn(values)
+                pivot_dict[row_key][col_key] = agg_fn(values)
 
-    return pivot
+    # Try to return DataFrame if pandas available
+    try:
+        import pandas as pd
+
+        df = pd.DataFrame(pivot_dict).T
+
+        # Sort columns - try numeric first, then string
+        def sort_key(x):
+            try:
+                return (0, int(x))  # Numeric columns first
+            except (ValueError, TypeError):
+                return (1, str(x))  # Then string columns
+
+        sorted_cols = sorted(df.columns, key=sort_key)
+        df = df.reindex(sorted_cols, axis=1)
+        return df
+    except ImportError:
+        return pivot_dict
 
 
 def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
@@ -179,20 +226,35 @@ def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
         "types": list(set(r.type for r in results)),
     }
 
+    # RAG-specific counts
+    rag_results = [r for r in results if r.type == "rag"]
+    if rag_results:
+        summary["embedding_models"] = list(set(r.embedding_model for r in rag_results if r.embedding_model != "unknown"))
+        summary["chunk_sizes"] = list(set(r.chunk_size for r in rag_results if r.chunk_size > 0))
+        summary["corpora"] = list(set(r.corpus for r in rag_results if r.corpus != "unknown"))
+
     # Best by each metric
-    for metric in ["f1", "exact_match", "bertscore_f1", "bleurt"]:
-        best = max(results, key=lambda r: getattr(r, metric, 0))
-        summary[f"best_{metric}"] = {
-            "name": best.name,
-            "value": getattr(best, metric, 0),
-            "model": best.model_short,
-            "dataset": best.dataset,
-            "prompt": best.prompt,
-        }
+    all_metrics = ["f1", "exact_match", "bertscore_f1", "bertscore_precision", "bertscore_recall", "bleurt"]
+    
+    # Add llm_judge if any results have it
+    if any(r.llm_judge is not None for r in results):
+        all_metrics.append("llm_judge")
+
+    for metric in all_metrics:
+        valid_results = [r for r in results if getattr(r, metric, None) is not None]
+        if valid_results:
+            best = max(valid_results, key=lambda r: getattr(r, metric, 0))
+            summary[f"best_{metric}"] = {
+                "name": best.name,
+                "value": getattr(best, metric, 0),
+                "model": best.model_short,
+                "dataset": best.dataset,
+                "prompt": best.prompt,
+            }
 
     # Averages
-    for metric in ["f1", "exact_match", "bertscore_f1", "bleurt", "throughput_qps"]:
-        values = [getattr(r, metric, 0) for r in results]
+    for metric in all_metrics + ["throughput_qps"]:
+        values = [getattr(r, metric, 0) for r in results if getattr(r, metric, None) is not None]
         summary[f"avg_{metric}"] = sum(values) / len(values) if values else 0
 
     # Total duration

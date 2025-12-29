@@ -41,6 +41,7 @@ except ImportError:
 # Visualization is optional (requires matplotlib)
 try:
     from ragicamp.analysis.visualization import (
+        create_rag_breakdown_dashboard,
         create_summary_dashboard,
         plot_comparison,
         plot_distribution,
@@ -57,6 +58,7 @@ except ImportError:
     plot_scatter = None  # type: ignore
     plot_distribution = None  # type: ignore
     create_summary_dashboard = None  # type: ignore
+    create_rag_breakdown_dashboard = None  # type: ignore
     VISUALIZATION_AVAILABLE = False
 
 __all__ = [
@@ -80,6 +82,7 @@ __all__ = [
     "plot_scatter",
     "plot_distribution",
     "create_summary_dashboard",
+    "create_rag_breakdown_dashboard",
     "VISUALIZATION_AVAILABLE",
 ]
 

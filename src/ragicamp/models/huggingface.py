@@ -62,6 +62,9 @@ class HuggingFaceModel(LanguageModel):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
+        # Use left-padding for decoder-only models (required for correct generation)
+        self.tokenizer.padding_side = "left"
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="auto" if self._use_quantization else None,
