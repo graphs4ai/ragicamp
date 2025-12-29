@@ -82,10 +82,11 @@ class FixedRAGAgent(RAGAgent):
         # Generate answer
         answer = self.model.generate(prompt, **kwargs)
 
-        # Return response
+        # Return response with prompt for debugging/analysis
         return RAGResponse(
             answer=answer,
             context=context,
+            prompt=prompt,
             metadata={"agent_type": "fixed_rag", "num_docs_used": len(retrieved_docs)},
         )
 
@@ -123,12 +124,15 @@ class FixedRAGAgent(RAGAgent):
         # Batch generate (single forward pass for all prompts!)
         answers = self.model.generate(prompts, **kwargs)
 
-        # Create responses
+        # Create responses with prompts for debugging/analysis
         responses = []
-        for query, answer, context, docs in zip(queries, answers, contexts, all_docs):
+        for query, prompt, answer, context, docs in zip(
+            queries, prompts, answers, contexts, all_docs
+        ):
             response = RAGResponse(
                 answer=answer,
                 context=context,
+                prompt=prompt,
                 metadata={
                     "agent_type": "fixed_rag",
                     "num_docs_used": len(docs),

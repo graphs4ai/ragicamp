@@ -52,8 +52,13 @@ class DirectLLMAgent(RAGAgent):
         # Generate answer
         answer = self.model.generate(prompt, **kwargs)
 
-        # Return response
-        return RAGResponse(answer=answer, context=context, metadata={"agent_type": "direct_llm"})
+        # Return response with prompt for debugging/analysis
+        return RAGResponse(
+            answer=answer,
+            context=context,
+            prompt=prompt,
+            metadata={"agent_type": "direct_llm"},
+        )
 
     def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
         """Generate answers for multiple queries using batch processing.
@@ -74,13 +79,14 @@ class DirectLLMAgent(RAGAgent):
         # Batch generate (single forward pass!)
         answers = self.model.generate(prompts, **kwargs)
 
-        # Create responses
+        # Create responses with prompts for debugging/analysis
         responses = []
-        for query, answer in zip(queries, answers):
+        for query, prompt, answer in zip(queries, prompts, answers):
             context = RAGContext(query=query)
             response = RAGResponse(
                 answer=answer,
                 context=context,
+                prompt=prompt,
                 metadata={"agent_type": "direct_llm", "batch_processing": True},
             )
             responses.append(response)

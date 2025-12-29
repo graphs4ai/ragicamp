@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 from ragicamp import Experiment, run_experiments
 from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
 from ragicamp.datasets import HotpotQADataset, NaturalQuestionsDataset, TriviaQADataset
-from ragicamp.metrics import ExactMatchMetric, F1Metric
+from ragicamp.factory import ComponentFactory
 from ragicamp.models import HuggingFaceModel, OpenAIModel
 from ragicamp.retrievers import DenseRetriever
 from ragicamp.utils.resource_manager import ResourceManager
@@ -84,58 +84,30 @@ def get_rag_template(prompt_key: str, dataset_name: str) -> str:
 
 
 def create_model(model_spec: str, quantization: str = "4bit"):
-    """Create model from spec string like 'hf:google/gemma-2b-it' or 'openai:gpt-4o-mini'."""
-    if ":" in model_spec:
-        provider, model_name = model_spec.split(":", 1)
-    else:
-        provider, model_name = "openai", model_spec
-
-    if provider == "openai":
-        return OpenAIModel(name=model_name, temperature=0.0)
-    elif provider == "hf":
-        return HuggingFaceModel(
-            model_name=model_name,
-            load_in_4bit=(quantization == "4bit"),
-            load_in_8bit=(quantization == "8bit"),
-        )
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    """Create model from spec string using ComponentFactory."""
+    config = ComponentFactory.parse_model_spec(model_spec, quantization=quantization)
+    return ComponentFactory.create_model(config)
 
 
 def create_dataset(name: str, num_questions: Optional[int] = None):
-    """Create dataset by name."""
-    datasets = {
-        "nq": NaturalQuestionsDataset,
-        "triviaqa": TriviaQADataset,
-        "hotpotqa": HotpotQADataset,
-    }
-    if name not in datasets:
-        raise ValueError(f"Unknown dataset: {name}")
-
-    dataset = datasets[name](split="validation")
-    if num_questions:
-        dataset.examples = dataset.examples[:num_questions]
-    return dataset
+    """Create dataset by name using ComponentFactory."""
+    config = ComponentFactory.parse_dataset_spec(name, limit=num_questions)
+    return ComponentFactory.create_dataset(config)
 
 
-def create_metrics(names: List[str]):
-    """Create metrics from names."""
-    from ragicamp.metrics import BERTScoreMetric, BLEURTMetric
+def create_judge_model(llm_judge_config: Optional[Dict[str, Any]]):
+    """Create LLM judge model from config."""
+    if not llm_judge_config:
+        return None
 
-    result = []
-    for name in names:
-        try:
-            if name == "f1":
-                result.append(F1Metric())
-            elif name == "exact_match":
-                result.append(ExactMatchMetric())
-            elif name == "bertscore":
-                result.append(BERTScoreMetric())
-            elif name == "bleurt":
-                result.append(BLEURTMetric())
-        except Exception as e:
-            print(f"  Warning: Could not create metric {name}: {e}")
-    return result
+    model_spec = llm_judge_config.get("model", "openai:gpt-4o-mini")
+
+    if model_spec.startswith("openai:"):
+        model_name = model_spec.split(":", 1)[1]
+        return OpenAIModel(model_name=model_name)
+    else:
+        print(f"  Warning: LLM judge only supports OpenAI models, got: {model_spec}")
+        return None
 
 
 # ============================================================================
@@ -258,6 +230,7 @@ def run_experiment_spec(
     num_questions: Optional[int],
     metrics: List[str],
     output_dir: Path,
+    llm_judge_config: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run a single experiment from spec."""
     import time
@@ -293,7 +266,9 @@ def run_experiment_spec(
                 context_template=template,
             )
 
-        metric_objs = create_metrics(metrics)
+        # Create metrics using factory pattern
+        judge_model = create_judge_model(llm_judge_config) if "llm_judge" in metrics else None
+        metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
 
         # Create and run experiment
         exp = Experiment(
@@ -352,11 +327,15 @@ def run_study(config: Dict[str, Any], dry_run: bool = False, skip_existing: bool
     experiments = build_experiments(config)
     num_questions = config.get("num_questions")
     metrics = config.get("metrics", ["f1", "exact_match"])
+    llm_judge_config = config.get("llm_judge")  # Optional LLM judge settings
     output_dir = Path(config.get("output_dir", "outputs"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nExperiments: {len(experiments)}")
     print(f"Questions: {num_questions or 'all'}")
+    print(f"Metrics: {', '.join(metrics)}")
+    if llm_judge_config and "llm_judge" in metrics:
+        print(f"LLM Judge: {llm_judge_config.get('model', 'openai:gpt-4o-mini')}")
     print(f"Output: {output_dir}")
 
     if dry_run:
@@ -376,7 +355,7 @@ def run_study(config: Dict[str, Any], dry_run: bool = False, skip_existing: bool
             skipped += 1
             continue
 
-        result = run_experiment_spec(spec, num_questions, metrics, output_dir)
+        result = run_experiment_spec(spec, num_questions, metrics, output_dir, llm_judge_config)
         if result:
             completed += 1
         else:

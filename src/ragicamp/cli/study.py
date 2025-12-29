@@ -116,7 +116,7 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
 
 from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
 from ragicamp.datasets import HotpotQADataset, NaturalQuestionsDataset, TriviaQADataset
-from ragicamp.metrics import ExactMatchMetric, F1Metric
+from ragicamp.factory import ComponentFactory
 from ragicamp.models import HuggingFaceModel, OpenAIModel
 from ragicamp.retrievers import DenseRetriever
 from ragicamp.utils.resource_manager import ResourceManager
@@ -180,40 +180,29 @@ def get_rag_template(key: str, dataset: str) -> str:
 
 
 def create_model(spec: str, quant: str = "4bit"):
-    """Create model from spec."""
+    """Create model from spec using ComponentFactory."""
     validate_model_spec(spec)
-    provider, name = spec.split(":", 1)
-    if provider == "openai":
-        return OpenAIModel(name=name, temperature=0.0)
-    return HuggingFaceModel(
-        model_name=name,
-        load_in_4bit=(quant == "4bit"),
-        load_in_8bit=(quant == "8bit"),
-    )
+    config = ComponentFactory.parse_model_spec(spec, quantization=quant)
+    return ComponentFactory.create_model(config)
 
 
 def create_dataset(name: str, limit: Optional[int] = None):
-    """Create dataset."""
-    datasets = {
-        "nq": NaturalQuestionsDataset,
-        "triviaqa": TriviaQADataset,
-        "hotpotqa": HotpotQADataset,
-    }
-    ds = datasets[name](split="validation")
-    if limit:
-        ds.examples = ds.examples[:limit]
-    return ds
+    """Create dataset using ComponentFactory."""
+    config = ComponentFactory.parse_dataset_spec(name, limit=limit)
+    return ComponentFactory.create_dataset(config)
 
 
-def create_metrics(names: List[str]):
-    """Create metrics."""
-    result = []
-    for name in names:
-        if name == "f1":
-            result.append(F1Metric())
-        elif name == "exact_match":
-            result.append(ExactMatchMetric())
-    return result
+def create_judge_model(llm_judge_config: Optional[Dict[str, Any]]):
+    """Create LLM judge model from config."""
+    if not llm_judge_config:
+        return None
+
+    model_spec = llm_judge_config.get("model", "openai:gpt-4o-mini")
+
+    if model_spec.startswith("openai:"):
+        model_name = model_spec.split(":", 1)[1]
+        return OpenAIModel(model_name=model_name)
+    return None
 
 
 # ============================================================================
@@ -282,7 +271,7 @@ def _name(t, m, p, d, q, r=None, k=None):
     return f"{t}_{m}_{p}_{d}{s}" if t == "direct" else f"{t}_{m}_{r}_k{k}_{p}_{d}{s}"
 
 
-def run_spec(spec: ExpSpec, limit: Optional[int], metrics: List[str], out: Path) -> bool:
+def run_spec(spec: ExpSpec, limit: Optional[int], metrics: List[str], out: Path, judge_model=None) -> bool:
     """Run single experiment."""
     import time
 
@@ -312,7 +301,7 @@ def run_spec(spec: ExpSpec, limit: Optional[int], metrics: List[str], out: Path)
                 spec.name, model, retriever, spec.top_k, context_template=template
             )
 
-        metric_objs = create_metrics(metrics)
+        metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
 
         exp = Experiment(spec.name, agent, dataset, metric_objs, out, _model=model)
         result = exp.run(batch_size=spec.batch_size, checkpoint_every=50, resume=True)
@@ -372,11 +361,19 @@ def run_study(
     specs = build_specs(config)
     limit = config.get("num_questions")
     metrics = config.get("metrics", ["f1", "exact_match"])
+    llm_judge_config = config.get("llm_judge")
     out = Path(config.get("output_dir", "outputs"))
     out.mkdir(parents=True, exist_ok=True)
 
+    # Create judge model once if needed
+    judge_model = None
+    if llm_judge_config and "llm_judge" in metrics:
+        judge_model = create_judge_model(llm_judge_config)
+        print(f"LLM Judge: {llm_judge_config.get('model', 'openai:gpt-4o-mini')}")
+
     print(f"\nExperiments: {len(specs)}")
     print(f"Questions: {limit or 'all'}")
+    print(f"Metrics: {', '.join(metrics)}")
     print(f"Output: {out}")
 
     if dry_run:
@@ -394,7 +391,7 @@ def run_study(
             skip += 1
             continue
 
-        if run_spec(spec, limit, metrics, out):
+        if run_spec(spec, limit, metrics, out, judge_model):
             ok += 1
         else:
             fail += 1

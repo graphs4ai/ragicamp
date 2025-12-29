@@ -178,6 +178,7 @@ class Experiment:
         predictions = []
         references = []
         questions = []
+        prompts = []  # Track prompts for debugging/analysis
         start_idx = 0
 
         # Resume from checkpoint
@@ -209,12 +210,14 @@ class Experiment:
                         predictions.append(resp.answer)
                         references.append(ex.answers)
                         questions.append(ex.question)
+                        prompts.append(resp.prompt)
                 except Exception as e:
                     logger.warning("Batch failed: %s", e)
                     for ex in batch:
                         predictions.append(f"[ERROR: {str(e)[:50]}]")
                         references.append(ex.answers)
                         questions.append(ex.question)
+                        prompts.append(None)
 
                 # Checkpoint
                 if checkpoint_every and len(predictions) % checkpoint_every == 0:
@@ -230,8 +233,10 @@ class Experiment:
                 try:
                     response = self.agent.answer(ex.question, **kwargs)
                     predictions.append(response.answer)
+                    prompts.append(response.prompt)
                 except Exception as e:
                     predictions.append(f"[ERROR: {str(e)[:50]}]")
+                    prompts.append(None)
 
                 references.append(ex.answers)
                 questions.append(ex.question)
@@ -280,13 +285,13 @@ class Experiment:
             },
         )
 
-        # Save predictions
+        # Save predictions with prompts for debugging/analysis
         if save_predictions:
             predictions_data = {
                 "experiment": self.name,
                 "predictions": [
-                    {"question": q, "prediction": p, "expected": r}
-                    for q, p, r in zip(questions, predictions, references)
+                    {"question": q, "prediction": p, "expected": r, "prompt": pr}
+                    for q, p, r, pr in zip(questions, predictions, references, prompts)
                 ],
             }
             with open(predictions_path, "w") as f:

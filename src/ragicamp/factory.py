@@ -106,6 +106,98 @@ class ComponentFactory:
 
         return decorator
 
+    # =========================================================================
+    # Spec Parsers - Convert compact string specs to config dicts
+    # =========================================================================
+
+    @staticmethod
+    def parse_model_spec(
+        spec: str,
+        quantization: str = "4bit",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Parse a model spec string into a config dict.
+
+        Args:
+            spec: Model spec like 'hf:google/gemma-2b-it' or 'openai:gpt-4o-mini'
+            quantization: Quantization for HF models ('4bit', '8bit', 'none')
+            **kwargs: Additional model parameters
+
+        Returns:
+            Config dict suitable for create_model()
+
+        Example:
+            >>> config = ComponentFactory.parse_model_spec("hf:google/gemma-2b-it", "4bit")
+            >>> model = ComponentFactory.create_model(config)
+        """
+        if ":" in spec:
+            provider, model_name = spec.split(":", 1)
+        else:
+            provider, model_name = "openai", spec
+
+        if provider in ("hf", "huggingface"):
+            config = {
+                "type": "huggingface",
+                "model_name": model_name,
+                "load_in_4bit": quantization == "4bit",
+                "load_in_8bit": quantization == "8bit",
+            }
+        elif provider == "openai":
+            config = {
+                "type": "openai",
+                "name": model_name,
+                "temperature": 0.0,
+            }
+        else:
+            raise ValueError(f"Unknown provider: {provider}. Use 'hf:' or 'openai:'")
+
+        config.update(kwargs)
+        return config
+
+    @staticmethod
+    def parse_dataset_spec(
+        name: str,
+        split: str = "validation",
+        limit: Optional[int] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Parse a dataset name into a config dict.
+
+        Args:
+            name: Dataset name ('nq', 'triviaqa', 'hotpotqa' or full names)
+            split: Dataset split ('train', 'validation', 'test')
+            limit: Optional limit on number of examples
+            **kwargs: Additional dataset parameters
+
+        Returns:
+            Config dict suitable for create_dataset()
+
+        Example:
+            >>> config = ComponentFactory.parse_dataset_spec("nq", limit=100)
+            >>> dataset = ComponentFactory.create_dataset(config)
+        """
+        # Map short names to full names
+        name_map = {
+            "nq": "natural_questions",
+            "triviaqa": "triviaqa",
+            "hotpotqa": "hotpotqa",
+            "natural_questions": "natural_questions",
+        }
+        full_name = name_map.get(name, name)
+
+        config = {
+            "name": full_name,
+            "split": split,
+        }
+        if limit:
+            config["num_examples"] = limit
+        config.update(kwargs)
+        return config
+
+    # =========================================================================
+    # Component Creators
+    # =========================================================================
+
     @classmethod
     def create_model(cls, config: Dict[str, Any]) -> LanguageModel:
         """Create a language model from configuration.
@@ -317,7 +409,7 @@ class ComponentFactory:
                     continue
                 metrics.append(BLEURTMetric(**metric_params))
 
-            elif metric_name == "llm_judge_qa":
+            elif metric_name in ("llm_judge_qa", "llm_judge"):
                 if not LLM_JUDGE_AVAILABLE:
                     logger.warning("Skipping LLM Judge (not available)")
                     continue

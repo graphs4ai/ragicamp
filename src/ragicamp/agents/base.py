@@ -32,12 +32,14 @@ class RAGResponse:
     Attributes:
         answer: The generated answer
         context: The RAG context used
+        prompt: The full prompt sent to the model (for debugging/analysis)
         confidence: Optional confidence score
         metadata: Additional response information (timing, token counts, etc.)
     """
 
     answer: str
     context: RAGContext
+    prompt: Optional[str] = None
     confidence: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
