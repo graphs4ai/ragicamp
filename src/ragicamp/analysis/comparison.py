@@ -229,13 +229,22 @@ def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
     # RAG-specific counts
     rag_results = [r for r in results if r.type == "rag"]
     if rag_results:
-        summary["embedding_models"] = list(set(r.embedding_model for r in rag_results if r.embedding_model != "unknown"))
+        summary["embedding_models"] = list(
+            set(r.embedding_model for r in rag_results if r.embedding_model != "unknown")
+        )
         summary["chunk_sizes"] = list(set(r.chunk_size for r in rag_results if r.chunk_size > 0))
         summary["corpora"] = list(set(r.corpus for r in rag_results if r.corpus != "unknown"))
 
     # Best by each metric
-    all_metrics = ["f1", "exact_match", "bertscore_f1", "bertscore_precision", "bertscore_recall", "bleurt"]
-    
+    all_metrics = [
+        "f1",
+        "exact_match",
+        "bertscore_f1",
+        "bertscore_precision",
+        "bertscore_recall",
+        "bleurt",
+    ]
+
     # Add llm_judge if any results have it
     if any(r.llm_judge is not None for r in results):
         all_metrics.append("llm_judge")
@@ -301,4 +310,3 @@ def _std(values: List[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((x - mean) ** 2 for x in values) / len(values)
     return variance**0.5
-

@@ -75,7 +75,7 @@ class OpenAIModel(LanguageModel):
 
     def _supports_sampling_params(self) -> bool:
         """Check if model supports temperature/top_p parameters.
-        
+
         Newer models (o1, o3, gpt-5) don't support these sampling parameters.
         """
         model_lower = self.model_name.lower()

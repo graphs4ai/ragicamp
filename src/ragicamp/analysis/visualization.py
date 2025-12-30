@@ -8,7 +8,7 @@ Example:
     from ragicamp.analysis.visualization import plot_comparison, plot_heatmap
 
     results = ResultsLoader("outputs/comprehensive_baseline").load_all()
-    
+
     fig = plot_comparison(results, group_by="model", metric="f1")
     fig.savefig("model_comparison.png")
 """
@@ -20,8 +20,8 @@ from ragicamp.analysis.loader import ExperimentResult
 
 # Check for matplotlib
 try:
-    import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
 
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
@@ -482,7 +482,7 @@ def create_rag_breakdown_dashboard(
     groups = list(stats.keys())
     means = [stats[g]["mean"] for g in groups]
     stds = [stats[g]["std"] for g in groups]
-    axes[0].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set2.colors[:len(groups)])
+    axes[0].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set2.colors[: len(groups)])
     axes[0].set_title(f"{metric.upper()} by Embedding Model", fontsize=11, fontweight="bold")
     axes[0].set_ylabel(metric.upper())
     for i, m in enumerate(means):
@@ -493,7 +493,7 @@ def create_rag_breakdown_dashboard(
     groups = list(stats.keys())
     means = [stats[g]["mean"] for g in groups]
     stds = [stats[g]["std"] for g in groups]
-    axes[1].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set3.colors[:len(groups)])
+    axes[1].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Set3.colors[: len(groups)])
     axes[1].set_title(f"{metric.upper()} by Chunk Size", fontsize=11, fontweight="bold")
     axes[1].set_ylabel(metric.upper())
     for i, m in enumerate(means):
@@ -504,7 +504,7 @@ def create_rag_breakdown_dashboard(
     groups = list(stats.keys())
     means = [stats[g]["mean"] for g in groups]
     stds = [stats[g]["std"] for g in groups]
-    axes[2].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Pastel1.colors[:len(groups)])
+    axes[2].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.Pastel1.colors[: len(groups)])
     axes[2].set_title(f"{metric.upper()} by top_k", fontsize=11, fontweight="bold")
     axes[2].set_ylabel(metric.upper())
     for i, m in enumerate(means):
@@ -551,14 +551,15 @@ def create_rag_breakdown_dashboard(
     groups = list(stats.keys())
     means = [stats[g]["mean"] for g in groups]
     stds = [stats[g]["std"] for g in groups]
-    axes[5].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.tab10.colors[:len(groups)])
+    axes[5].bar(groups, means, yerr=stds, capsize=5, color=plt.cm.tab10.colors[: len(groups)])
     axes[5].set_title(f"{metric.upper()} by LLM", fontsize=11, fontweight="bold")
     axes[5].set_ylabel(metric.upper())
     axes[5].tick_params(axis="x", rotation=45)
     for i, m in enumerate(means):
         axes[5].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom", fontsize=9)
 
-    plt.suptitle(f"RAG Configuration Analysis: {metric.upper()}", fontsize=16, fontweight="bold", y=1.02)
+    plt.suptitle(
+        f"RAG Configuration Analysis: {metric.upper()}", fontsize=16, fontweight="bold", y=1.02
+    )
     plt.tight_layout()
     return fig
-

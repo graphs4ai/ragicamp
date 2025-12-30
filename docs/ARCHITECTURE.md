@@ -16,7 +16,7 @@ This document describes the architecture and design principles of RAGiCamp.
 │                        CLI & Study Runner                            │
 │  ragicamp run | health | resume | metrics | compare | evaluate      │
 └─────────────────────────────────┬───────────────────────────────────┘
-                                  │
+                  │
 ┌─────────────────────────────────┴───────────────────────────────────┐
 │                        Experiment Layer                              │
 │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -32,7 +32,7 @@ This document describes the architecture and design principles of RAGiCamp.
 │  │ (persistence)    │  │ (health checks)  │                         │
 │  └──────────────────┘  └──────────────────┘                         │
 └─────────────────────────────────┬───────────────────────────────────┘
-                                  │
+                  │
 ┌─────────────────────────────────┴───────────────────────────────────┐
 │                          Agent Layer                                 │
 │  ┌────────────────┐              ┌─────────────────┐                │

@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from ragicamp.agents.base import RAGAgent
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets.base import QADataset
+from ragicamp.execution import ResilientExecutor
 from ragicamp.experiment_state import (
     ExperimentHealth,
     ExperimentPhase,
@@ -163,6 +164,7 @@ class Experiment:
     _state: Optional[ExperimentState] = field(default=None, repr=False)
     _callbacks: Optional[ExperimentCallbacks] = field(default=None, repr=False)
     _batch_size: int = field(default=8, repr=False)
+    _min_batch_size: int = field(default=1, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
 
@@ -207,6 +209,7 @@ class Experiment:
     def run(
         self,
         batch_size: int = 8,
+        min_batch_size: int = 1,
         checkpoint_every: int = 50,
         resume: bool = True,
         callbacks: Optional[ExperimentCallbacks] = None,
@@ -217,6 +220,8 @@ class Experiment:
 
         Args:
             batch_size: Number of examples to process in parallel
+            min_batch_size: Minimum batch size to reduce to on CUDA errors (default: 1).
+                On CUDA/OOM errors, batch size is halved until it reaches this floor.
             checkpoint_every: Save checkpoint every N examples
             resume: Resume from checkpoint if available
             callbacks: Optional callbacks for progress monitoring
@@ -228,6 +233,7 @@ class Experiment:
         """
         self._callbacks = callbacks or ExperimentCallbacks()
         self._batch_size = batch_size
+        self._min_batch_size = min_batch_size
         self._checkpoint_every = checkpoint_every
         self._start_time = time.time()
         self._kwargs = kwargs
@@ -375,10 +381,7 @@ class Experiment:
         logger.info("Exported %d questions", len(examples))
 
     def _phase_generate(self) -> None:
-        """Phase 2: Generate predictions with checkpointing."""
-        import torch
-        from tqdm import tqdm
-
+        """Phase 2: Generate predictions using ResilientExecutor."""
         logger.info("Phase: GENERATING - generating predictions")
 
         # Load questions
@@ -393,11 +396,19 @@ class Experiment:
         if self.predictions_path.exists():
             with open(self.predictions_path) as f:
                 predictions_data = json.load(f)
-            completed_indices = {p.get("idx", i) for i, p in enumerate(predictions_data["predictions"])}
-            logger.info("Resuming: %d/%d predictions complete", len(completed_indices), len(questions))
+            completed_indices = {
+                p.get("idx", i) for i, p in enumerate(predictions_data["predictions"])
+            }
+            logger.info(
+                "Resuming: %d/%d predictions complete", len(completed_indices), len(questions)
+            )
 
-        # Find pending questions
-        pending = [(i, q) for i, q in enumerate(questions) if q["idx"] not in completed_indices]
+        # Find pending questions - format: (idx, question, expected_answers)
+        pending = [
+            (q["idx"], q["question"], q["expected"])
+            for q in questions
+            if q["idx"] not in completed_indices
+        ]
 
         if not pending:
             logger.info("All predictions already complete")
@@ -405,84 +416,59 @@ class Experiment:
 
         logger.info("Generating %d predictions...", len(pending))
 
-        batch_size = self._batch_size
+        # Create executor with auto batch size reduction
+        executor = ResilientExecutor(
+            agent=self.agent,
+            batch_size=self._batch_size,
+            min_batch_size=self._min_batch_size,
+        )
+
+        # Checkpoint callback
+        def on_checkpoint(results: List[Dict]) -> None:
+            # Convert executor results to predictions format
+            for r in results:
+                if r["idx"] not in completed_indices:
+                    predictions_data["predictions"].append(
+                        {
+                            "idx": r["idx"],
+                            "question": r["query"],
+                            "prediction": r["prediction"],
+                            "expected": r["expected"],
+                            "prompt": r.get("prompt"),
+                            "metrics": {},
+                        }
+                    )
+                    completed_indices.add(r["idx"])
+            self._state.predictions_complete = len(predictions_data["predictions"])
+            self._save_predictions(predictions_data)
+            self._state.save(self.state_path)
+
+        # Execute with resilient batching
         kwargs = getattr(self, "_kwargs", {})
+        results = executor.execute(
+            queries=pending,
+            progress=True,
+            checkpoint_every=self._checkpoint_every,
+            checkpoint_callback=on_checkpoint if self._checkpoint_every else None,
+            **kwargs,
+        )
 
-        if batch_size > 1 and hasattr(self.agent, "batch_answer"):
-            # Batch processing
-            for batch_start in tqdm(range(0, len(pending), batch_size), desc="Batches"):
-                batch = pending[batch_start : batch_start + batch_size]
-                batch_queries = [q["question"] for _, q in batch]
-
-                if self._callbacks.on_batch_start:
-                    batch_idx = batch_start // batch_size
-                    total_batches = (len(pending) + batch_size - 1) // batch_size
-                    self._callbacks.on_batch_start(batch_idx, total_batches)
-
-                try:
-                    responses = self.agent.batch_answer(batch_queries, **kwargs)
-                    for (orig_idx, q), resp in zip(batch, responses):
-                        predictions_data["predictions"].append({
-                            "idx": q["idx"],
-                            "question": q["question"],
-                            "prediction": resp.answer,
-                            "expected": q["expected"],
-                            "prompt": resp.prompt,
-                            "metrics": {},
-                        })
-                except Exception as e:
-                    logger.warning("Batch failed: %s", e)
-                    for orig_idx, q in batch:
-                        predictions_data["predictions"].append({
-                            "idx": q["idx"],
-                            "question": q["question"],
-                            "prediction": f"[ERROR: {str(e)[:50]}]",
-                            "expected": q["expected"],
-                            "prompt": None,
-                            "metrics": {},
-                        })
-
-                # Checkpoint
-                self._state.predictions_complete = len(predictions_data["predictions"])
-                if self._checkpoint_every and len(predictions_data["predictions"]) % self._checkpoint_every == 0:
-                    self._save_predictions(predictions_data)
-                    self._state.save(self.state_path)
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-        else:
-            # Sequential processing
-            for orig_idx, q in tqdm(pending, desc="Questions"):
-                try:
-                    response = self.agent.answer(q["question"], **kwargs)
-                    predictions_data["predictions"].append({
-                        "idx": q["idx"],
-                        "question": q["question"],
-                        "prediction": response.answer,
-                        "expected": q["expected"],
-                        "prompt": response.prompt,
+        # Add results to predictions (if not already added via checkpoint)
+        for r in results:
+            if r["idx"] not in completed_indices:
+                predictions_data["predictions"].append(
+                    {
+                        "idx": r["idx"],
+                        "question": r["query"],
+                        "prediction": r["prediction"],
+                        "expected": r["expected"],
+                        "prompt": r.get("prompt"),
                         "metrics": {},
-                    })
-                except Exception as e:
-                    predictions_data["predictions"].append({
-                        "idx": q["idx"],
-                        "question": q["question"],
-                        "prediction": f"[ERROR: {str(e)[:50]}]",
-                        "expected": q["expected"],
-                        "prompt": None,
-                        "metrics": {},
-                    })
-
-                # Checkpoint
-                self._state.predictions_complete = len(predictions_data["predictions"])
-                if self._checkpoint_every and len(predictions_data["predictions"]) % self._checkpoint_every == 0:
-                    self._save_predictions(predictions_data)
-                    self._state.save(self.state_path)
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    }
+                )
 
         # Final save
+        self._state.predictions_complete = len(predictions_data["predictions"])
         self._save_predictions(predictions_data)
         logger.info("Generated %d predictions", len(predictions_data["predictions"]))
 

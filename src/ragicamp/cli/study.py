@@ -223,6 +223,7 @@ class ExpSpec:
     retriever: Optional[str] = None
     top_k: int = 5
     batch_size: int = 8
+    min_batch_size: int = 1  # Floor for auto batch size reduction on CUDA errors
 
 
 def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
@@ -230,6 +231,7 @@ def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
     specs = []
     datasets = config.get("datasets", ["nq"])
     batch = config.get("batch_size", 8)
+    min_batch = config.get("min_batch_size", 1)  # Floor for auto batch size reduction
 
     # Direct experiments
     direct = config.get("direct", {})
@@ -242,7 +244,16 @@ def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
                     for ds in datasets:
                         name = _name("direct", model, prompt, ds, quant)
                         specs.append(
-                            ExpSpec(name, "direct", model, ds, prompt, quant, batch_size=batch)
+                            ExpSpec(
+                                name,
+                                "direct",
+                                model,
+                                ds,
+                                prompt,
+                                quant,
+                                batch_size=batch,
+                                min_batch_size=min_batch,
+                            )
                         )
 
     # RAG experiments
@@ -258,7 +269,18 @@ def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
                             for ds in datasets:
                                 name = _name("rag", model, prompt, ds, quant, ret, k)
                                 specs.append(
-                                    ExpSpec(name, "rag", model, ds, prompt, quant, ret, k, batch)
+                                    ExpSpec(
+                                        name,
+                                        "rag",
+                                        model,
+                                        ds,
+                                        prompt,
+                                        quant,
+                                        ret,
+                                        k,
+                                        batch_size=batch,
+                                        min_batch_size=min_batch,
+                                    )
                                 )
 
     return specs
@@ -280,12 +302,13 @@ def run_spec(
     force: bool = False,
 ) -> str:
     """Run single experiment with health-aware execution.
-    
+
     Returns:
         Status string: 'complete', 'resumed', 'ran', 'failed', 'skipped'
     """
     import time
-    from ragicamp.experiment_state import check_health, ExperimentPhase
+
+    from ragicamp.experiment_state import ExperimentPhase, check_health
 
     exp_out = out / spec.name
     exp_out.mkdir(parents=True, exist_ok=True)
@@ -340,7 +363,12 @@ def run_spec(
         metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
 
         exp = Experiment(spec.name, agent, dataset, metric_objs, out, _model=model)
-        result = exp.run(batch_size=spec.batch_size, checkpoint_every=50, resume=True)
+        result = exp.run(
+            batch_size=spec.batch_size,
+            min_batch_size=spec.min_batch_size,
+            checkpoint_every=50,
+            resume=True,
+        )
 
         # Save metadata
         meta = {
@@ -419,13 +447,21 @@ def run_study(
     if dry_run:
         print("\n[DRY RUN] - Checking experiment status:")
         from ragicamp.experiment_state import check_health
+
         for s in specs:
             health = check_health(out / s.name, metrics)
             print(f"  {health.summary()} - {s.name}")
         return
 
     # Track results by status
-    status_counts = {"complete": 0, "resumed": 0, "ran": 0, "failed": 0, "skipped": 0, "incomplete": 0}
+    status_counts = {
+        "complete": 0,
+        "resumed": 0,
+        "ran": 0,
+        "failed": 0,
+        "skipped": 0,
+        "incomplete": 0,
+    }
 
     for i, spec in enumerate(specs, 1):
         print(f"\n[{i}/{len(specs)}] ", end="")
@@ -437,9 +473,11 @@ def run_study(
     compare(out)
 
     print("\n" + "=" * 70)
-    print(f"Done! Ran: {status_counts['ran']}, Resumed: {status_counts['resumed']}, "
-          f"Complete: {status_counts['complete']}, Incomplete: {status_counts['incomplete']}, "
-          f"Failed: {status_counts['failed']}")
+    print(
+        f"Done! Ran: {status_counts['ran']}, Resumed: {status_counts['resumed']}, "
+        f"Complete: {status_counts['complete']}, Incomplete: {status_counts['incomplete']}, "
+        f"Failed: {status_counts['failed']}"
+    )
     print("=" * 70)
 
 
@@ -468,5 +506,13 @@ def compare(out: Path):
         em = r.get("metrics", {}).get("exact_match", 0) * 100
         print(f"{n:<50} {f1:>9.1f}% {em:>9.1f}%")
 
-    with open(out / "comparison.json", "w") as f:
-        json.dump({"experiments": results}, f, indent=2)
+    # Save study summary (for quick access to aggregated results)
+    with open(out / "study_summary.json", "w") as f:
+        json.dump(
+            {
+                "experiments": results,
+                "count": len(results),
+            },
+            f,
+            indent=2,
+        )

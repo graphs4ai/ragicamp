@@ -1,9 +1,9 @@
 """Load experiment results from disk.
 
 Supports loading from:
-- Individual experiment directories (metadata.json, *_summary.json)
+- Individual experiment directories (metadata.json, results.json, predictions.json)
+- Legacy format: metadata.json + *_summary.json + *_predictions.json
 - Study comparison files (comparison.json)
-- Hydra multirun directories
 """
 
 import json
@@ -242,7 +242,12 @@ class ResultsLoader:
         Returns:
             List of ExperimentResult objects
         """
-        # Try comparison.json first (most complete)
+        # Try study_summary.json first (aggregated results)
+        summary_file = self.base_dir / "study_summary.json"
+        if summary_file.exists():
+            return self._load_from_comparison(summary_file)
+
+        # Legacy: comparison.json
         comparison_file = self.base_dir / "comparison.json"
         if comparison_file.exists():
             return self._load_from_comparison(comparison_file)
@@ -297,14 +302,22 @@ class ResultsLoader:
                 with open(metadata_path) as f:
                     metadata = json.load(f)
 
-                # Find corresponding summary file
-                summary_files = list(exp_dir.glob("*_summary.json"))
-                if not summary_files:
-                    logger.warning("No summary file for %s", exp_dir.name)
-                    continue
-
-                with open(summary_files[0]) as f:
-                    summary = json.load(f)
+                # Try new format: results.json
+                results_file = exp_dir / "results.json"
+                if results_file.exists():
+                    with open(results_file) as f:
+                        summary = json.load(f)
+                    # Adapt to from_metadata expected format
+                    if "overall_metrics" not in summary:
+                        summary["overall_metrics"] = summary.get("metrics", {})
+                else:
+                    # Fall back to legacy: *_summary.json
+                    summary_files = list(exp_dir.glob("*_summary.json"))
+                    if not summary_files:
+                        logger.warning("No results/summary file for %s", exp_dir.name)
+                        continue
+                    with open(summary_files[0]) as f:
+                        summary = json.load(f)
 
                 result = ExperimentResult.from_metadata(metadata, summary)
                 results.append(result)
@@ -326,7 +339,14 @@ class ResultsLoader:
         """
         exp_dir = self.base_dir / experiment_name
 
-        # Find predictions file
+        # Try new format: predictions.json
+        pred_file = exp_dir / "predictions.json"
+        if pred_file.exists():
+            with open(pred_file) as f:
+                data = json.load(f)
+            return data.get("predictions", [])
+
+        # Fall back to legacy: *_predictions.json
         pred_files = list(exp_dir.glob("*_predictions.json"))
         if not pred_files:
             return None
@@ -335,4 +355,3 @@ class ResultsLoader:
             data = json.load(f)
 
         return data.get("predictions", [])
-

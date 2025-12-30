@@ -90,7 +90,9 @@ class ExperimentState:
         )
 
     @classmethod
-    def new(cls, total_questions: int = 0, metrics: Optional[List[str]] = None) -> "ExperimentState":
+    def new(
+        cls, total_questions: int = 0, metrics: Optional[List[str]] = None
+    ) -> "ExperimentState":
         """Create a new experiment state."""
         now = datetime.now().isoformat()
         return cls(
@@ -252,6 +254,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     # Log if we adjusted the phase
     if state.phase != original_phase:
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(
             "State mismatch detected: state.json claims %s but artifacts missing. "
@@ -424,4 +427,3 @@ def check_health(
         metrics_missing=metrics_missing,
         error=state.error,
     )
-

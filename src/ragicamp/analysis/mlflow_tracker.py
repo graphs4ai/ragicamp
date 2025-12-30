@@ -302,4 +302,3 @@ def log_to_mlflow(
         tracker.log_params(params)
         tracker.log_metrics(metrics)
         return run.info.run_id
-

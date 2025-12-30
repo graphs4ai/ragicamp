@@ -149,21 +149,13 @@ output_dir: outputs/comprehensive_baseline
 # Execution options
 # ============================================================================
 
-# Default batch size for small models
+# Batch size configuration
+# Start with a high batch size - it will automatically halve on CUDA/OOM errors
 batch_size: 32
 
-# Per-model batch sizes (for larger models that need less batching)
-# Pattern matching: if pattern is found in model spec, use that batch size
-model_batch_sizes:
-  # Large models - use smaller batches to avoid OOM
-  "Llama-3.1-8B": 8
-  "Qwen2.5-7B": 8
-  "gemma-2-9b": 8
-  "Mistral-7B": 16
-  # Medium models
-  "Llama-3.2-3B": 16
-  "phi-3-mini": 16
-  # Small models can use default batch_size: 8
+# Minimum batch size (floor for auto-reduction)
+# When a batch fails, size halves until reaching this floor: 32 → 16 → 8 → 4 → 2 → 1
+min_batch_size: 1
 
 options:
   # Save predictions after each experiment (for recovery)

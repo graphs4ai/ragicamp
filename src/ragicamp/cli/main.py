@@ -196,7 +196,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             metrics.append(BLEURTMetric())
 
     if not metrics:
-        print("No valid metrics specified. Available: f1, exact_match, llm_judge_qa, bertscore, bleurt")
+        print(
+            "No valid metrics specified. Available: f1, exact_match, llm_judge_qa, bertscore, bleurt"
+        )
         return 1
 
     print(f"Computing metrics: {[m.name for m in metrics]}")
@@ -226,7 +228,14 @@ def cmd_health(args: argparse.Namespace) -> int:
         return 1
 
     # Find experiment directories
-    exp_dirs = [d for d in output_dir.iterdir() if d.is_dir() and (d / "state.json").exists() or (d / "predictions.json").exists() or (d / "results.json").exists()]
+    exp_dirs = [
+        d
+        for d in output_dir.iterdir()
+        if d.is_dir()
+        and (d / "state.json").exists()
+        or (d / "predictions.json").exists()
+        or (d / "results.json").exists()
+    ]
 
     if not exp_dirs:
         print(f"No experiments found in {output_dir}")
@@ -256,7 +265,7 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume incomplete experiments."""
-    from ragicamp.experiment_state import check_health, ExperimentPhase
+    from ragicamp.experiment_state import ExperimentPhase, check_health
 
     output_dir = args.output_dir
     if not output_dir.exists():
@@ -321,6 +330,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
             print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
             return 1
         from ragicamp.models.openai import OpenAIModel
+
         judge_model = OpenAIModel(args.judge_model, temperature=0.0)
 
     metrics = ComponentFactory.create_metrics(metric_names, judge_model=judge_model)

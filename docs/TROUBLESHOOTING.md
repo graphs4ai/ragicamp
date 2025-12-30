@@ -33,7 +33,7 @@ uv run ragicamp run conf/study/my_study.yaml
 
 **Symptom:** Predictions are done but metrics need to be recomputed.
 
-**Solution:**
+**Solution:**  
 ```bash
 # Recompute specific metrics
 uv run ragicamp metrics outputs/my_study/exp_name -m f1,llm_judge
@@ -338,12 +338,12 @@ uv run python -c "import ragicamp; print('✓ Works')"
    - [Architecture](ARCHITECTURE.md)
 
 2. Check experiment health:
-   ```bash
+```bash
    uv run ragicamp health outputs/my_study
    ```
 
 3. Look at state.json for errors:
-   ```bash
+```bash
    cat outputs/my_study/exp_name/state.json
    ```
 

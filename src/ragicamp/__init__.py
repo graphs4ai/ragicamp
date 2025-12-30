@@ -2,6 +2,7 @@
 
 Key modules:
 - experiment: Unified experiment abstraction
+- execution: Resilient batch execution with auto-recovery
 - agents: RAG agents (DirectLLM, FixedRAG)
 - models: Language model interfaces (HuggingFace, OpenAI)
 - retrievers: Document retrieval (Dense, Sparse)
@@ -25,6 +26,7 @@ Quick start:
 
 __version__ = "0.3.0"
 
+from ragicamp.execution import ResilientExecutor
 from ragicamp.experiment import (
     Experiment,
     ExperimentCallbacks,
@@ -52,6 +54,8 @@ __all__ = [
     "ExperimentHealth",
     "check_health",
     "detect_state",
+    # Execution
+    "ResilientExecutor",
     # Factory
     "ComponentFactory",
     # Version
