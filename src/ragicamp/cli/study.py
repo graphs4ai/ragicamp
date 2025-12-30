@@ -362,6 +362,10 @@ def run_spec(
         return "resumed" if health.can_resume else "ran"
 
     except Exception as e:
+        # Check if it's the metrics incomplete error
+        if type(e).__name__ == "_MetricsIncompleteError":
+            print(f"⚠ Incomplete: missing metrics {getattr(e, 'missing_metrics', [])}")
+            return "incomplete"
         print(f"Failed: {e}")
         import traceback
 
@@ -421,7 +425,7 @@ def run_study(
         return
 
     # Track results by status
-    status_counts = {"complete": 0, "resumed": 0, "ran": 0, "failed": 0, "skipped": 0}
+    status_counts = {"complete": 0, "resumed": 0, "ran": 0, "failed": 0, "skipped": 0, "incomplete": 0}
 
     for i, spec in enumerate(specs, 1):
         print(f"\n[{i}/{len(specs)}] ", end="")
@@ -434,7 +438,8 @@ def run_study(
 
     print("\n" + "=" * 70)
     print(f"Done! Ran: {status_counts['ran']}, Resumed: {status_counts['resumed']}, "
-          f"Complete: {status_counts['complete']}, Failed: {status_counts['failed']}")
+          f"Complete: {status_counts['complete']}, Incomplete: {status_counts['incomplete']}, "
+          f"Failed: {status_counts['failed']}")
     print("=" * 70)
 
 

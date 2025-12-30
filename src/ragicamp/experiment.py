@@ -47,6 +47,18 @@ from ragicamp.utils.resource_manager import ResourceManager
 logger = get_logger(__name__)
 
 
+class _MetricsIncompleteError(Exception):
+    """Internal exception raised when some metrics fail to compute.
+
+    This prevents the experiment from being marked complete, allowing
+    the user to fix the issue (e.g., set API keys) and re-run.
+    """
+
+    def __init__(self, missing_metrics: List[str]):
+        self.missing_metrics = missing_metrics
+        super().__init__(f"Metrics incomplete: {missing_metrics}")
+
+
 @dataclass
 class ExperimentCallbacks:
     """Callbacks for monitoring experiment progress.
@@ -263,6 +275,13 @@ class Experiment:
                 self._run_phase(phase)
 
             return self._load_result()
+
+        except _MetricsIncompleteError as e:
+            # Metrics incomplete - don't mark as failed, allow retry
+            logger.warning("Experiment incomplete: %s", e)
+            # State already saved in _phase_compute_metrics, just save partial results
+            self._save_partial_result()
+            raise
 
         except Exception as e:
             logger.error("Experiment failed: %s", e)
@@ -624,6 +643,37 @@ class Experiment:
             predictions_path=self.predictions_path if self.predictions_path.exists() else None,
             metadata=data.get("metadata", {}),
         )
+
+    def _save_partial_result(self) -> None:
+        """Save partial results when metrics are incomplete.
+
+        This creates a results.json with available metrics so the experiment
+        can be loaded, but leaves state in COMPUTING_METRICS for retry.
+        """
+        if not self.predictions_path.exists():
+            return
+
+        with open(self.predictions_path) as f:
+            data = json.load(f)
+
+        metrics = data.get("aggregate_metrics", {})
+        duration = time.time() - self._start_time
+
+        result_data = {
+            "name": self.name,
+            "metrics": metrics,
+            "num_examples": len(data.get("predictions", [])),
+            "duration_seconds": duration,
+            "completed_at": datetime.now().isoformat(),
+            "partial": True,  # Mark as incomplete
+            "metrics_computed": self._state.metrics_computed,
+            "metrics_missing": list(
+                set(self._state.metrics_requested) - set(self._state.metrics_computed)
+            ),
+        }
+
+        with open(self.results_path, "w") as f:
+            json.dump(result_data, f, indent=2)
 
     def _phases_from(self, phase: ExperimentPhase) -> List[ExperimentPhase]:
         """Get list of phases starting from the given phase."""
