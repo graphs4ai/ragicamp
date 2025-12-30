@@ -251,20 +251,27 @@ class Experiment:
         # Unload model before computing metrics
         self._unload_model()
 
-        # Compute metrics
+        # Compute metrics (aggregate and per-item)
         logger.info("Computing metrics...")
         metric_results = {}
+        per_item_metrics: Dict[str, List[float]] = {}
 
         for metric in self.metrics:
             try:
                 logger.debug("Computing %s...", metric.name)
-                if metric.name == "llm_judge":
+                if metric.name in ("llm_judge", "llm_judge_qa"):
                     scores = metric.compute(
                         predictions=predictions, references=references, questions=questions
                     )
                 else:
                     scores = metric.compute(predictions=predictions, references=references)
                 metric_results.update(scores)
+
+                # Get per-item scores if available
+                if hasattr(metric, "get_per_item_scores"):
+                    per_item = metric.get_per_item_scores()
+                    if per_item:
+                        per_item_metrics[metric.name] = per_item
             except Exception as e:
                 logger.warning("%s failed: %s", metric.name, e)
 
@@ -285,14 +292,28 @@ class Experiment:
             },
         )
 
-        # Save predictions with prompts for debugging/analysis
+        # Save predictions with prompts and per-item metrics
         if save_predictions:
+            # Build per-prediction data with metrics
+            predictions_list = []
+            for i, (q, p, r, pr) in enumerate(zip(questions, predictions, references, prompts)):
+                pred_entry = {
+                    "question": q,
+                    "prediction": p,
+                    "expected": r,
+                    "prompt": pr,
+                    "metrics": {},
+                }
+                # Add per-item metrics for this prediction
+                for metric_name, scores in per_item_metrics.items():
+                    if i < len(scores):
+                        pred_entry["metrics"][metric_name] = scores[i]
+                predictions_list.append(pred_entry)
+
             predictions_data = {
                 "experiment": self.name,
-                "predictions": [
-                    {"question": q, "prediction": p, "expected": r, "prompt": pr}
-                    for q, p, r, pr in zip(questions, predictions, references, prompts)
-                ],
+                "aggregate_metrics": metric_results,
+                "predictions": predictions_list,
             }
             with open(predictions_path, "w") as f:
                 json.dump(predictions_data, f, indent=2)

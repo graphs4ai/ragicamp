@@ -32,7 +32,7 @@ num_questions: 100  # null = full dataset, or set a cap for testing
 # All three QA datasets
 datasets:
   - nq
-  #- triviaqa
+  - triviaqa
   - hotpotqa
 
 # ============================================================================
@@ -42,7 +42,7 @@ direct:
   enabled: true
   models:
     # --- OpenAI (high quality, costs money) ---
-    #- openai:gpt-4o-mini       # Fast, cheap, good baseline
+    - openai:gpt-4o-mini       # Fast, cheap, good baseline
     #- openai:gpt-4o            # SOTA, expensive but comprehensive
     
     # --- HuggingFace models (local, free) ---
@@ -71,9 +71,9 @@ direct:
     #- fewshot_3  # 3 dataset-specific examples
   
   # Quantization options for HF models (OpenAI is unaffected)
-  # NOTE: Removed 'none' (full precision) to avoid OOM on 16GB GPUs
   quantization:
-    - 8bit       # 4-bit quantization (faster, less VRAM)
+    - 8bit
+    - none
 
 # ============================================================================
 # RAG Experiments (with retrieval)
@@ -118,7 +118,8 @@ rag:
   # Quantization for RAG (only affects HF models)
   # NOTE: Removed 'none' (full precision) to avoid OOM on 16GB GPUs
   quantization:
-    - 8bit       # 4-bit quantization
+    - 8bit
+    - none
 
 # ============================================================================
 # Metrics
@@ -136,7 +137,7 @@ metrics:
   - llm_judge
 
 llm_judge:
-  model: openai:gpt-4o-mini
+  model: openai:gpt-5-mini
   type: binary  # CORRECT/INCORRECT
 
 # ============================================================================
@@ -170,7 +171,3 @@ options:
   
   # Skip if output already exists
   skip_existing: true
-  
-  # GPU memory optimization for HF models
-  quantization: 8bit  # 4bit, 8bit, or none
-

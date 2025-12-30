@@ -133,6 +133,9 @@ class ExactMatchMetric(Metric):
             score = 1.0 if any(pred_norm == r for r in refs_norm) else 0.0
             scores.append(score)
 
+        # Store per-item scores for retrieval
+        self._last_per_item = scores
+
         avg_score = sum(scores) / len(scores) if scores else 0.0
         return {"exact_match": avg_score}
 
@@ -191,6 +194,9 @@ class F1Metric(Metric):
 
             f1_scores = [self._compute_f1(pred, r) for r in refs]
             scores.append(max(f1_scores))
+
+        # Store per-item scores for retrieval
+        self._last_per_item = scores
 
         avg_score = sum(scores) / len(scores) if scores else 0.0
         return {"f1": avg_score}
