@@ -79,10 +79,13 @@ class DenseRetriever(Retriever):
 
         # Encode query
         query_embedding = self.encoder.encode([query])
-        query_embedding = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
+        
+        # Normalize for cosine similarity (use FAISS built-in for efficiency)
+        query_embedding = query_embedding.astype("float32")
+        faiss.normalize_L2(query_embedding)
 
         # Search
-        scores, indices = self.index.search(query_embedding.astype("float32"), top_k)
+        scores, indices = self.index.search(query_embedding, top_k)
 
         # Return documents with scores
         results = []

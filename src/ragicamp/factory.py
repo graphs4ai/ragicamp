@@ -234,8 +234,9 @@ class ComponentFactory:
             available = ["huggingface", "openai"] + list(cls._custom_models.keys())
             raise ValueError(f"Unknown model type: {model_type}. Available: {available}")
 
-    @staticmethod
+    @classmethod
     def create_agent(
+        cls,
         config: Dict[str, Any],
         model: LanguageModel,
         retriever: Optional[Retriever] = None,
@@ -260,6 +261,11 @@ class ComponentFactory:
         config_copy = dict(config)
         config_copy.pop("type", None)
 
+        # Check custom registry first
+        if agent_type in cls._custom_agents:
+            return cls._custom_agents[agent_type](model=model, retriever=retriever, **config_copy)
+
+        # Built-in agents
         if agent_type == "direct_llm":
             return DirectLLMAgent(model=model, **config_copy)
 
@@ -269,8 +275,9 @@ class ComponentFactory:
             return FixedRAGAgent(model=model, retriever=retriever, **config_copy)
 
         else:
+            available = ["direct_llm", "fixed_rag"] + list(cls._custom_agents.keys())
             raise ValueError(
-                f"Unknown agent type: {agent_type}. " f"Available: direct_llm, fixed_rag"
+                f"Unknown agent type: {agent_type}. Available: {', '.join(available)}"
             )
 
     @staticmethod

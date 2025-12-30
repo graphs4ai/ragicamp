@@ -161,9 +161,11 @@ class Defaults:
     TOP_K = 5
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
-    # Evaluation
+    # Evaluation & Execution
     BATCH_SIZE = 8
-    CHECKPOINT_EVERY = 20
+    MIN_BATCH_SIZE = 1  # Minimum batch size for auto-reduction
+    CHECKPOINT_INTERVAL = 50  # Save checkpoint every N items
+    EXECUTOR_BATCH_SIZE = 32  # Default for ResilientExecutor
 
     # Paths
     DATA_DIR = "data"

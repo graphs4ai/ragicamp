@@ -21,17 +21,21 @@ from ragicamp.utils.resource_manager import ResourceManager
 logger = get_logger(__name__)
 
 
-# Errors that indicate batch size should be reduced
+# Errors that indicate batch size should be reduced (recoverable errors)
+# These patterns match errors from GPU/CUDA operations that can be resolved
+# by reducing batch size or retrying with different configuration.
+# See also: ragicamp.core.exceptions.RecoverableError
 REDUCIBLE_ERROR_PATTERNS = (
-    "CUDA",
-    "out of memory",
-    "OOM",
-    "invalid configuration argument",  # bitsandbytes CUDA kernel error
-    "cuBLAS",
-    "CUDNN",
-    "RuntimeError",
-    "NCCL",
-    "allocat",  # catches "allocation", "allocate failed", etc.
+    "CUDA",  # General CUDA errors
+    "out of memory",  # OOM errors
+    "OOM",  # OOM abbreviation
+    "invalid configuration argument",  # bitsandbytes CUDA kernel errors (8-bit quant)
+    "cuBLAS",  # CUDA BLAS library errors
+    "CUDNN",  # cuDNN errors
+    "RuntimeError",  # Torch runtime errors (often GPU-related)
+    "NCCL",  # Multi-GPU communication errors
+    "allocat",  # Catches "allocation", "allocate failed", etc.
+    "device-side assert",  # CUDA assertions
 )
 
 
@@ -180,6 +184,8 @@ class ResilientExecutor:
         results: List[Dict[str, Any]] = []
         idx = 0
         pbar = tqdm(total=len(queries), desc="Generating", disable=not progress)
+        consecutive_failures = 0
+        max_consecutive_failures = 5  # Fail entire execution after this many consecutive errors
 
         while idx < len(queries):
             batch = queries[idx : idx + self.current_batch_size]
@@ -202,9 +208,33 @@ class ResilientExecutor:
 
                 pbar.update(len(batch))
                 idx += self.current_batch_size
+                consecutive_failures = 0  # Reset on success
 
             except Exception as e:
                 error_str = str(e)
+                consecutive_failures += 1
+
+                # Check if we've hit too many consecutive failures (model may be broken)
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(
+                        "Hit %d consecutive failures - model may be broken. Aborting execution.",
+                        consecutive_failures,
+                    )
+                    # Record remaining items as failed
+                    for i in range(idx, len(queries)):
+                        orig_idx, query, expected = queries[i]
+                        results.append(
+                            {
+                                "idx": orig_idx,
+                                "query": query,
+                                "prediction": f"[ABORTED: {consecutive_failures} consecutive failures]",
+                                "expected": expected,
+                                "prompt": None,
+                                "error": f"Aborted after {consecutive_failures} failures: {error_str}",
+                            }
+                        )
+                    pbar.update(len(queries) - idx)
+                    break  # Exit the while loop
 
                 if self._is_reducible_error(error_str):
                     if self.current_batch_size > self.min_batch_size:
@@ -214,25 +244,51 @@ class ResilientExecutor:
                             self.min_batch_size, self.current_batch_size // 2
                         )
                         logger.warning(
-                            "Batch failed with CUDA error, reducing: %d → %d",
+                            "Batch failed with CUDA error, reducing: %d → %d (attempt %d)",
                             old_size,
                             self.current_batch_size,
+                            consecutive_failures,
                         )
                         self._clear_gpu()
                         continue  # Retry same batch with smaller size
                     else:
                         # At min batch size, fall back to sequential for this batch
                         logger.warning(
-                            "Batch size at minimum (%d), processing sequentially",
+                            "Batch size at minimum (%d), processing sequentially (attempt %d)",
                             self.min_batch_size,
+                            consecutive_failures,
                         )
-                        seq_results = self._execute_sequential_batch(batch, **kwargs)
-                        results.extend(seq_results)
-                        pbar.update(len(batch))
-                        idx += len(batch)
+                        try:
+                            seq_results = self._execute_sequential_batch(batch, **kwargs)
+                            results.extend(seq_results)
+                            pbar.update(len(batch))
+                            idx += len(batch)
+                            consecutive_failures = 0  # Reset on success
+                        except Exception as seq_error:
+                            # Even sequential failed - mark all as errors and move on
+                            logger.error(
+                                "Sequential processing also failed: %s", str(seq_error)[:100]
+                            )
+                            for orig_idx, query, expected in batch:
+                                results.append(
+                                    {
+                                        "idx": orig_idx,
+                                        "query": query,
+                                        "prediction": f"[ERROR: {str(seq_error)[:50]}]",
+                                        "expected": expected,
+                                        "prompt": None,
+                                        "error": str(seq_error),
+                                    }
+                                )
+                            pbar.update(len(batch))
+                            idx += len(batch)
                 else:
                     # Non-reducible error - record and continue
-                    logger.warning("Batch failed (non-recoverable): %s", error_str[:80])
+                    logger.warning(
+                        "Batch failed (non-recoverable, attempt %d): %s",
+                        consecutive_failures,
+                        error_str[:80],
+                    )
                     for orig_idx, query, expected in batch:
                         results.append(
                             {
@@ -245,7 +301,7 @@ class ResilientExecutor:
                             }
                         )
                     pbar.update(len(batch))
-                    idx += self.current_batch_size
+                    idx += len(batch)
 
             # Checkpoint
             if checkpoint_every and len(results) % checkpoint_every == 0:

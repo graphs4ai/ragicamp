@@ -272,5 +272,96 @@ class TestFactoryConfigHandling:
         assert agent.name == "test_agent"
 
 
+class TestCustomPlugins:
+    """Test custom plugin registration system."""
+
+    def test_register_custom_model(self):
+        """Test registering and using a custom model type."""
+        # Create a custom model class
+        @ComponentFactory.register_model("custom_test")
+        class CustomTestModel(LanguageModel):
+            def __init__(self, model_name: str, **kwargs):
+                super().__init__(model_name, **kwargs)
+                self.custom_param = kwargs.get("custom_param", "default")
+            
+            def generate(self, prompt, **kwargs):
+                return f"Custom: {prompt}"
+            
+            def get_embeddings(self, texts):
+                return [[0.0] * 768 for _ in texts]
+            
+            def count_tokens(self, text):
+                return len(text.split())
+            
+            def unload(self):
+                pass
+        
+        # Should be registered
+        assert "custom_test" in ComponentFactory._custom_models
+        
+        # Should be able to create it
+        config = {"type": "custom_test", "model_name": "test-model", "custom_param": "value"}
+        model = ComponentFactory.create_model(config)
+        
+        assert isinstance(model, CustomTestModel)
+        assert model.custom_param == "value"
+        
+        # Cleanup
+        del ComponentFactory._custom_models["custom_test"]
+
+    def test_register_custom_agent(self):
+        """Test registering and using a custom agent type."""
+        from ragicamp.agents.base import RAGAgent, RAGResponse, RAGContext
+        
+        # Create a custom agent class
+        @ComponentFactory.register_agent("custom_test_agent")
+        class CustomTestAgent(RAGAgent):
+            def answer(self, query: str, **kwargs):
+                return RAGResponse(
+                    answer=f"Custom answer for: {query}",
+                    context=RAGContext(query=query),
+                )
+        
+        # Should be registered
+        assert "custom_test_agent" in ComponentFactory._custom_agents
+        
+        # Should be able to create it
+        model = Mock(spec=LanguageModel)
+        config = {"type": "custom_test_agent", "name": "test_agent"}
+        agent = ComponentFactory.create_agent(config, model=model)
+        
+        assert isinstance(agent, CustomTestAgent)
+        assert agent.name == "test_agent"
+        
+        # Cleanup
+        del ComponentFactory._custom_agents["custom_test_agent"]
+    
+    def test_custom_agent_listed_in_error(self):
+        """Test that custom agents appear in error message for unknown types."""
+        from ragicamp.agents.base import RAGAgent
+        
+        # Register a custom agent
+        @ComponentFactory.register_agent("my_custom")
+        class MyCustomAgent(RAGAgent):
+            def answer(self, query: str, **kwargs):
+                pass
+        
+        # Try to create an unknown agent
+        model = Mock(spec=LanguageModel)
+        config = {"type": "unknown_agent", "name": "test"}
+        
+        with pytest.raises(ValueError) as exc_info:
+            ComponentFactory.create_agent(config, model=model)
+        
+        # Error message should list custom agents
+        error_msg = str(exc_info.value)
+        assert "my_custom" in error_msg
+        assert "direct_llm" in error_msg
+        assert "fixed_rag" in error_msg
+        
+        # Cleanup
+        del ComponentFactory._custom_agents["my_custom"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

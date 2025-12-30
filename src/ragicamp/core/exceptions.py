@@ -85,5 +85,26 @@ class EvaluationError(RAGiCampError):
     pass
 
 
+class RecoverableError(RAGiCampError):
+    """Recoverable error that can be retried.
+
+    Raised when:
+    - CUDA out of memory (can reduce batch size)
+    - Temporary GPU errors (can retry)
+    - Resource allocation failures (can retry with different config)
+    
+    These errors should be caught and handled with retry logic,
+    not propagated to crash the entire experiment.
+    
+    Example:
+        >>> try:
+        ...     model.generate(prompts, batch_size=32)
+        ... except torch.cuda.OutOfMemoryError as e:
+        ...     raise RecoverableError("CUDA OOM", details={"batch_size": 32}, cause=e)
+    """
+
+    pass
+
+
 # Aliases for backward compatibility
 ConfigurationError = ConfigError

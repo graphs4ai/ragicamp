@@ -231,7 +231,7 @@ def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
     specs = []
     datasets = config.get("datasets", ["nq"])
     batch = config.get("batch_size", 8)
-    min_batch = config.get("min_batch_size", 1)  # Floor for auto batch size reduction
+    min_batch = config.get("min_batch_size", 1)
 
     # Direct experiments
     direct = config.get("direct", {})
@@ -293,19 +293,193 @@ def _name(t, m, p, d, q, r=None, k=None):
     return f"{t}_{m}_{p}_{d}{s}" if t == "direct" else f"{t}_{m}_{r}_k{k}_{p}_{d}{s}"
 
 
+def run_spec_subprocess(
+    spec: ExpSpec,
+    limit: Optional[int],
+    metrics: List[str],
+    out: Path,
+    llm_judge_config: Optional[Dict[str, Any]] = None,
+    timeout: int = 7200,  # 2 hour default timeout
+) -> str:
+    """Run experiment in subprocess (isolated from CUDA crashes).
+    
+    If the subprocess crashes (e.g., CUDA error), retries with halved batch size
+    until min_batch_size is reached.
+    
+    Returns:
+        Status string: 'complete', 'resumed', 'ran', 'failed', 'crashed', 'timeout'
+    """
+    import subprocess
+    import sys
+    
+    from ragicamp.experiment_state import ExperimentPhase, check_health
+    
+    exp_out = out / spec.name
+    exp_out.mkdir(parents=True, exist_ok=True)
+    
+    # Check health before running
+    health = check_health(exp_out, metrics)
+    
+    if health.is_complete:
+        print(f"✓ {spec.name} (complete)")
+        return "complete"
+    
+    if health.phase == ExperimentPhase.FAILED:
+        print(f"✗ {spec.name} (failed previously: {health.error[:50] if health.error else 'unknown'})")
+        print(f"  Retrying in subprocess...")
+    
+    # Determine action
+    if health.can_resume:
+        action = f"↻ Resuming from {health.resume_phase.value}"
+        if health.needs_generation:
+            action += f" ({health.predictions_complete}/{health.total_questions} predictions)"
+    else:
+        action = "▶ Starting"
+    
+    print(f"\n{'='*60}")
+    print(f"{spec.exp_type.upper()}: {spec.name}")
+    print(f"{action}")
+    print(f"{'='*60}")
+    
+    script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "experiments" / "run_single_experiment.py"
+    
+    # Dynamic batch size reduction on crash
+    current_batch_size = spec.batch_size
+    min_batch_size = spec.min_batch_size
+    attempt = 0
+    
+    while current_batch_size >= min_batch_size:
+        attempt += 1
+        
+        # Build spec JSON for subprocess with current batch size
+        spec_dict = {
+            "name": spec.name,
+            "exp_type": spec.exp_type,
+            "model": spec.model,
+            "dataset": spec.dataset,
+            "prompt": spec.prompt,
+            "quant": spec.quant,
+            "retriever": spec.retriever,
+            "top_k": spec.top_k,
+            "batch_size": current_batch_size,
+            "min_batch_size": min_batch_size,
+        }
+        
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--spec-json", json.dumps(spec_dict),
+            "--output-dir", str(out),
+            "--metrics", ",".join(metrics),
+        ]
+        if limit:
+            cmd.extend(["--limit", str(limit)])
+        if llm_judge_config:
+            cmd.extend(["--llm-judge-config", json.dumps(llm_judge_config)])
+        
+        if attempt > 1:
+            print(f"🔄 Retrying with batch_size={current_batch_size} (attempt {attempt})")
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                timeout=timeout,
+                capture_output=False,  # Let output stream to console
+            )
+            
+            if result.returncode == 0:
+                return "resumed" if health.can_resume else "ran"
+            else:
+                # Subprocess crashed - check if we should retry with smaller batch
+                if current_batch_size > min_batch_size:
+                    new_batch_size = max(current_batch_size // 2, min_batch_size)
+                    print(f"💥 Crashed (exit code {result.returncode}), reducing batch: {current_batch_size} → {new_batch_size}")
+                    current_batch_size = new_batch_size
+                    # Clear GPU memory before retry
+                    try:
+                        ResourceManager.clear_gpu_memory()
+                    except:
+                        pass
+                    continue
+                else:
+                    # Already at min batch size, give up
+                    error_log = exp_out / "error.log"
+                    if not error_log.exists():
+                        with open(error_log, "w") as f:
+                            f.write(f"Subprocess crashed with exit code: {result.returncode}\n")
+                            f.write(f"Tried batch sizes: {spec.batch_size} → {min_batch_size}\n")
+                            f.write(f"This is typically a CUDA/bitsandbytes fatal error.\n")
+                            f.write(f"Experiment: {spec.name}\n")
+                            f.write(f"Model: {spec.model}\n")
+                            f.write(f"Quantization: {spec.quant}\n")
+                    
+                    print(f"❌ Failed after {attempt} attempts (min batch={min_batch_size}). See: {error_log}")
+                    
+                    # Mark as failed in state
+                    try:
+                        from ragicamp.experiment_state import ExperimentState
+                        state_path = exp_out / "state.json"
+                        if state_path.exists():
+                            state = ExperimentState.load(state_path)
+                        else:
+                            state = ExperimentState.new(metrics=metrics)
+                        state.set_error(f"Crashed after {attempt} attempts (batch sizes {spec.batch_size}→{min_batch_size})")
+                        state.save(state_path)
+                    except:
+                        pass
+                    
+                    return "crashed"
+                
+        except subprocess.TimeoutExpired:
+            print(f"⏱️  Experiment TIMEOUT after {timeout}s")
+            
+            # Mark as timed out
+            with open(exp_out / "error.log", "w") as f:
+                f.write(f"Experiment timed out after {timeout} seconds\n")
+                f.write(f"Experiment: {spec.name}\n")
+            
+            try:
+                from ragicamp.experiment_state import ExperimentState
+                state_path = exp_out / "state.json"
+                if state_path.exists():
+                    state = ExperimentState.load(state_path)
+                else:
+                    state = ExperimentState.new(metrics=metrics)
+                state.set_error(f"Timeout after {timeout}s")
+                state.save(state_path)
+            except:
+                pass
+            
+            return "timeout"
+        
+        except KeyboardInterrupt:
+            print(f"\n⚠️  Interrupted by user")
+            raise
+    
+    # Should never reach here, but just in case
+    return "failed"
+
+
 def run_spec(
     spec: ExpSpec,
     limit: Optional[int],
     metrics: List[str],
     out: Path,
     judge_model=None,
+    llm_judge_config: Optional[Dict[str, Any]] = None,
     force: bool = False,
+    use_subprocess: bool = True,
 ) -> str:
     """Run single experiment with health-aware execution.
 
     Returns:
-        Status string: 'complete', 'resumed', 'ran', 'failed', 'skipped'
+        Status string: 'complete', 'resumed', 'ran', 'failed', 'skipped', 'crashed', 'timeout'
     """
+    # Use subprocess isolation for robustness against CUDA crashes
+    if use_subprocess:
+        return run_spec_subprocess(spec, limit, metrics, out, llm_judge_config=llm_judge_config)
+    
+    # Original in-process execution (kept for backwards compatibility)
     import time
 
     from ragicamp.experiment_state import ExperimentPhase, check_health
@@ -389,16 +563,73 @@ def run_spec(
 
         return "resumed" if health.can_resume else "ran"
 
+    except KeyboardInterrupt:
+        # User interrupted - save state and exit gracefully
+        print(f"\n⚠️  Interrupted by user")
+        # Try to save state as interrupted (not failed)
+        try:
+            from ragicamp.experiment_state import ExperimentState
+            state_path = exp_out / "state.json"
+            if state_path.exists():
+                state = ExperimentState.load(state_path)
+                state.error = "Interrupted by user (Ctrl+C)"
+                state.save(state_path)
+        except:
+            pass
+        raise  # Re-raise to stop the study
+    
     except Exception as e:
         # Check if it's the metrics incomplete error
         if type(e).__name__ == "_MetricsIncompleteError":
             print(f"⚠ Incomplete: missing metrics {getattr(e, 'missing_metrics', [])}")
             return "incomplete"
-        print(f"Failed: {e}")
+        
+        # Log the error
+        error_msg = str(e)
+        print(f"❌ Failed: {error_msg[:100]}")
+        
+        # Save detailed error to state
+        try:
+            from ragicamp.experiment_state import ExperimentState
+            state_path = exp_out / "state.json"
+            
+            if state_path.exists():
+                state = ExperimentState.load(state_path)
+            else:
+                state = ExperimentState.new(metrics=metrics)
+            
+            state.set_error(error_msg)
+            state.save(state_path)
+            
+            # Also save error details to a separate file for debugging
+            error_log_path = exp_out / "error.log"
+            with open(error_log_path, "w") as f:
+                import traceback
+                f.write(f"Error: {error_msg}\n\n")
+                f.write(f"Experiment: {spec.name}\n")
+                f.write(f"Model: {spec.model}\n")
+                f.write(f"Quantization: {spec.quant}\n\n")
+                f.write("Traceback:\n")
+                traceback.print_exc(file=f)
+            
+            print(f"  Error details saved to: {error_log_path}")
+        except Exception as save_error:
+            print(f"  Warning: Could not save error state: {save_error}")
+        
+        # Don't print full traceback to console (it's in error.log)
+        # But do log it for debugging
         import traceback
-
-        traceback.print_exc()
+        logger = __import__('logging').getLogger(__name__)
+        logger.debug("Full traceback:", exc_info=True)
+        
         return "failed"
+    
+    finally:
+        # Always clean up GPU memory after experiment (success or failure)
+        try:
+            ResourceManager.clear_gpu_memory()
+        except:
+            pass
 
 
 def run_study(
@@ -461,12 +692,14 @@ def run_study(
         "failed": 0,
         "skipped": 0,
         "incomplete": 0,
+        "crashed": 0,  # CUDA/subprocess crashes
+        "timeout": 0,  # Experiments that timed out
     }
 
     for i, spec in enumerate(specs, 1):
         print(f"\n[{i}/{len(specs)}] ", end="")
 
-        status = run_spec(spec, limit, metrics, out, judge_model, force=not skip_existing)
+        status = run_spec(spec, limit, metrics, out, judge_model, llm_judge_config=llm_judge_config, force=not skip_existing)
         status_counts[status] += 1
 
     # Comparison
@@ -476,8 +709,11 @@ def run_study(
     print(
         f"Done! Ran: {status_counts['ran']}, Resumed: {status_counts['resumed']}, "
         f"Complete: {status_counts['complete']}, Incomplete: {status_counts['incomplete']}, "
-        f"Failed: {status_counts['failed']}"
+        f"Failed: {status_counts['failed']}, Crashed: {status_counts['crashed']}, "
+        f"Timeout: {status_counts['timeout']}"
     )
+    if status_counts['crashed'] > 0:
+        print(f"⚠️  {status_counts['crashed']} experiments crashed (CUDA errors) - see error.log files")
     print("=" * 70)
 
 
