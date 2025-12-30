@@ -73,6 +73,16 @@ class OpenAIModel(LanguageModel):
             self._async_client = AsyncOpenAI(api_key=self._api_key)
         return self._async_client
 
+    def _supports_sampling_params(self) -> bool:
+        """Check if model supports temperature/top_p parameters.
+        
+        Newer models (o1, o3, gpt-5) don't support these sampling parameters.
+        """
+        model_lower = self.model_name.lower()
+        # Models that don't support temperature/top_p
+        unsupported_prefixes = ("o1", "o3", "gpt-5")
+        return not any(model_lower.startswith(prefix) for prefix in unsupported_prefixes)
+
     def _single_generate(
         self,
         prompt: str,
@@ -83,15 +93,23 @@ class OpenAIModel(LanguageModel):
         **kwargs: Any,
     ) -> str:
         """Generate text for a single prompt."""
-        response = openai.chat.completions.create(
-            model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop,
+        # Build API params, excluding unsupported values
+        api_params = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
             **kwargs,
-        )
+        }
+        # Only include sampling params for models that support them
+        if self._supports_sampling_params():
+            api_params["temperature"] = temperature
+            api_params["top_p"] = top_p
+        if max_tokens is not None:
+            # Use max_completion_tokens for newer models (o1, o3, etc.)
+            api_params["max_completion_tokens"] = max_tokens
+        if stop is not None:
+            api_params["stop"] = stop
+
+        response = openai.chat.completions.create(**api_params)
         return response.choices[0].message.content
 
     def generate(
@@ -202,15 +220,23 @@ class OpenAIModel(LanguageModel):
             messages.append({"role": "system", "content": system_message})
         messages.append({"role": "user", "content": prompt})
 
-        response = await self.async_client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=stop,
+        # Build API params, excluding unsupported values
+        api_params = {
+            "model": self.model_name,
+            "messages": messages,
             **kwargs,
-        )
+        }
+        # Only include sampling params for models that support them
+        if self._supports_sampling_params():
+            api_params["temperature"] = temperature
+            api_params["top_p"] = top_p
+        if max_tokens is not None:
+            # Use max_completion_tokens for newer models (o1, o3, etc.)
+            api_params["max_completion_tokens"] = max_tokens
+        if stop is not None:
+            api_params["stop"] = stop
+
+        response = await self.async_client.chat.completions.create(**api_params)
         return response.choices[0].message.content
 
     async def agenerate(

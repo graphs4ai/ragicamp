@@ -271,17 +271,53 @@ def _name(t, m, p, d, q, r=None, k=None):
     return f"{t}_{m}_{p}_{d}{s}" if t == "direct" else f"{t}_{m}_{r}_k{k}_{p}_{d}{s}"
 
 
-def run_spec(spec: ExpSpec, limit: Optional[int], metrics: List[str], out: Path, judge_model=None) -> bool:
-    """Run single experiment."""
+def run_spec(
+    spec: ExpSpec,
+    limit: Optional[int],
+    metrics: List[str],
+    out: Path,
+    judge_model=None,
+    force: bool = False,
+) -> str:
+    """Run single experiment with health-aware execution.
+    
+    Returns:
+        Status string: 'complete', 'resumed', 'ran', 'failed', 'skipped'
+    """
     import time
+    from ragicamp.experiment_state import check_health, ExperimentPhase
+
+    exp_out = out / spec.name
+    exp_out.mkdir(parents=True, exist_ok=True)
+
+    # Check health before running
+    health = check_health(exp_out, metrics)
+
+    if health.is_complete and not force:
+        print(f"✓ {spec.name} (complete)")
+        return "complete"
+
+    if health.phase == ExperimentPhase.FAILED and not force:
+        print(f"✗ {spec.name} (failed: {health.error})")
+        print(f"  Use --force to retry")
+        return "skipped"
+
+    # Determine action
+    if health.can_resume:
+        action = f"↻ Resuming from {health.resume_phase.value}"
+        if health.needs_generation:
+            action += f" ({health.predictions_complete}/{health.total_questions} predictions)"
+        if health.needs_metrics:
+            action += f" (missing: {', '.join(health.metrics_missing)})"
+    else:
+        action = "▶ Starting"
 
     print(f"\n{'='*60}")
     print(f"{spec.exp_type.upper()}: {spec.name}")
+    print(f"{action}")
     print(f"{'='*60}")
 
     start = time.time()
-    exp_out = out / spec.name
-    exp_out.mkdir(parents=True, exist_ok=True)
 
     try:
         ResourceManager.clear_gpu_memory()
@@ -323,14 +359,14 @@ def run_spec(spec: ExpSpec, limit: Optional[int], metrics: List[str], out: Path,
         with open(exp_out / "metadata.json", "w") as f:
             json.dump(meta, f, indent=2)
 
-        return True
+        return "resumed" if health.can_resume else "ran"
 
     except Exception as e:
         print(f"Failed: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        return "failed"
 
 
 def run_study(
@@ -377,30 +413,28 @@ def run_study(
     print(f"Output: {out}")
 
     if dry_run:
-        print("\n[DRY RUN]")
+        print("\n[DRY RUN] - Checking experiment status:")
+        from ragicamp.experiment_state import check_health
         for s in specs:
-            print(f"  - {s.name}")
+            health = check_health(out / s.name, metrics)
+            print(f"  {health.summary()} - {s.name}")
         return
 
-    ok, skip, fail = 0, 0, 0
+    # Track results by status
+    status_counts = {"complete": 0, "resumed": 0, "ran": 0, "failed": 0, "skipped": 0}
+
     for i, spec in enumerate(specs, 1):
         print(f"\n[{i}/{len(specs)}] ", end="")
 
-        if skip_existing and (out / spec.name / "results.json").exists():
-            print(f"Skipping {spec.name}")
-            skip += 1
-            continue
-
-        if run_spec(spec, limit, metrics, out, judge_model):
-            ok += 1
-        else:
-            fail += 1
+        status = run_spec(spec, limit, metrics, out, judge_model, force=not skip_existing)
+        status_counts[status] += 1
 
     # Comparison
     compare(out)
 
     print("\n" + "=" * 70)
-    print(f"Done! OK: {ok}, Skipped: {skip}, Failed: {fail}")
+    print(f"Done! Ran: {status_counts['ran']}, Resumed: {status_counts['resumed']}, "
+          f"Complete: {status_counts['complete']}, Failed: {status_counts['failed']}")
     print("=" * 70)
 
 

@@ -5,37 +5,102 @@ This guide shows how to use RAGiCamp for your RAG experiments.
 ## Installation
 
 ```bash
-# Clone the repository
+# Navigate to the repository
 cd ragicamp
 
-# Install with uv (recommended - faster and better dependency resolution)
+# Install with uv (recommended)
 uv sync
 
-# Install with optional dependencies
-uv sync --extra dev --extra metrics --extra viz
-
-# Or install with pip if you prefer
-# pip install -e ".[dev,metrics,viz]"
+# Install with dev dependencies
+uv sync --extra dev
 ```
 
 ## Quick Start
 
-### 1. Using Agents Programmatically
+### 1. Run a Study (Recommended)
+
+The easiest way to run experiments is with study configs:
+
+```bash
+# Preview what will run
+uv run ragicamp run conf/study/simple_hf.yaml --dry-run
+
+# Run experiments
+uv run ragicamp run conf/study/simple_hf.yaml --skip-existing
+```
+
+### 2. Check Experiment Status
+
+```bash
+# See health of all experiments
+uv run ragicamp health outputs/simple_hf
+```
+
+### 3. Compare Results
+
+```bash
+# Compare by model
+uv run ragicamp compare outputs/simple_hf --metric f1
+```
+
+## Python API
+
+### Using ComponentFactory (Recommended)
 
 ```python
-from ragicamp.agents.direct_llm import DirectLLMAgent
-from ragicamp.models.huggingface import HuggingFaceModel
+from ragicamp import Experiment, ComponentFactory
+from ragicamp.metrics import F1Metric, ExactMatchMetric
 
-# Create a model
-model = HuggingFaceModel(
-    model_name="google/flan-t5-base",
-    device="cuda"
+# Create model
+model = ComponentFactory.create_model({
+    "type": "huggingface",
+    "model_name": "google/gemma-2b-it",
+    "load_in_4bit": True,
+})
+
+# Create agent
+agent = ComponentFactory.create_agent(
+    {"type": "direct_llm", "name": "my_baseline"},
+    model=model,
 )
 
-# Create an agent
+# Create dataset
+dataset = ComponentFactory.create_dataset({
+    "name": "natural_questions",
+    "split": "validation",
+    "num_examples": 100,
+})
+
+# Run experiment
+exp = Experiment(
+    name="my_experiment",
+    agent=agent,
+    dataset=dataset,
+    metrics=[F1Metric(), ExactMatchMetric()],
+)
+
+result = exp.run(batch_size=8)
+print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
+```
+
+### Direct Component Creation
+
+```python
+from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
+from ragicamp.models import HuggingFaceModel, OpenAIModel
+from ragicamp.retrievers import DenseRetriever
+from ragicamp.datasets import NaturalQuestionsDataset
+
+# Create model directly
+model = HuggingFaceModel(
+    model_name="google/gemma-2b-it",
+    load_in_4bit=True,
+)
+
+# Create agent
 agent = DirectLLMAgent(
     name="my_agent",
-    model=model
+    model=model,
 )
 
 # Ask a question
@@ -43,418 +108,267 @@ response = agent.answer("What is the capital of France?")
 print(response.answer)
 ```
 
-### 2. Using Configuration Files
-
-```bash
-# Run baseline experiment
-uv run python experiments/scripts/run_experiment.py \
-    --config experiments/configs/baseline_direct.yaml \
-    --mode eval
-
-# Train adaptive agent
-uv run python experiments/scripts/run_experiment.py \
-    --config experiments/configs/bandit_rag.yaml \
-    --mode train
-
-# Run Gemma 2B baseline (recommended starting point)
-uv run python experiments/scripts/run_gemma2b_baseline.py \
-    --dataset natural_questions \
-    --num-examples 100
-```
-
-## Components Guide
-
-### Agents
-
-#### DirectLLMAgent (Baseline 1)
-No retrieval, just asks the LLM.
+### Using RAG Agent
 
 ```python
-from ragicamp.agents.direct_llm import DirectLLMAgent
+from ragicamp.agents import FixedRAGAgent
+from ragicamp.retrievers import DenseRetriever
 
-agent = DirectLLMAgent(
-    name="direct_llm",
-    model=model,
-    system_prompt="Answer questions accurately."
-)
-```
+# Load pre-built index
+retriever = DenseRetriever.load_index("simple_minilm_recursive_512")
 
-#### FixedRAGAgent (Baseline 2)
-Standard RAG with fixed parameters.
-
-```python
-from ragicamp.agents.fixed_rag import FixedRAGAgent
-
+# Create RAG agent
 agent = FixedRAGAgent(
-    name="fixed_rag",
+    name="my_rag_agent",
     model=model,
     retriever=retriever,
-    top_k=5  # Always retrieve 5 documents
+    top_k=5,
 )
+
+response = agent.answer("When did World War 2 end?")
+print(response.answer)
+print(f"Retrieved {len(response.context)} documents")
 ```
 
-#### BanditRAGAgent
-Adaptive parameter selection using bandits.
+## Study Configuration
 
-```python
-from ragicamp.agents.bandit_rag import BanditRAGAgent
-from ragicamp.policies.bandits import UCBBandit
-
-# Define action space (different configurations)
-actions = [
-    {"top_k": 3},
-    {"top_k": 5},
-    {"top_k": 10}
-]
-
-# Create policy
-policy = UCBBandit(name="ucb", actions=actions, c=2.0)
-
-# Create agent
-agent = BanditRAGAgent(
-    name="bandit_rag",
-    model=model,
-    retriever=retriever,
-    policy=policy
-)
-
-# After getting response and reward
-agent.update_policy(
-    query=query,
-    params=selected_params,
-    reward=reward
-)
-```
-
-#### MDPRAGAgent
-Iterative decision-making with reinforcement learning.
-
-```python
-from ragicamp.agents.mdp_rag import MDPRAGAgent
-from ragicamp.policies.mdp import QLearningMDPPolicy
-
-# Create MDP policy
-policy = QLearningMDPPolicy(
-    name="qlearning",
-    action_types=["retrieve", "reformulate", "generate"],
-    learning_rate=0.1,
-    epsilon=0.1
-)
-
-# Create agent
-agent = MDPRAGAgent(
-    name="mdp_rag",
-    model=model,
-    retriever=retriever,
-    policy=policy,
-    max_steps=5  # Maximum steps before forcing answer
-)
-```
-
-### Models
-
-#### HuggingFace Models
-
-```python
-from ragicamp.models.huggingface import HuggingFaceModel
-
-model = HuggingFaceModel(
-    model_name="google/flan-t5-base",
-    device="cuda",
-    load_in_8bit=False  # Enable for large models
-)
-```
-
-#### OpenAI Models
-
-```python
-from ragicamp.models.openai import OpenAIModel
-
-model = OpenAIModel(
-    model_name="gpt-4.1-mini",
-    api_key="your-api-key"  # Or set OPENAI_API_KEY env var
-)
-```
-
-### Retrievers
-
-#### Dense Retriever (Embeddings + FAISS)
-
-```python
-from ragicamp.retrievers.dense import DenseRetriever
-from ragicamp.retrievers.base import Document
-
-# Create retriever
-retriever = DenseRetriever(
-    name="dense",
-    embedding_model="all-MiniLM-L6-v2",
-    index_type="flat"
-)
-
-# Index documents
-documents = [
-    Document(id="1", text="Paris is the capital of France.", metadata={}),
-    Document(id="2", text="London is the capital of England.", metadata={}),
-    # ... more documents
-]
-retriever.index_documents(documents)
-
-# Retrieve
-results = retriever.retrieve("What is the capital of France?", top_k=5)
-```
-
-#### Sparse Retriever (TF-IDF)
-
-```python
-from ragicamp.retrievers.sparse import SparseRetriever
-
-retriever = SparseRetriever(
-    name="sparse",
-    max_features=10000
-)
-```
-
-### Datasets
-
-```python
-from ragicamp.datasets.nq import NaturalQuestionsDataset
-from ragicamp.datasets.hotpotqa import HotpotQADataset
-from ragicamp.datasets.triviaqa import TriviaQADataset
-
-# Load datasets
-nq = NaturalQuestionsDataset(split="validation")
-hotpot = HotpotQADataset(split="train")
-trivia = TriviaQADataset(split="validation")
-
-# Access examples
-for example in nq:
-    print(f"Q: {example.question}")
-    print(f"A: {example.answers}")
-```
-
-### Metrics
-
-```python
-from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
-from ragicamp.metrics.bertscore import BERTScoreMetric
-from ragicamp.metrics.llm_judge import LLMJudgeMetric
-
-# Simple metrics
-em = ExactMatchMetric()
-f1 = F1Metric()
-
-# Advanced metrics
-bert_score = BERTScoreMetric(model_type="microsoft/deberta-xlarge-mnli")
-llm_judge = LLMJudgeMetric(judge_model=model, criteria="accuracy", scale=10)
-
-# Compute
-predictions = ["Paris", "London"]
-references = [["Paris"], ["London", "Greater London"]]
-
-em_score = em.compute(predictions, references)
-f1_score = f1.compute(predictions, references)
-bert_scores = bert_score.compute(predictions, references)
-```
-
-### Training
-
-```python
-from ragicamp.training.trainer import Trainer
-
-trainer = Trainer(
-    agent=adaptive_agent,
-    dataset=train_dataset,
-    metrics=[F1Metric()],
-    reward_metric="f1"
-)
-
-results = trainer.train(
-    num_epochs=1,
-    eval_interval=100
-)
-
-# Save learned policy
-agent.policy.save("policy.json")
-```
-
-### Evaluation
-
-```python
-from ragicamp.evaluation.evaluator import Evaluator
-
-evaluator = Evaluator(
-    agent=agent,
-    dataset=eval_dataset,
-    metrics=[ExactMatchMetric(), F1Metric()]
-)
-
-# Evaluate single agent
-results = evaluator.evaluate(
-    num_examples=100,
-    save_predictions=True,
-    output_path="results.json"
-)
-
-# Compare multiple agents
-agents = [direct_agent, rag_agent, bandit_agent]
-comparison = evaluator.compare_agents(agents, num_examples=100)
-```
-
-## Configuration File Format
-
-Example configuration (YAML):
+Create a study config to define multiple experiments:
 
 ```yaml
-agent:
-  type: bandit_rag
-  name: "my_bandit_agent"
-  system_prompt: "Answer accurately using context."
+# conf/study/my_study.yaml
+name: my_study
+description: "My experiments"
+num_questions: 100
+datasets: [nq, triviaqa]
 
-model:
-  type: huggingface
-  model_name: "google/flan-t5-base"
-  device: "cuda"
+direct:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+    - openai:gpt-4o-mini
+  prompts: [default, concise, fewshot]
+  quantization: [4bit]
 
-retriever:
-  type: dense
-  embedding_model: "all-MiniLM-L6-v2"
+rag:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+  retrievers:
+    - simple_minilm_recursive_512
+  top_k_values: [3, 5, 10]
+  prompts: [default, fewshot]
+  quantization: [4bit]
 
-policy:
-  type: ucb
-  c: 2.0
-  actions:
-    - top_k: 3
-    - top_k: 5
-    - top_k: 10
+metrics: [f1, exact_match, bertscore, llm_judge]
 
-dataset:
-  name: natural_questions
-  split: validation
-  num_examples: 100
+llm_judge:
+  model: openai:gpt-4o-mini
+  type: binary
 
-metrics:
-  - exact_match
-  - f1
-
-output:
-  save_predictions: true
-  output_path: "outputs/results.json"
+output_dir: outputs/my_study
 ```
 
-## Experiment Workflow
-
-### 1. Run Baselines
+Run it:
 
 ```bash
-# Baseline 1: Direct LLM
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/baseline_direct.yaml \
-    --mode eval
-
-# Baseline 2: Fixed RAG
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/baseline_rag.yaml \
-    --mode eval
+uv run ragicamp run conf/study/my_study.yaml --skip-existing
 ```
 
-### 2. Train Adaptive Agents
+## CLI Commands
+
+### Run Study
 
 ```bash
-# Train bandit-based RAG
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/bandit_rag.yaml \
-    --mode train
-
-# Train MDP-based RAG
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/mdp_rag.yaml \
-    --mode train
+ragicamp run <config.yaml> [OPTIONS]
+  --dry-run        Preview experiments and status
+  --skip-existing  Skip completed experiments
+  --validate       Validate config only
 ```
 
-### 3. Compare Results
+### Check Health
+
+```bash
+ragicamp health <output_dir> [OPTIONS]
+  --metrics        Comma-separated metrics to check
+```
+
+### Recompute Metrics
+
+```bash
+ragicamp metrics <exp_dir> -m <metrics>
+  -m, --metrics    Required. Comma-separated metrics (f1,llm_judge)
+  --judge-model    Model for LLM judge (default: gpt-4o-mini)
+```
+
+### Compare Results
+
+```bash
+ragicamp compare <output_dir> [OPTIONS]
+  --metric, -m     Metric to compare (default: f1)
+  --group-by, -g   Dimension to group by (model, dataset, retriever)
+  --pivot A B      Create pivot table
+  --top N          Show top N results
+  --mlflow         Log to MLflow
+```
+
+### Build Index
+
+```bash
+ragicamp index [OPTIONS]
+  --corpus         Corpus: simple, en (default: simple)
+  --embedding      Embedding: minilm, e5, mpnet (default: minilm)
+  --chunk-size     Chunk size in chars (default: 512)
+  --max-docs       Max documents to index
+```
+
+### Evaluate Predictions
+
+```bash
+ragicamp evaluate <predictions.json> [OPTIONS]
+  --metrics        Metrics to compute (f1, exact_match, llm_judge_qa)
+  --output         Output file path
+  --judge-model    Model for LLM judge
+```
+
+## Experiment Lifecycle
+
+Experiments run in phases with automatic checkpointing:
+
+```
+INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
+```
+
+### Artifacts Created
+
+| Phase | Artifacts |
+|-------|-----------|
+| INIT | `state.json`, `questions.json`, `metadata.json` |
+| GENERATING | `predictions.json` (partial, checkpointed) |
+| COMPLETE | `predictions.json` (full), `results.json` |
+
+### Resuming Experiments
+
+Experiments automatically resume from the last checkpoint:
+
+```bash
+# Just run again - will pick up where it left off
+uv run ragicamp run conf/study/my_study.yaml
+
+# Check what needs to be done
+uv run ragicamp run conf/study/my_study.yaml --dry-run
+```
+
+## Analysis
+
+### Load and Compare Results
 
 ```python
-# Use the compare_baselines.py script
-python experiments/scripts/compare_baselines.py
+from ragicamp.analysis import ResultsLoader, compare_results, best_by, pivot_results
+
+# Load results
+loader = ResultsLoader("outputs/my_study")
+results = loader.load_all()
+
+# Compare by model
+stats = compare_results(results, group_by="model", metric="f1")
+print(stats)
+
+# Get top 10 by F1
+for r in best_by(results, metric="f1", n=10):
+    print(f"{r.name}: {r.f1:.3f}")
+
+# Create pivot table
+pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
 ```
 
-## Adding New Components
-
-### Add a New Agent
+### MLflow Tracking
 
 ```python
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from ragicamp.analysis import MLflowTracker
 
-class MyCustomAgent(RAGAgent):
-    def __init__(self, name, model, **kwargs):
-        super().__init__(name, **kwargs)
-        self.model = model
-    
-    def answer(self, query, **kwargs):
-        # Your custom logic here
-        context = RAGContext(query=query)
-        answer = self.model.generate(f"Question: {query}\nAnswer:")
-        
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            metadata={"agent_type": "custom"}
-        )
+# Log results to MLflow
+tracker = MLflowTracker("my_study")
+tracker.backfill_from_results(results)
+
+# View in MLflow UI
+# $ mlflow ui
+# Open http://localhost:5000
 ```
 
-### Add a New Metric
+## Best Practices
+
+### Memory Management
 
 ```python
-from ragicamp.metrics.base import Metric
+from ragicamp.utils.resource_manager import ResourceManager
 
-class MyCustomMetric(Metric):
-    def __init__(self):
-        super().__init__(name="my_metric")
-    
-    def compute(self, predictions, references, **kwargs):
-        # Your custom metric logic
-        scores = []
-        for pred, ref in zip(predictions, references):
-            score = # ... compute score
-            scores.append(score)
-        return sum(scores) / len(scores)
+# Clear GPU memory between experiments
+ResourceManager.clear_gpu_memory()
+
+# Use 4-bit quantization for large models
+model = HuggingFaceModel(model_name="...", load_in_4bit=True)
 ```
 
-## Tips and Best Practices
+### Batch Processing
 
-1. **Start Small**: Test on a small dataset subset first
-2. **Use Configs**: Define experiments in YAML for reproducibility
-3. **Monitor Training**: Use `eval_interval` to track learning progress
-4. **Save Policies**: Save learned policies for later use
-5. **Compare Fairly**: Use same data, model, and metrics for all comparisons
-6. **Iterate**: Start with baselines, then add complexity
+```python
+# Use batch processing for faster inference
+result = exp.run(batch_size=8)  # Process 8 questions at a time
+```
+
+### Checkpointing
+
+```python
+# Checkpoints are automatic, but you can control frequency
+result = exp.run(checkpoint_every=50)  # Checkpoint every 50 predictions
+```
+
+### Health Checks
+
+```python
+from ragicamp import check_health
+
+# Check before running
+health = check_health("outputs/my_study/exp_name")
+if health.is_complete:
+    print("Already done!")
+elif health.can_resume:
+    print(f"Resume from: {health.resume_phase.value}")
+```
 
 ## Troubleshooting
 
-### Out of Memory
+### Out of Memory (OOM)
 
-- Use smaller models
-- Enable `load_in_8bit=True` for HuggingFace models
-- Reduce batch sizes
-- Use CPU instead of GPU for small experiments
+```python
+# Use quantization
+model = HuggingFaceModel(model_name="...", load_in_4bit=True)
 
-### Slow Retrieval
+# Reduce batch size
+result = exp.run(batch_size=4)
 
-- Use smaller embedding models
-- Reduce corpus size
-- Use IVF index for large document collections
+# Clear memory between experiments
+ResourceManager.clear_gpu_memory()
+```
 
-### Poor Performance
+### Slow Inference
 
-- Check that documents are properly indexed
-- Verify metric implementations
-- Ensure proper text normalization
-- Try different reward metrics for training
+```bash
+# Use batch processing
+result = exp.run(batch_size=16)
 
-## Next Steps
+# Skip completed experiments
+ragicamp run config.yaml --skip-existing
+```
 
-- Check `ARCHITECTURE.md` for design details
-- Explore `notebooks/quickstart.ipynb` for interactive examples
-- Read source code for implementation details
-- Add your own datasets, models, and agents!
+### Experiment Crashed
 
+```bash
+# Check health
+ragicamp health outputs/my_study
+
+# Just run again - will resume automatically
+ragicamp run config.yaml
+```
+
+See [Troubleshooting](TROUBLESHOOTING.md) for more solutions.

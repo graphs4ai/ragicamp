@@ -6,247 +6,120 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] - 2025-11-18
+## [0.3.0] - 2025-12-30
 
 ### 🎉 Major Features
 
-#### Type-Safe Configuration System
-- **Added** Pydantic-based configuration schemas (`src/ragicamp/config/schemas.py`)
-- **Added** ConfigLoader for loading and validating configs (`src/ragicamp/config/loader.py`)
-- **Added** Automatic validation when running experiments
-- **Added** Better error messages for config issues
-- **Improved** Type safety throughout config handling
+#### Phased Experiment Execution
+- **Added** `ExperimentPhase` enum: INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
+- **Added** `ExperimentState` for persistent state tracking (phase, progress, timestamps)
+- **Added** `ExperimentHealth` for health checks (missing predictions, missing metrics)
+- **Added** Automatic checkpointing during generation with resume capability
+- **Added** `state.json`, `questions.json` artifacts for better state management
 
-#### Component Factory & Registry
-- **Added** ComponentFactory for centralized component instantiation (`src/ragicamp/factory.py`)
-- **Added** ComponentRegistry for easy extensibility (`src/ragicamp/registry.py`)
-- **Added** Decorator-based component registration
-- **Improved** Code organization and maintainability
+#### New CLI Commands
+- **Added** `ragicamp health <dir>` - Check experiment health status
+- **Added** `ragicamp resume <dir>` - Resume incomplete experiments
+- **Added** `ragicamp metrics <dir> -m f1,llm_judge` - Recompute specific metrics
+- **Enhanced** `--dry-run` now shows health status of each experiment
 
-#### CLI Tools
-- **Added** `scripts/validate_config.py` - Validate experiment configs
-- **Added** `scripts/create_config.py` - Generate config templates
-- **Added** `make validate-config` - Validate single config
-- **Added** `make validate-all-configs` - Validate all configs
-- **Added** `make create-config` - Create config from template
+#### OpenAI API Improvements
+- **Fixed** `max_tokens` → `max_completion_tokens` for newer models (o1, o3, gpt-5)
+- **Fixed** Skip `temperature`/`top_p` for models that don't support them
+- **Added** Automatic detection of model capabilities
 
 ### ✨ Enhancements
 
-#### Better Imports
-- **Improved** Module exports for cleaner imports
-- **Added** Top-level exports in `__init__.py` files
-- **Example**: `from ragicamp.agents import DirectLLMAgent` (instead of deep imports)
+#### Experiment Management
+- **Added** Phase-based callbacks: `on_phase_start`, `on_phase_end`
+- **Added** `check_health()` method on Experiment class
+- **Added** `run_phase()` for running specific phases only
+- **Enhanced** Study runner with health-aware execution
+- **Added** Status tracking: complete, resumed, ran, failed, skipped
 
-#### Configuration Updates
-- **Fixed** Generation parameters (max_tokens, temperature) incorrectly passed to model init
-- **Updated** All Pydantic `.dict()` calls to `.model_dump()` (Pydantic V2)
-- **Cleaned** Redundant experiment configs
-
-#### Performance Improvements
-- **Added** Batch processing support for model generation
-- **Added** Batch evaluation in framework
-- **Fixed** LLM Judge caching bug (100x performance improvement)
-- **Added** Judgment caching to avoid redundant API calls
-
-#### Dataset Management
-- **Enhanced** Base `QADataset` class with caching
-- **Added** `download_and_cache()` method for unified dataset handling
-- **Improved** Cache path generation to include dataset-specific parameters
-- **Fixed** TriviaQA and HotpotQA cache paths to include subset/distractor params
-
-#### Path Utilities
-- **Added** `src/ragicamp/utils/paths.py` module
-- **Added** `ensure_dir()` - Create directories automatically
-- **Added** `safe_write_json()` - Safe JSON writing with directory creation
-- **Added** `ensure_output_dirs()` - Setup all standard directories
-- **Fixed** FileNotFoundError when output directories don't exist
-
-#### Cross-Environment Fixes
-- **Fixed** Matplotlib backend issues in BERTScore and BLEURT
-- **Added** Force `Agg` backend for non-interactive environments
-- **Improved** Compatibility across notebook and script contexts
-
-#### Experiment Scripts
-- **Refactored** `run_experiment.py` to use ComponentFactory (426 → 295 LOC)
-- **Improved** Type safety with Pydantic configs
-- **Cleaned** Redundant scripts (removed 3 duplicate scripts)
-- **Enhanced** Error handling and validation
+#### Analysis & Metrics
+- **Added** Per-item metric scores in `predictions.json`
+- **Added** Full prompt storage in predictions for debugging
+- **Enhanced** Analysis notebook with metric-agnostic visualizations
+- **Added** LLM-as-Judge async batching with rate limiting
 
 ### 🐛 Bug Fixes
 
-- **Fixed** `TypeError` when passing generation params to model initialization
-- **Fixed** `KeyError: 'partially_correct'` in LLM Judge binary mode
-- **Fixed** LLM Judge making redundant API calls (now caches results)
-- **Fixed** `FileNotFoundError` when output directories don't exist
-- **Fixed** Matplotlib backend crashes in non-interactive environments
-- **Fixed** Cache path not considering dataset-specific parameters
-
-### 📚 Documentation
-
-#### New Documentation
-- **Added** `REFACTOR_COMPLETE.md` - Complete refactoring summary
-- **Added** `CONFIG_SYSTEM_BENEFITS.md` - Benefits of new config system
-- **Added** `ARCHITECTURE_REVIEW.md` - Comprehensive codebase analysis
-- **Added** `IMPLEMENTATION_CHECKLIST.md` - Task-by-task improvement guide
-- **Added** `docs/fixes/config_factory_fixes.md` - Config/factory bug fixes
-- **Added** This CHANGELOG!
-
-#### Updated Documentation
-- **Updated** `README.md` - Added config validation section, new features
-- **Updated** `QUICK_REFERENCE.md` - Added config management commands
-- **Updated** `CONFIG_BASED_EVALUATION.md` - Added validation, factory/registry examples
-- **Updated** `.cursorrules` - Better guidance on documentation practices
-- **Consolidated** Scattered `.md` files into main documentation
-
-#### Documentation Improvements
-- **Added** Examples for ComponentFactory usage
-- **Added** Examples for ComponentRegistry usage
-- **Added** Config validation examples
-- **Added** Better error message examples
-- **Improved** Code snippets with type hints
+- **Fixed** OpenAI API errors with newer models (o1, o3, gpt-5)
+- **Fixed** Analysis notebook issues with pivot table returns
+- **Fixed** Padding side for HuggingFace decoder-only models
 
 ### 🗑️ Removed
 
-- **Deleted** `experiments/scripts/run_gemma2b_baseline.py` (redundant)
-- **Deleted** `experiments/scripts/run_fixed_rag_eval.py` (redundant)
-- **Deleted** `experiments/scripts/demo_new_architecture.py` (redundant)
-- **Deleted** Redundant experiment configs (4 files)
-- **Deleted** Scattered changelog `.md` files (consolidated into main CHANGELOG)
+- **Deleted** `experiments/` folder (legacy configs and scripts)
+- **Deleted** Orphaned Hydra config subdirectories (`conf/agent/`, `conf/model/`, etc.)
+- **Deleted** Empty script folders (`scripts/eval/`, `scripts/examples/`, etc.)
+- **Deleted** Duplicate `scripts/analysis/compare_baseline.py`
+- **Deleted** `src/ragicamp/registry.py` (merged into ComponentFactory)
+- **Deleted** `docs/archives/` (outdated documentation)
 
-### 🏗️ Architecture
+### 📚 Documentation
 
-- **Improved** Separation of concerns with factory pattern
-- **Added** Registry system for easy extensibility
-- **Enhanced** Type safety with Pydantic throughout
-- **Centralized** Component instantiation logic
-- **Standardized** Configuration handling
-- **Modularized** Path and directory utilities
-
-### 📊 Metrics
-
-- **LOC Reduction**: `run_experiment.py` 426 → 295 LOC (31% reduction)
-- **New Infrastructure**: ~1,500 LOC (factory, registry, config, utils)
-- **Performance**: LLM Judge 100x faster with caching
-- **Files Deleted**: 7 redundant files
-- **Files Created**: 11 new infrastructure/doc files
+- **Updated** README.md with phased execution and new CLI commands
+- **Updated** AGENTS.md with current architecture
+- **Updated** ARCHITECTURE.md to reflect actual components
+- **Updated** CHEATSHEET.md with current workflows
+- **Updated** GETTING_STARTED.md with modern examples
+- **Cleaned** Removed references to non-existent features (BanditRAG, MDPRAG, Policies, etc.)
 
 ---
 
-## Migration Guide
+## [0.2.0] - 2025-11-18
 
-### For Existing Users
+### 🎉 Major Features
 
-#### 1. Update Imports (Optional but Recommended)
+#### Unified Experiment API
+- **Added** Single `Experiment` class for all evaluations
+- **Added** `ExperimentCallbacks` for monitoring hooks
+- **Added** `ExperimentResult` dataclass
+- **Added** `ComponentFactory` for component creation from configs
 
-**Before:**
-```python
-from ragicamp.agents.direct_llm import DirectLLMAgent
-from ragicamp.models.huggingface import HuggingFaceModel
-```
+#### Study Configuration
+- **Added** YAML-based study configs (`conf/study/`)
+- **Added** Study runner (`scripts/experiments/run_study.py`)
+- **Added** Support for direct and RAG experiments in same study
 
-**After:**
-```python
-from ragicamp.agents import DirectLLMAgent
-from ragicamp.models import HuggingFaceModel
-```
+#### Analysis Tools
+- **Added** `ragicamp.analysis` module (ResultsLoader, comparison, visualization)
+- **Added** `ragicamp compare` CLI command
+- **Added** MLflow integration for experiment tracking
+- **Added** Analysis notebook (`notebooks/experiment_analysis.ipynb`)
 
-#### 2. Validate Your Configs
+### ✨ Enhancements
 
-```bash
-# Validate your existing configs
-make validate-all-configs
+- **Added** Batch processing for model generation
+- **Added** Plugin registration with `@ComponentFactory.register_model()`
+- **Added** ResourceManager for GPU memory cleanup
+- **Added** Stop sequences in HuggingFace model
 
-# If any fail, fix the issues
-make validate-config CONFIG=experiments/configs/my_config.yaml
-```
+### 📚 Documentation
 
-#### 3. Update Pydantic Usage (If Programmatic)
-
-**Before:**
-```python
-config_dict = config.model.dict()
-```
-
-**After:**
-```python
-config_dict = config.model.model_dump()
-```
-
-### Backward Compatibility
-
-✅ **All existing code still works!** This release is 100% backward compatible:
-- Old imports still valid (new ones are just cleaner)
-- Existing configs work without changes
-- No breaking changes to APIs
-
-### New Features You Can Start Using
-
-1. **Config Validation**: `make validate-config CONFIG=my.yaml`
-2. **Config Templates**: `make create-config OUTPUT=my.yaml TYPE=baseline`
-3. **ComponentFactory**: `ComponentFactory.create_model(config)`
-4. **ComponentRegistry**: `@ComponentRegistry.register_agent("name")`
-5. **Better Imports**: `from ragicamp.agents import DirectLLMAgent`
+- **Added** AGENTS.md (development guidelines)
+- **Added** CHEATSHEET.md (quick reference)
+- **Added** Comprehensive docstrings
 
 ---
 
-## Key Benefits Summary
+## [0.1.0] - 2025-10-01
 
-### For Users
-- ✅ Catch config errors before running (save time)
-- ✅ Better error messages (easier debugging)
-- ✅ Config templates (faster setup)
-- ✅ Type safety (fewer bugs)
+### Initial Release
 
-### For Developers
-- ✅ Cleaner imports (better DX)
-- ✅ Factory pattern (easier testing)
-- ✅ Registry system (easy extensibility)
-- ✅ Better architecture (maintainable code)
-
-### For Researchers
-- ✅ Reproducible configs (validated)
-- ✅ Easy to extend (registry system)
-- ✅ Faster experimentation (validation + templates)
-- ✅ Better performance (LLM judge caching)
-
----
-
-## What's Next
-
-### Planned for Next Release
-
-- [ ] More config templates (advanced RAG, multi-hop, etc.)
-- [ ] Config inheritance and composition
-- [ ] Web UI for config creation
-- [ ] Performance profiling tools
-- [ ] More example custom components
-
-### Under Consideration
-
-- [ ] Distributed evaluation support
-- [ ] Experiment tracking integration (W&B, MLflow)
-- [ ] Auto-tuning hyperparameters
-- [ ] More dataset connectors
-- [ ] Streaming evaluation support
-
----
-
-## Contributors
-
-- Gabriel Frontera (@gabriel_frontera_cloudwalk_io)
+- DirectLLMAgent and FixedRAGAgent
+- HuggingFace and OpenAI model support
+- Dense retriever with FAISS
+- NQ, TriviaQA, HotpotQA datasets
+- F1, Exact Match, BERTScore, BLEURT, LLM-as-judge metrics
+- Basic evaluation scripts
 
 ---
 
 ## Links
 
-- **Documentation**: See `README.md` and `docs/`
-- **Quick Reference**: See `QUICK_REFERENCE.md`
-- **Config Guide**: See `docs/guides/CONFIG_BASED_EVALUATION.md`
-- **Architecture Review**: See `ARCHITECTURE_REVIEW.md`
-- **Refactoring Summary**: See `REFACTOR_COMPLETE.md`
-
----
-
-**Questions?** Check the docs or open an issue!
-
-**Want to contribute?** See contributing guidelines (coming soon!)
+- **Documentation**: See `docs/README.md`
+- **Quick Reference**: See `CHEATSHEET.md`
+- **Architecture**: See `docs/ARCHITECTURE.md`

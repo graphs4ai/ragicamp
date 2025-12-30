@@ -156,7 +156,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     """Compute metrics on predictions file."""
     import os
 
-    from ragicamp.evaluation import Evaluator
+    from ragicamp.evaluation import compute_metrics_from_file
     from ragicamp.metrics import ExactMatchMetric, F1Metric
 
     metrics = []
@@ -202,16 +202,152 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     print(f"Computing metrics: {[m.name for m in metrics]}")
     print(f"Predictions file: {args.predictions}")
 
-    results = Evaluator.compute_metrics_from_file(
+    results = compute_metrics_from_file(
         predictions_path=str(args.predictions),
         metrics=metrics,
         output_path=str(args.output) if args.output else None,
     )
 
     print("\nResults:")
-    for key, value in results.items():
+    for key, value in results.get("aggregate", {}).items():
         if isinstance(value, float):
             print(f"  {key}: {value:.4f}")
+
+    return 0
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Check health of experiments in a directory."""
+    from ragicamp.experiment_state import check_health
+
+    output_dir = args.output_dir
+    if not output_dir.exists():
+        print(f"Directory not found: {output_dir}")
+        return 1
+
+    # Find experiment directories
+    exp_dirs = [d for d in output_dir.iterdir() if d.is_dir() and (d / "state.json").exists() or (d / "predictions.json").exists() or (d / "results.json").exists()]
+
+    if not exp_dirs:
+        print(f"No experiments found in {output_dir}")
+        return 1
+
+    print(f"Checking {len(exp_dirs)} experiments in {output_dir}\n")
+
+    # Status counts
+    complete = 0
+    incomplete = 0
+    failed = 0
+
+    for exp_dir in sorted(exp_dirs):
+        health = check_health(exp_dir, args.metrics.split(",") if args.metrics else None)
+        print(f"  {health.summary()} - {exp_dir.name}")
+
+        if health.is_complete:
+            complete += 1
+        elif health.phase.value == "failed":
+            failed += 1
+        else:
+            incomplete += 1
+
+    print(f"\nSummary: {complete} complete, {incomplete} incomplete, {failed} failed")
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Resume incomplete experiments."""
+    from ragicamp.experiment_state import check_health, ExperimentPhase
+
+    output_dir = args.output_dir
+    if not output_dir.exists():
+        print(f"Directory not found: {output_dir}")
+        return 1
+
+    # Find experiment directories
+    exp_dirs = [d for d in output_dir.iterdir() if d.is_dir()]
+
+    if not exp_dirs:
+        print(f"No experiments found in {output_dir}")
+        return 1
+
+    # Find incomplete experiments
+    to_resume = []
+    for exp_dir in sorted(exp_dirs):
+        health = check_health(exp_dir)
+        if health.can_resume and not health.is_complete:
+            to_resume.append((exp_dir, health))
+
+    if not to_resume:
+        print("All experiments are complete or failed.")
+        return 0
+
+    print(f"Found {len(to_resume)} experiments to resume:\n")
+    for exp_dir, health in to_resume:
+        print(f"  {health.summary()} - {exp_dir.name}")
+
+    if args.dry_run:
+        print("\n[DRY RUN] - no changes made")
+        return 0
+
+    # Note: Actually resuming would require loading the original config
+    # For now, just report what needs to be done
+    print(f"\nTo resume, run the original study config with --skip-existing=False")
+    print("Or use `ragicamp metrics <dir>` to recompute just metrics")
+    return 0
+
+
+def cmd_metrics(args: argparse.Namespace) -> int:
+    """Recompute metrics for an experiment."""
+    import os
+
+    from ragicamp.evaluation import compute_metrics_from_file
+    from ragicamp.factory import ComponentFactory
+
+    exp_dir = args.exp_dir
+    predictions_path = exp_dir / "predictions.json"
+
+    if not predictions_path.exists():
+        print(f"Predictions not found: {predictions_path}")
+        return 1
+
+    # Parse metrics
+    metric_names = [m.strip() for m in args.metrics.split(",")]
+
+    # Build judge model if needed
+    judge_model = None
+    if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
+            return 1
+        from ragicamp.models.openai import OpenAIModel
+        judge_model = OpenAIModel(args.judge_model, temperature=0.0)
+
+    metrics = ComponentFactory.create_metrics(metric_names, judge_model=judge_model)
+
+    print(f"Computing metrics: {metric_names}")
+    print(f"Experiment: {exp_dir.name}")
+
+    results = compute_metrics_from_file(
+        predictions_path=str(predictions_path),
+        metrics=metrics,
+        output_path=str(predictions_path),  # Update in place
+    )
+
+    print("\nResults:")
+    for key, value in results.get("aggregate", {}).items():
+        if isinstance(value, float):
+            print(f"  {key}: {value:.4f}")
+
+    # Update results.json if it exists
+    results_path = exp_dir / "results.json"
+    if results_path.exists():
+        with open(results_path) as f:
+            result_data = json.load(f)
+        result_data["metrics"].update(results.get("aggregate", {}))
+        with open(results_path, "w") as f:
+            json.dump(result_data, f, indent=2)
+        print(f"\n✓ Updated {results_path}")
 
     return 0
 
@@ -298,6 +434,38 @@ def create_parser() -> argparse.ArgumentParser:
         help="Max concurrent API calls for LLM judge (default: 20)",
     )
     eval_parser.set_defaults(func=cmd_evaluate)
+
+    # Health command
+    health_parser = subparsers.add_parser("health", help="Check experiment health")
+    health_parser.add_argument("output_dir", type=Path, help="Output directory")
+    health_parser.add_argument(
+        "--metrics",
+        default=None,
+        help="Comma-separated metrics to check (e.g., f1,exact_match,llm_judge)",
+    )
+    health_parser.set_defaults(func=cmd_health)
+
+    # Resume command
+    resume_parser = subparsers.add_parser("resume", help="Resume incomplete experiments")
+    resume_parser.add_argument("output_dir", type=Path, help="Output directory")
+    resume_parser.add_argument("--dry-run", action="store_true", help="Preview only")
+    resume_parser.set_defaults(func=cmd_resume)
+
+    # Metrics command
+    metrics_parser = subparsers.add_parser("metrics", help="Recompute metrics for an experiment")
+    metrics_parser.add_argument("exp_dir", type=Path, help="Experiment directory")
+    metrics_parser.add_argument(
+        "--metrics",
+        "-m",
+        required=True,
+        help="Comma-separated metrics (e.g., f1,exact_match,llm_judge)",
+    )
+    metrics_parser.add_argument(
+        "--judge-model",
+        default="gpt-4o-mini",
+        help="Model for LLM judge (default: gpt-4o-mini)",
+    )
+    metrics_parser.set_defaults(func=cmd_metrics)
 
     return parser
 

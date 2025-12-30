@@ -8,10 +8,13 @@ Quick reference for common tasks. For detailed docs, see `docs/`.
 
 ```bash
 # Install
-make setup
+uv sync
 
-# Run quick test
-make quick-test
+# Run quick test (dry-run first)
+uv run ragicamp run conf/study/simple_hf.yaml --dry-run
+
+# Run for real
+uv run ragicamp run conf/study/simple_hf.yaml
 
 # View results
 ls outputs/
@@ -21,159 +24,256 @@ ls outputs/
 
 ## 📋 Common Workflows
 
-### 1. Quick Smoke Test
+### 1. Run a Study
 ```bash
-make quick-test
-# or
-python -m ragicamp.cli.run experiment=quick_test
+# Dry-run to check status
+uv run ragicamp run conf/study/comprehensive_baseline.yaml --dry-run
+
+# Run (skips completed experiments)
+uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
+
+# Or via script
+uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
 ```
 
-### 2. Baseline Evaluation (DirectLLM)
+### 2. Check Experiment Health
 ```bash
-make baseline
-# or
-python -m ragicamp.cli.run experiment=baseline
+# Check all experiments in a directory
+uv run ragicamp health outputs/comprehensive_baseline
+
+# Shows: ✓ Complete, ○ Incomplete, ✗ Failed
 ```
 
-### 3. RAG Evaluation
+### 3. Recompute Metrics Only
 ```bash
-# First time: index corpus
-make index
-
-# Then run
-make rag
-# or
-python -m ragicamp.cli.run experiment=rag
+# Recompute specific metrics for one experiment
+uv run ragicamp metrics outputs/comprehensive_baseline/my_exp -m f1,llm_judge
 ```
 
-### 4. Compare Models
+### 4. Compare Results
 ```bash
-python -m ragicamp.cli.run --multirun \
-  model=gemma_2b_4bit,phi3 \
-  experiment=baseline
+# Basic comparison by model
+uv run ragicamp compare outputs/comprehensive_baseline
+
+# Compare by retriever
+uv run ragicamp compare outputs/comprehensive_baseline --group-by retriever
+
+# Pivot table
+uv run ragicamp compare outputs/comprehensive_baseline --pivot model dataset
 ```
 
-### 5. Parameter Sweep
+### 5. Build Retrieval Index
 ```bash
-python -m ragicamp.cli.run --multirun \
-  experiment=rag \
-  agent.top_k=1,3,5,10
+# Quick (simple Wikipedia, small)
+uv run ragicamp index --corpus simple --embedding minilm --chunk-size 512
+
+# Full
+uv run ragicamp index --corpus simple --embedding minilm --chunk-size 1024 --max-docs 50000
 ```
 
 ---
 
-## 🎛️ Override Any Parameter
+## 🎛️ CLI Commands
 
+| Command | Description |
+|---------|-------------|
+| `ragicamp run <config>` | Run study from YAML config |
+| `ragicamp health <dir>` | Check experiment health |
+| `ragicamp resume <dir>` | Resume incomplete experiments |
+| `ragicamp metrics <dir>` | Recompute metrics |
+| `ragicamp compare <dir>` | Compare results |
+| `ragicamp evaluate <file>` | Compute metrics on predictions file |
+| `ragicamp index` | Build retrieval index |
+
+### Run Options
 ```bash
-# Change model
-python -m ragicamp.cli.run model=phi3
+ragicamp run <config.yaml> [OPTIONS]
+  --dry-run        Preview experiments and their status
+  --skip-existing  Skip completed experiments
+  --validate       Validate config only
+```
 
-# Change dataset size  
-python -m ragicamp.cli.run dataset.num_examples=50
-
-# Change multiple things
-python -m ragicamp.cli.run \
-  model=phi3 \
-  dataset=triviaqa \
-  evaluation=quick \
-  metrics=fast
+### Compare Options
+```bash
+ragicamp compare <output_dir> [OPTIONS]
+  --metric, -m     Metric to compare (default: f1)
+  --group-by, -g   Dimension to group by (model, dataset, retriever, etc.)
+  --pivot A B      Create pivot table (rows=A, cols=B)
+  --top N          Show top N results (default: 10)
+  --mlflow         Log to MLflow
 ```
 
 ---
 
-## 📁 Available Configs
+## 📁 Study Config Structure
 
-| Category | Options |
-|----------|---------|
-| **model** | `gemma_2b`, `gemma_2b_4bit`, `gemma_2b_8bit`, `phi3`, `llama3_8b`, `openai_gpt4`, `cpu` |
-| **dataset** | `nq`, `triviaqa`, `hotpotqa` |
-| **agent** | `direct_llm`, `fixed_rag`, `bandit_rag` |
-| **metrics** | `fast`, `standard`, `full`, `rag` |
-| **evaluation** | `quick`, `standard`, `full`, `generate_only`, `evaluate_only` |
-| **experiment** | `baseline`, `rag`, `quick_test`, `model_comparison` |
+```yaml
+name: my_study
+description: "Description"
+num_questions: 100  # null = all
+datasets: [nq, triviaqa, hotpotqa]
+batch_size: 8
 
----
+direct:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+    - openai:gpt-4o-mini
+  prompts: [default, concise, fewshot]
+  quantization: [4bit, 8bit]
 
-## 📊 Metrics Presets
+rag:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+  retrievers:
+    - simple_minilm_recursive_512
+    - simple_minilm_recursive_1024
+  top_k_values: [3, 5, 10]
+  prompts: [default, fewshot]
+  quantization: [4bit]
 
-| Preset | Metrics | Speed |
-|--------|---------|-------|
-| `fast` | EM, F1 | ~1 sec |
-| `standard` | EM, F1, LLM Judge | ~1 min |
-| `full` | EM, F1, BERTScore, LLM Judge | ~5 min |
-| `rag` | EM, F1, Faithfulness, Context Precision | ~2 min |
+metrics: [f1, exact_match, bertscore, bleurt, llm_judge]
 
----
+llm_judge:
+  model: openai:gpt-4o-mini
+  type: binary
 
-## 🔧 Data Preparation
-
-```bash
-# Download datasets
-make download-nq
-make download-triviaqa
-make download-all
-
-# Index corpus for RAG
-make index                    # Small (10k docs, fast)
-make index-wiki-simple        # Full (200k docs, slow)
-
-# List what you have
-make list-datasets
-make list-artifacts
+output_dir: outputs/my_study
 ```
 
 ---
 
-## 🧪 Testing
+## 📊 Model Spec Format
 
-```bash
-make test           # All tests
-make test-fast      # Skip slow tests
-make test-coverage  # With coverage report
+| Provider | Format | Example |
+|----------|--------|---------|
+| HuggingFace | `hf:model/name` | `hf:google/gemma-2b-it` |
+| OpenAI | `openai:model-name` | `openai:gpt-4o-mini` |
+
+---
+
+## 🔧 Quantization
+
+| Option | Description | VRAM |
+|--------|-------------|------|
+| `4bit` | 4-bit quantization | Lowest |
+| `8bit` | 8-bit quantization | Medium |
+| `none` | Full precision | Highest |
+
+---
+
+## 📁 Output Structure
+
+Each experiment creates:
+
+```
+outputs/my_study/experiment_name/
+├── state.json        # Phase tracking
+├── questions.json    # Exported questions
+├── metadata.json     # Experiment config
+├── predictions.json  # Answers + per-item metrics
+└── results.json      # Final aggregate metrics
 ```
 
 ---
 
-## 📁 Project Structure
+## 🐍 Python API
 
+### Run Experiment
+```python
+from ragicamp import Experiment, ComponentFactory
+from ragicamp.metrics import F1Metric
+
+model = ComponentFactory.create_model({
+    "type": "huggingface",
+    "model_name": "google/gemma-2b-it",
+    "load_in_4bit": True,
+})
+
+agent = ComponentFactory.create_agent(
+    {"type": "direct_llm", "name": "baseline"},
+    model=model,
+)
+
+dataset = ComponentFactory.create_dataset({
+    "name": "natural_questions",
+    "num_examples": 100,
+})
+
+exp = Experiment(
+    name="my_exp",
+    agent=agent,
+    dataset=dataset,
+    metrics=[F1Metric()],
+)
+
+result = exp.run(batch_size=8)
+print(f"F1: {result.f1:.3f}")
 ```
-ragicamp/
-├── conf/               # Hydra configs (composable)
-├── scripts/            # Utility scripts
-├── src/ragicamp/       # Main library
-├── tests/              # Test suite
-├── outputs/            # Evaluation results
-├── artifacts/          # Saved indexes
-└── data/               # Downloaded datasets
+
+### Check Health
+```python
+from ragicamp import check_health
+
+health = check_health("outputs/my_study/exp_name")
+print(health.summary())
+# ✓ Complete (100 predictions, 5 metrics)
+# ○ generating - predictions: 45/100
+```
+
+### Load and Compare Results
+```python
+from ragicamp.analysis import ResultsLoader, compare_results, best_by
+
+loader = ResultsLoader("outputs/my_study")
+results = loader.load_all()
+
+# Top 5 by F1
+for r in best_by(results, metric="f1", n=5):
+    print(f"{r.name}: {r.f1:.3f}")
 ```
 
 ---
 
-## 💡 Pro Tips
+## 💡 Tips
 
-### Speed Up Evaluation
+### Speed Up
+- Use `--dry-run` to preview
+- Use `batch_size=16` for faster inference
+- Use `4bit` quantization
+- Reduce `num_questions` for testing
+
+### Resume After Crash
+Experiments auto-resume! Just re-run the same command.
+
+### Recompute Only Metrics
 ```bash
-# Use fast metrics
-python -m ragicamp.cli.run metrics=fast
-
-# Reduce examples
-python -m ragicamp.cli.run dataset.num_examples=10
-
-# Use 4-bit quantization
-python -m ragicamp.cli.run model=gemma_2b_4bit
+uv run ragicamp metrics <exp_dir> -m f1,llm_judge
 ```
 
-### Resume Failed Runs
-Checkpointing is automatic! Just rerun the same command.
-
-### Disable MLflow
-```bash
-python -m ragicamp.cli.run mlflow=disabled
+### Clear GPU Memory
+```python
+from ragicamp.utils.resource_manager import ResourceManager
+ResourceManager.clear_gpu_memory()
 ```
 
-### View Full Config
+---
+
+## 🧪 Development
+
 ```bash
-python -m ragicamp.cli.run --cfg job
+# Format
+uv run ruff format src/ tests/ scripts/
+
+# Lint
+uv run ruff check src/ tests/ scripts/
+
+# Test
+uv run pytest
+
+# Test with coverage
+uv run pytest --cov=ragicamp
 ```
 
 ---
@@ -183,34 +283,9 @@ python -m ragicamp.cli.run --cfg job
 | Resource | Location |
 |----------|----------|
 | Full docs | `docs/README.md` |
-| Config reference | `conf/README.md` |
-| Hydra guide | `docs/guides/MLFLOW_RAGAS_GUIDE.md` |
+| Architecture | `docs/ARCHITECTURE.md` |
+| Metrics guide | `docs/guides/METRICS.md` |
 | Troubleshooting | `docs/TROUBLESHOOTING.md` |
-
----
-
-## ⚡ All Make Commands
-
-```bash
-make help              # Show all commands
-
-# Experiments
-make quick-test        # Fast smoke test
-make baseline          # DirectLLM baseline
-make rag              # RAG evaluation
-make compare-models    # Multi-model comparison
-
-# Data
-make download-all      # Download all datasets
-make index            # Index small corpus
-make index-wiki-simple # Index full corpus
-
-# Development
-make test             # Run tests
-make lint             # Run linters
-make format           # Format code
-make clean            # Clean up
-```
 
 ---
 

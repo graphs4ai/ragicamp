@@ -6,173 +6,139 @@ Common issues and solutions for RAGiCamp.
 
 | Issue | Solution |
 |-------|----------|
-| `FileNotFoundError` on save | **Fixed automatically** - Uses `ensure_dir()` |
-| Matplotlib backend error | **Fixed automatically** - Sets backend to `'Agg'` |
-| CUDA/GPU not found | Use CPU configs or set `device: cpu` |
-| Out of memory | Use `load_in_8bit: true` or reduce batch size |
-
-See detailed guides: [Matplotlib Issues](guides/TROUBLESHOOTING_MATPLOTLIB.md)
+| Experiment crashed | Just re-run - experiments auto-resume |
+| Check status | `ragicamp health outputs/my_study` |
+| CUDA/GPU not found | Use `load_in_4bit: true` or OpenAI models |
+| Out of memory | Use 4-bit quantization or reduce batch size |
+| Metrics missing | `ragicamp metrics <exp_dir> -m f1,llm_judge` |
 
 ---
 
-## NumPy Version Compatibility
+## Experiment Issues
+
+### Experiment Crashed Mid-Run
+
+**Symptom:** Experiment failed during generation or metrics computation.
+
+**Solution:** Just run again - experiments automatically resume:
+```bash
+# Check status first
+uv run ragicamp health outputs/my_study
+
+# Re-run (will resume from checkpoint)
+uv run ragicamp run conf/study/my_study.yaml
+```
+
+### Need to Recompute Metrics Only
+
+**Symptom:** Predictions are done but metrics need to be recomputed.
+
+**Solution:**
+```bash
+# Recompute specific metrics
+uv run ragicamp metrics outputs/my_study/exp_name -m f1,llm_judge
+```
+
+### Experiment Shows "Failed" Status
+
+**Symptom:** `ragicamp health` shows ✗ Failed
+
+**Solution:**
+```bash
+# Check the error
+cat outputs/my_study/exp_name/state.json
+
+# Use --force to retry (if using study runner)
+# Or delete state.json and re-run
+rm outputs/my_study/exp_name/state.json
+uv run ragicamp run conf/study/my_study.yaml
+```
+
+---
+
+## OpenAI API Issues
+
+### Error: "max_tokens is not supported with this model"
 
 **Symptom:**
 ```
-AttributeError: _ARRAY_API not found
-A module that was compiled using NumPy 1.x cannot be run in NumPy 2.2.6
+Unsupported parameter: 'max_tokens' is not supported with this model.
+Use 'max_completion_tokens' instead.
 ```
 
-**Cause:**  
-TensorFlow and some other dependencies were compiled with NumPy 1.x and are incompatible with NumPy 2.x.
-
-**Solution:**  
-The dependencies in `pyproject.toml` are already pinned to `numpy>=1.21.0,<2.0.0`. If you still see this issue:
-
+**Solution:** Already fixed in v0.3.0. Update to latest version:
 ```bash
-# Resync dependencies
+git pull
 uv sync
-
-# Or manually downgrade numpy
-uv pip install "numpy<2.0.0"
 ```
 
-**Verify the fix:**
+### Error: "temperature does not support 0.0 with this model"
+
+**Symptom:** Newer OpenAI models (o1, o3, gpt-5) don't support temperature parameter.
+
+**Solution:** Already fixed in v0.3.0. The code automatically detects these models and skips unsupported parameters.
+
+### Error: "OPENAI_API_KEY not set"
+
+**Solution:**
 ```bash
-uv run python -c "import numpy; print(numpy.__version__)"
-# Should show 1.x.x, not 2.x.x
+export OPENAI_API_KEY='your-api-key'
 ```
 
 ---
 
-## Build Errors
+## Memory Issues
 
-### Error: "Dependency cannot be a direct reference"
+### CUDA Out of Memory
 
-**Full error**:
-```
-ValueError: Dependency #2 of option `metrics` of field `project.optional-dependencies`
-cannot be a direct reference unless field `tool.hatch.metadata.allow-direct-references` is
-set to `true`
-```
+**Solutions:**
 
-**Cause**: Hatchling build backend doesn't allow git-based dependencies by default.
-
-**Solution**: Already fixed in latest version. If you see this:
-```bash
-git pull  # Get latest code
-uv sync   # Re-sync dependencies
+1. Use 4-bit quantization:
+```yaml
+# In study config
+quantization: [4bit]
 ```
 
-The fix adds this to `pyproject.toml`:
-```toml
-[tool.hatch.metadata]
-allow-direct-references = true
+2. Reduce batch size:
+```yaml
+batch_size: 4  # or even 1
 ```
 
-### Error: "Failed to build ragicamp"
-
-**Solution**:
-```bash
-# Clear UV cache and rebuild
-rm -rf .venv
-uv sync
+3. Use a smaller model:
+```yaml
+models:
+  - hf:google/gemma-2b-it  # Instead of larger models
 ```
 
-## Metrics Errors
-
-### Error: "No module named 'bert_score'"
-
-**Cause**: BERTScore not installed.
-
-**Solution**:
-```bash
-uv sync --extra metrics
-```
-
-### Error: "No module named 'bleurt'"
-
-**Cause**: BLEURT not installed.
-
-**Solution**:
-```bash
-uv sync --extra metrics
-```
-
-**Note**: BLEURT installation from git may take a few minutes.
-
-### Error: "Failed to load BLEURT checkpoint"
-
-**Cause**: Checkpoint download failed or wrong checkpoint name.
-
-**Solution**:
-```bash
-# Use default checkpoint
---bleurt-checkpoint BLEURT-20
-
-# Check internet connection - checkpoint is ~1.5GB
-# Wait for download to complete
+4. Clear GPU memory between experiments:
+```python
+from ragicamp.utils.resource_manager import ResourceManager
+ResourceManager.clear_gpu_memory()
 ```
 
 ### BERTScore: "CUDA out of memory"
 
-**Solutions**:
+**Solutions:**
 ```bash
-# 1. Use smaller model
---bertscore-model microsoft/deberta-base-mnli
-
-# 2. Reduce batch size (automatic)
-# 3. Use CPU (slower but works)
---device cpu
-
-# 4. Reduce dataset size
---num-examples 10
+# Use CPU for BERTScore (slower but works)
+# Or reduce dataset size
+num_questions: 50
 ```
 
-## Dataset Errors
+---
 
-### Error: "Failed to load dataset"
-
-**Cause**: Network issue or HuggingFace datasets not properly installed.
-
-**Solution**:
-```bash
-# Check internet connection
-ping huggingface.co
-
-# Re-install dependencies
-uv sync
-
-# Try again with a smaller dataset first
---num-examples 10
-```
-
-### Warning: "Filtered out N examples without explicit answers"
-
-**This is normal!** It means some questions don't have ground-truth answers.
-
-**To disable filtering**:
-```bash
-# Remove --filter-no-answer flag
-uv run python experiments/scripts/run_gemma2b_baseline.py \
-    --dataset natural_questions \
-    --num-examples 100
-```
-
-## Model Errors
+## Model Issues
 
 ### Error: "You need to accept the Gemma license"
 
-**Solution**:
-1. Visit: https://huggingface.co/google/gemma-2-2b-it
+**Solution:**
+1. Visit: https://huggingface.co/google/gemma-2b-it
 2. Click "Agree and access repository"
 3. Login: `uv run huggingface-cli login`
 
 ### Error: "We couldn't connect to huggingface.co"
 
-**Cause**: Network issue or not logged in.
-
-**Solutions**:
+**Solutions:**
 ```bash
 # 1. Check internet
 ping huggingface.co
@@ -180,157 +146,158 @@ ping huggingface.co
 # 2. Login to HuggingFace
 uv run huggingface-cli login
 
-# 3. Check if you accepted the license (see above)
+# 3. Check if you accepted the license
 ```
 
-### Error: "CUDA out of memory"
+### HuggingFace Padding Warning
 
-**Solutions**:
-```bash
-# 1. Use 8-bit quantization
---load-in-8bit
-
-# 2. Use CPU
---device cpu
-
-# 3. Reduce batch size (automatic)
-
-# 4. Reduce dataset size
---num-examples 10
+**Symptom:**
+```
+A decoder-only architecture is being used, but right-padding was detected!
 ```
 
-## Performance Issues
+**Solution:** Already fixed in v0.3.0. The code sets `padding_side='left'` automatically.
 
-### Evaluation is very slow
+---
 
-**Solutions**:
+## Metrics Issues
 
-For GPU:
+### Error: "No module named 'bert_score'"
+
+**Solution:**
 ```bash
-# Check GPU is being used
---device cuda
-
-# Use smaller model
---load-in-8bit
-
-# Reduce dataset size
---num-examples 10
+uv sync --extra metrics
 ```
 
-For CPU:
+### Error: "No module named 'bleurt'"
+
+**Solution:**
 ```bash
-# CPU is ~10x slower, this is expected
-# Use very small dataset for testing
---num-examples 5
+uv sync --extra metrics
 ```
 
 ### BLEURT is extremely slow
 
 **This is normal!** BLEURT is the slowest metric.
 
-**Solutions**:
-```bash
-# 1. Use fewer examples
---num-examples 10
+**Solutions:**
+- Use fewer examples: `num_questions: 50`
+- Skip BLEURT: `metrics: [f1, exact_match, bertscore]`
+- Compute BLEURT later: `ragicamp metrics <dir> -m bleurt`
 
-# 2. Use only BERTScore instead
---metrics exact_match f1 bertscore
+### LLM Judge API Errors
 
-# 3. Remove BLEURT for quick iteration
---metrics exact_match f1
+**Solution:** Check your OpenAI API key and model name:
+```yaml
+llm_judge:
+  model: openai:gpt-4o-mini  # Make sure model exists
 ```
 
-## UV/Package Issues
+---
+
+## Installation Issues
 
 ### Error: "uv: command not found"
 
-**Solution**:
+**Solution:**
 ```bash
 # Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Add to PATH (follow instructions from install script)
+# Restart terminal or source profile
 ```
-
-### Error: "Package not found in virtual environment"
-
-**Solution**:
-```bash
-# Re-sync dependencies
-uv sync
-
-# Or with extras
-uv sync --extra metrics
-```
-
-## Import Errors
 
 ### Error: "No module named 'ragicamp'"
 
-**Cause**: Not running with `uv run` or virtual environment not activated.
-
-**Solution**:
+**Solution:** Always use `uv run`:
 ```bash
-# Always use uv run
+# Correct
 uv run python script.py
+uv run ragicamp run config.yaml
 
-# Or activate venv manually
-source .venv/bin/activate
+# Wrong
 python script.py
+ragicamp run config.yaml
 ```
 
-### Error: "ModuleNotFoundError: No module named 'X'"
+### NumPy Version Compatibility
 
-**Solutions**:
+**Symptom:**
+```
+AttributeError: _ARRAY_API not found
+A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x
+```
+
+**Solution:**
 ```bash
-# Re-sync all dependencies
+# Resync dependencies (numpy is pinned in pyproject.toml)
 uv sync
-
-# Install specific extras
-uv sync --extra metrics --extra viz
-
-# Check what's installed
-uv pip list
 ```
 
-## Make Command Errors
+---
 
-### Error: "make: command not found"
+## Performance Issues
 
-**Cause**: Make not installed (rare on Linux/Mac, common on Windows).
+### Evaluation is Very Slow
 
-**Solution**:
+**Solutions:**
 
-On Linux/Mac:
+1. Use batch processing:
+```yaml
+batch_size: 8  # or 16
+```
+
+2. Use 4-bit quantization:
+```yaml
+quantization: [4bit]
+```
+
+3. Skip completed experiments:
 ```bash
-# Install make (usually pre-installed)
-sudo apt-get install make  # Ubuntu/Debian
-brew install make          # macOS
+uv run ragicamp run config.yaml --skip-existing
 ```
 
-On Windows:
+4. Reduce dataset size for testing:
+```yaml
+num_questions: 50
+```
+
+### Dry-run is Slow
+
+**Cause:** Loading TensorFlow/PyTorch for health checks.
+
+**Solution:** This is normal for the first run. Subsequent runs are faster.
+
+---
+
+## Configuration Issues
+
+### Error: "Config missing required field"
+
+**Solution:**
 ```bash
-# Use the commands directly instead of make
-uv run python experiments/scripts/run_gemma2b_baseline.py --dataset natural_questions --num-examples 10
+# Validate config first
+uv run ragicamp run config.yaml --validate
+
+# Check the error message for missing fields
 ```
 
-## Git Issues
+### Error: "Invalid model spec"
 
-### Error: "Signing failed"
+**Solution:** Use correct format:
+- HuggingFace: `hf:google/gemma-2b-it`
+- OpenAI: `openai:gpt-4o-mini`
 
-**Solution**: Use `--no-gpg-sign` flag
-```bash
-git commit --no-gpg-sign -m "message"
-```
+### Error: "Unknown dataset"
 
-Or disable signing globally:
-```bash
-git config --global commit.gpgsign false
-```
+**Solution:** Valid datasets are:
+- `nq` (Natural Questions)
+- `triviaqa`
+- `hotpotqa`
 
-## General Tips
+---
 
-### Quick Diagnosis
+## Quick Diagnosis
 
 ```bash
 # Check UV
@@ -339,87 +306,48 @@ uv --version
 # Check Python
 uv run python --version
 
-# Check installed packages
-uv pip list | grep ragicamp
-uv pip list | grep bert-score
-uv pip list | grep bleurt
+# Check ragicamp
+uv run python -c "import ragicamp; print(f'v{ragicamp.__version__}')"
 
-# Check if in right directory
-pwd
-# Should show: .../ragicamp
+# Check experiment health
+uv run ragicamp health outputs/my_study
 
-# Check git status
-git status
+# Test basic run
+uv run ragicamp run conf/study/simple_hf.yaml --dry-run
 ```
 
-### Start Fresh
+## Start Fresh
 
-If nothing works, start from scratch:
+If nothing works:
 ```bash
 # Remove virtual environment
 rm -rf .venv
 
-# Remove UV cache
-rm -rf ~/.cache/uv/
-
 # Re-install
 uv sync
 
-# Test basic import
-uv run python -c "import ragicamp; print('✓ ragicamp works')"
+# Test import
+uv run python -c "import ragicamp; print('✓ Works')"
 ```
-
-### Get Help
-
-1. Check the documentation:
-   - `QUICK_REFERENCE.md` - Quick commands
-   - `METRICS_GUIDE.md` - Metrics details
-   - `GEMMA2B_QUICKSTART.md` - Gemma setup
-
-2. Check error messages carefully - they usually tell you exactly what's wrong
-
-3. Search for the error message online
-
-4. Try the simplest possible command first:
-```bash
-uv run python -c "print('hello')"
-```
-
-## Common Gotchas
-
-1. **Always use `uv run`** - Don't just run `python`, use `uv run python`
-
-2. **Install metrics extras** - BERTScore and BLEURT need: `uv sync --extra metrics`
-
-3. **Accept Gemma license** - Required for first-time use
-
-4. **Network required** - For downloading models and datasets
-
-5. **GPU vs CPU** - GPU is 10x faster but requires CUDA
-
-6. **Filtering is default** - Use `--filter-no-answer` to only evaluate questions with answers
-
-7. **BLEURT is slow** - This is normal, use fewer examples or skip BLEURT for quick iteration
 
 ## Still Having Issues?
 
-Check these files for more info:
-- `README.md` - Project overview
-- `GETTING_STARTED.md` - Setup guide
-- `USAGE.md` - Detailed usage
-- `ARCHITECTURE.md` - System design
+1. Check the documentation:
+   - [Getting Started](GETTING_STARTED.md)
+   - [Usage Guide](USAGE.md)
+   - [Architecture](ARCHITECTURE.md)
 
-Or try the simplest possible workflow:
-```bash
-# 1. Fresh start
-cd ragicamp
-rm -rf .venv
-uv sync
+2. Check experiment health:
+   ```bash
+   uv run ragicamp health outputs/my_study
+   ```
 
-# 2. Test import
-uv run python -c "from ragicamp.agents.direct_llm import DirectLLMAgent; print('✓ Works')"
+3. Look at state.json for errors:
+   ```bash
+   cat outputs/my_study/exp_name/state.json
+   ```
 
-# 3. Run tiny test
-uv run python experiments/scripts/run_gemma2b_baseline.py --dataset natural_questions --num-examples 2 --device cpu
-```
-
+4. Try the simplest possible workflow:
+   ```bash
+   uv run ragicamp run conf/study/simple_hf.yaml --dry-run
+   ```

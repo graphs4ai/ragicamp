@@ -16,7 +16,10 @@ Or programmatically:
         dataset=dataset,
         metrics=metrics,
     )
-    results = exp.run(batch_size=8, checkpoint_every=50)
+    results = exp.run(batch_size=8)
+
+Phases:
+    INIT -> GENERATING -> GENERATED -> COMPUTING_METRICS -> COMPLETE
 """
 
 import json
@@ -28,13 +31,20 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from ragicamp.agents.base import RAGAgent
 from ragicamp.core.logging import get_logger
-
-logger = get_logger(__name__)
 from ragicamp.datasets.base import QADataset
+from ragicamp.experiment_state import (
+    ExperimentHealth,
+    ExperimentPhase,
+    ExperimentState,
+    check_health,
+    detect_state,
+)
 from ragicamp.metrics.base import Metric
 from ragicamp.models.base import LanguageModel
 from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -50,6 +60,12 @@ class ExperimentCallbacks:
         )
         exp.run(callbacks=callbacks)
     """
+
+    on_phase_start: Optional[Callable[[ExperimentPhase], None]] = None
+    """Called when entering a new phase. Args: (phase)"""
+
+    on_phase_end: Optional[Callable[[ExperimentPhase], None]] = None
+    """Called when completing a phase. Args: (phase)"""
 
     on_batch_start: Optional[Callable[[int, int], None]] = None
     """Called before each batch. Args: (batch_index, total_batches)"""
@@ -107,10 +123,19 @@ class ExperimentResult:
 
 @dataclass
 class Experiment:
-    """Unified experiment abstraction.
+    """Unified experiment abstraction with phased execution.
 
     Combines model, agent, dataset, and metrics into a single runnable unit.
     Handles checkpointing, resource management, and result saving automatically.
+
+    Phases:
+        1. INIT: Save metadata, export questions
+        2. GENERATING: Generate predictions with checkpointing
+        3. GENERATED: All predictions complete
+        4. COMPUTING_METRICS: Compute all metrics
+        5. COMPLETE: Save final results
+
+    Each phase produces artifacts that enable resume from any point.
     """
 
     name: str
@@ -122,216 +147,437 @@ class Experiment:
     # Optional references for cleanup
     _model: Optional[LanguageModel] = field(default=None, repr=False)
 
+    # Runtime state (not serialized)
+    _state: Optional[ExperimentState] = field(default=None, repr=False)
+    _callbacks: Optional[ExperimentCallbacks] = field(default=None, repr=False)
+    _batch_size: int = field(default=8, repr=False)
+    _checkpoint_every: int = field(default=50, repr=False)
+    _start_time: float = field(default=0.0, repr=False)
+
+    # =========================================================================
+    # Public API
+    # =========================================================================
+
+    def check_health(self) -> ExperimentHealth:
+        """Check experiment state and detect issues.
+
+        Returns:
+            ExperimentHealth with current phase, missing predictions/metrics, etc.
+        """
+        metric_names = [m.name for m in self.metrics]
+        return check_health(self.output_path, metric_names)
+
+    @property
+    def output_path(self) -> Path:
+        """Path to experiment output directory."""
+        return self.output_dir / self.name
+
+    @property
+    def state_path(self) -> Path:
+        return self.output_path / "state.json"
+
+    @property
+    def questions_path(self) -> Path:
+        return self.output_path / "questions.json"
+
+    @property
+    def predictions_path(self) -> Path:
+        return self.output_path / "predictions.json"
+
+    @property
+    def results_path(self) -> Path:
+        return self.output_path / "results.json"
+
+    @property
+    def metadata_path(self) -> Path:
+        return self.output_path / "metadata.json"
+
     def run(
         self,
-        batch_size: int = 1,
+        batch_size: int = 8,
         checkpoint_every: int = 50,
         resume: bool = True,
-        save_predictions: bool = True,
         callbacks: Optional[ExperimentCallbacks] = None,
+        phases: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> ExperimentResult:
-        """Run the experiment.
+        """Run the experiment with phase-aware execution.
 
         Args:
             batch_size: Number of examples to process in parallel
             checkpoint_every: Save checkpoint every N examples
             resume: Resume from checkpoint if available
-            save_predictions: Save predictions to disk
             callbacks: Optional callbacks for progress monitoring
+            phases: Optional list of phases to run (default: all remaining)
             **kwargs: Additional arguments passed to agent.answer()
 
         Returns:
             ExperimentResult with metrics and metadata
         """
-        callbacks = callbacks or ExperimentCallbacks()
+        self._callbacks = callbacks or ExperimentCallbacks()
+        self._batch_size = batch_size
+        self._checkpoint_every = checkpoint_every
+        self._start_time = time.time()
+        self._kwargs = kwargs
+
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
+        # Check current state
+        health = self.check_health()
+
+        if health.is_complete and resume:
+            logger.info("Experiment %s already complete. Loading results...", self.name)
+            return self._load_result()
+
+        # Determine which phases to run
+        if phases:
+            # Explicit phases requested
+            target_phases = [ExperimentPhase(p) for p in phases]
+        elif resume and health.can_resume:
+            # Resume from current phase
+            logger.info("Resuming %s from phase: %s", self.name, health.resume_phase.value)
+            target_phases = self._phases_from(health.resume_phase)
+        else:
+            # Start fresh
+            target_phases = list(ExperimentPhase)[:5]  # All except FAILED
+
+        # Load or create state (use detect_state to validate artifacts)
+        metric_names = [m.name for m in self.metrics]
+        if self.state_path.exists() and resume:
+            self._state = detect_state(self.output_path, metric_names)
+        else:
+            self._state = ExperimentState.new(metrics=metric_names)
+
+        ResourceManager.clear_gpu_memory()
+        logger.info("Running: %s", self.name)
+
+        try:
+            # Execute phases
+            for phase in target_phases:
+                if phase == ExperimentPhase.FAILED:
+                    continue
+                if self._state.is_past(phase) and phase != ExperimentPhase.COMPUTING_METRICS:
+                    # Skip already completed phases (except metrics which can be re-run)
+                    continue
+
+                self._run_phase(phase)
+
+            return self._load_result()
+
+        except Exception as e:
+            logger.error("Experiment failed: %s", e)
+            self._state.set_error(str(e))
+            self._state.save(self.state_path)
+            raise
+
+    def run_phase(self, phase: Union[str, ExperimentPhase]) -> None:
+        """Run a specific phase only.
+
+        Useful for recomputing just metrics or resuming generation.
+
+        Args:
+            phase: Phase to run (string or ExperimentPhase)
+        """
+        if isinstance(phase, str):
+            phase = ExperimentPhase(phase)
+
+        self._callbacks = ExperimentCallbacks()
+        self._start_time = time.time()
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
+        # Load state
+        if self.state_path.exists():
+            self._state = ExperimentState.load(self.state_path)
+        else:
+            metric_names = [m.name for m in self.metrics]
+            self._state = ExperimentState.new(metrics=metric_names)
+
+        self._run_phase(phase)
+
+    # =========================================================================
+    # Phase Implementations
+    # =========================================================================
+
+    def _run_phase(self, phase: ExperimentPhase) -> None:
+        """Execute a single phase."""
+        if self._callbacks.on_phase_start:
+            self._callbacks.on_phase_start(phase)
+
+        self._state.advance_to(phase)
+        self._state.save(self.state_path)
+
+        if phase == ExperimentPhase.INIT:
+            self._phase_init()
+        elif phase == ExperimentPhase.GENERATING:
+            self._phase_generate()
+        elif phase == ExperimentPhase.GENERATED:
+            self._phase_generated()
+        elif phase == ExperimentPhase.COMPUTING_METRICS:
+            self._phase_compute_metrics()
+        elif phase == ExperimentPhase.COMPLETE:
+            self._phase_complete()
+
+        self._state.save(self.state_path)
+
+        if self._callbacks.on_phase_end:
+            self._callbacks.on_phase_end(phase)
+
+    def _phase_init(self) -> None:
+        """Phase 1: Initialize experiment - save metadata, export questions."""
+        logger.info("Phase: INIT - exporting questions and metadata")
+
+        # Export questions
+        examples = list(self.dataset)
+        questions_data = {
+            "experiment": self.name,
+            "dataset": self.dataset.name,
+            "count": len(examples),
+            "questions": [
+                {"idx": i, "question": ex.question, "expected": ex.answers}
+                for i, ex in enumerate(examples)
+            ],
+        }
+        with open(self.questions_path, "w") as f:
+            json.dump(questions_data, f, indent=2)
+
+        # Save metadata
+        metadata = {
+            "name": self.name,
+            "agent": self.agent.name,
+            "dataset": self.dataset.name,
+            "metrics": [m.name for m in self.metrics],
+            "started_at": self._state.started_at,
+        }
+        with open(self.metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        # Update state
+        self._state.total_questions = len(examples)
+        logger.info("Exported %d questions", len(examples))
+
+    def _phase_generate(self) -> None:
+        """Phase 2: Generate predictions with checkpointing."""
         import torch
         from tqdm import tqdm
 
-        start_time = time.time()
-        output_path = self.output_dir / self.name
-        output_path.mkdir(parents=True, exist_ok=True)
+        logger.info("Phase: GENERATING - generating predictions")
 
-        predictions_path = output_path / "predictions.json"
-        checkpoint_path = output_path / "checkpoint.json"
-        results_path = output_path / "results.json"
+        # Load questions
+        with open(self.questions_path) as f:
+            q_data = json.load(f)
+        questions = q_data["questions"]
 
-        # Check if already completed
-        if resume and results_path.exists():
-            logger.info("Experiment %s already completed. Loading results...", self.name)
-            with open(results_path) as f:
-                data = json.load(f)
-            return ExperimentResult(
-                name=self.name,
-                metrics=data.get("metrics", {}),
-                num_examples=data.get("num_examples", 0),
-                duration_seconds=data.get("duration_seconds", 0),
-                output_path=output_path,
-                predictions_path=predictions_path if predictions_path.exists() else None,
-            )
+        # Load existing predictions if resuming
+        predictions_data = {"experiment": self.name, "predictions": []}
+        completed_indices = set()
 
-        logger.info("Running: %s", self.name)
+        if self.predictions_path.exists():
+            with open(self.predictions_path) as f:
+                predictions_data = json.load(f)
+            completed_indices = {p.get("idx", i) for i, p in enumerate(predictions_data["predictions"])}
+            logger.info("Resuming: %d/%d predictions complete", len(completed_indices), len(questions))
 
-        ResourceManager.clear_gpu_memory()
+        # Find pending questions
+        pending = [(i, q) for i, q in enumerate(questions) if q["idx"] not in completed_indices]
 
-        examples = list(self.dataset)
-        predictions = []
-        references = []
-        questions = []
-        prompts = []  # Track prompts for debugging/analysis
-        start_idx = 0
+        if not pending:
+            logger.info("All predictions already complete")
+            return
 
-        # Resume from checkpoint
-        if resume and checkpoint_path.exists():
-            try:
-                with open(checkpoint_path) as f:
-                    checkpoint = json.load(f)
-                predictions = checkpoint.get("predictions", [])
-                references = checkpoint.get("references", [])
-                questions = checkpoint.get("questions", [])
-                start_idx = len(predictions)
-                logger.info("Resumed from checkpoint: %d/%d", start_idx, len(examples))
-            except Exception as e:
-                logger.warning("Failed to load checkpoint: %s", e)
-                start_idx = 0
+        logger.info("Generating %d predictions...", len(pending))
 
-        # Generate predictions
-        logger.info("Generating answers for %d examples...", len(examples))
+        batch_size = self._batch_size
+        kwargs = getattr(self, "_kwargs", {})
 
         if batch_size > 1 and hasattr(self.agent, "batch_answer"):
             # Batch processing
-            for i in tqdm(range(start_idx, len(examples), batch_size), desc="Batches"):
-                batch = examples[i : i + batch_size]
-                batch_queries = [ex.question for ex in batch]
+            for batch_start in tqdm(range(0, len(pending), batch_size), desc="Batches"):
+                batch = pending[batch_start : batch_start + batch_size]
+                batch_queries = [q["question"] for _, q in batch]
+
+                if self._callbacks.on_batch_start:
+                    batch_idx = batch_start // batch_size
+                    total_batches = (len(pending) + batch_size - 1) // batch_size
+                    self._callbacks.on_batch_start(batch_idx, total_batches)
 
                 try:
                     responses = self.agent.batch_answer(batch_queries, **kwargs)
-                    for ex, resp in zip(batch, responses):
-                        predictions.append(resp.answer)
-                        references.append(ex.answers)
-                        questions.append(ex.question)
-                        prompts.append(resp.prompt)
+                    for (orig_idx, q), resp in zip(batch, responses):
+                        predictions_data["predictions"].append({
+                            "idx": q["idx"],
+                            "question": q["question"],
+                            "prediction": resp.answer,
+                            "expected": q["expected"],
+                            "prompt": resp.prompt,
+                            "metrics": {},
+                        })
                 except Exception as e:
                     logger.warning("Batch failed: %s", e)
-                    for ex in batch:
-                        predictions.append(f"[ERROR: {str(e)[:50]}]")
-                        references.append(ex.answers)
-                        questions.append(ex.question)
-                        prompts.append(None)
+                    for orig_idx, q in batch:
+                        predictions_data["predictions"].append({
+                            "idx": q["idx"],
+                            "question": q["question"],
+                            "prediction": f"[ERROR: {str(e)[:50]}]",
+                            "expected": q["expected"],
+                            "prompt": None,
+                            "metrics": {},
+                        })
 
                 # Checkpoint
-                if checkpoint_every and len(predictions) % checkpoint_every == 0:
-                    self._save_checkpoint(checkpoint_path, predictions, references, questions)
+                self._state.predictions_complete = len(predictions_data["predictions"])
+                if self._checkpoint_every and len(predictions_data["predictions"]) % self._checkpoint_every == 0:
+                    self._save_predictions(predictions_data)
+                    self._state.save(self.state_path)
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
         else:
             # Sequential processing
-            for i, ex in enumerate(
-                tqdm(examples[start_idx:], desc="Questions", initial=start_idx, total=len(examples))
-            ):
+            for orig_idx, q in tqdm(pending, desc="Questions"):
                 try:
-                    response = self.agent.answer(ex.question, **kwargs)
-                    predictions.append(response.answer)
-                    prompts.append(response.prompt)
+                    response = self.agent.answer(q["question"], **kwargs)
+                    predictions_data["predictions"].append({
+                        "idx": q["idx"],
+                        "question": q["question"],
+                        "prediction": response.answer,
+                        "expected": q["expected"],
+                        "prompt": response.prompt,
+                        "metrics": {},
+                    })
                 except Exception as e:
-                    predictions.append(f"[ERROR: {str(e)[:50]}]")
-                    prompts.append(None)
-
-                references.append(ex.answers)
-                questions.append(ex.question)
+                    predictions_data["predictions"].append({
+                        "idx": q["idx"],
+                        "question": q["question"],
+                        "prediction": f"[ERROR: {str(e)[:50]}]",
+                        "expected": q["expected"],
+                        "prompt": None,
+                        "metrics": {},
+                    })
 
                 # Checkpoint
-                if checkpoint_every and len(predictions) % checkpoint_every == 0:
-                    self._save_checkpoint(checkpoint_path, predictions, references, questions)
+                self._state.predictions_complete = len(predictions_data["predictions"])
+                if self._checkpoint_every and len(predictions_data["predictions"]) % self._checkpoint_every == 0:
+                    self._save_predictions(predictions_data)
+                    self._state.save(self.state_path)
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-        # Unload model before computing metrics
+        # Final save
+        self._save_predictions(predictions_data)
+        logger.info("Generated %d predictions", len(predictions_data["predictions"]))
+
+    def _phase_generated(self) -> None:
+        """Phase 3: Mark generation as complete, unload model."""
+        logger.info("Phase: GENERATED - cleaning up model")
         self._unload_model()
 
-        # Compute metrics (aggregate and per-item)
-        logger.info("Computing metrics...")
-        metric_results = {}
+    def _phase_compute_metrics(self) -> None:
+        """Phase 4: Compute all metrics on predictions."""
+        logger.info("Phase: COMPUTING_METRICS")
+
+        # Load predictions
+        with open(self.predictions_path) as f:
+            data = json.load(f)
+
+        preds = data["predictions"]
+        predictions = [p["prediction"] for p in preds]
+        references = [p["expected"] for p in preds]
+        questions = [p["question"] for p in preds]
+
+        # Compute metrics
+        aggregate_results = {}
         per_item_metrics: Dict[str, List[float]] = {}
 
         for metric in self.metrics:
+            if metric.name in self._state.metrics_computed:
+                logger.info("Skipping %s (already computed)", metric.name)
+                continue
+
             try:
-                logger.debug("Computing %s...", metric.name)
+                logger.info("Computing %s...", metric.name)
                 if metric.name in ("llm_judge", "llm_judge_qa"):
                     scores = metric.compute(
                         predictions=predictions, references=references, questions=questions
                     )
                 else:
                     scores = metric.compute(predictions=predictions, references=references)
-                metric_results.update(scores)
+                aggregate_results.update(scores)
 
-                # Get per-item scores if available
+                # Get per-item scores
                 if hasattr(metric, "get_per_item_scores"):
                     per_item = metric.get_per_item_scores()
                     if per_item:
                         per_item_metrics[metric.name] = per_item
+
+                self._state.metrics_computed.append(metric.name)
+                self._state.save(self.state_path)
+
             except Exception as e:
                 logger.warning("%s failed: %s", metric.name, e)
 
-        duration = time.time() - start_time
+        # Update predictions with per-item metrics
+        for i, pred in enumerate(preds):
+            if "metrics" not in pred:
+                pred["metrics"] = {}
+            for metric_name, scores in per_item_metrics.items():
+                if i < len(scores):
+                    pred["metrics"][metric_name] = scores[i]
+
+        # Merge with existing aggregate metrics
+        existing_agg = data.get("aggregate_metrics", {})
+        existing_agg.update(aggregate_results)
+        data["aggregate_metrics"] = existing_agg
+        data["predictions"] = preds
+
+        self._save_predictions(data)
+        logger.info("Computed metrics: %s", list(aggregate_results.keys()))
+
+        # Check if all requested metrics were computed
+        missing = set(self._state.metrics_requested) - set(self._state.metrics_computed)
+        if missing:
+            logger.warning(
+                "Some metrics failed to compute: %s. Experiment will not be marked complete.",
+                list(missing),
+            )
+            # Stay in COMPUTING_METRICS phase - don't proceed to COMPLETE
+            raise _MetricsIncompleteError(list(missing))
+
+    def _phase_complete(self) -> None:
+        """Phase 5: Create final summary and results."""
+        logger.info("Phase: COMPLETE - saving results")
+
+        # Load predictions for final metrics
+        with open(self.predictions_path) as f:
+            data = json.load(f)
+
+        metrics = data.get("aggregate_metrics", {})
+        duration = time.time() - self._start_time
 
         # Build result
         result = ExperimentResult(
             name=self.name,
-            metrics=metric_results,
-            num_examples=len(examples),
+            metrics=metrics,
+            num_examples=len(data.get("predictions", [])),
             duration_seconds=duration,
-            output_path=output_path,
+            output_path=self.output_path,
+            predictions_path=self.predictions_path,
             metadata={
                 "agent": self.agent.name,
                 "dataset": self.dataset.name,
-                "batch_size": batch_size,
+                "batch_size": self._batch_size,
                 "timestamp": datetime.now().isoformat(),
             },
         )
 
-        # Save predictions with prompts and per-item metrics
-        if save_predictions:
-            # Build per-prediction data with metrics
-            predictions_list = []
-            for i, (q, p, r, pr) in enumerate(zip(questions, predictions, references, prompts)):
-                pred_entry = {
-                    "question": q,
-                    "prediction": p,
-                    "expected": r,
-                    "prompt": pr,
-                    "metrics": {},
-                }
-                # Add per-item metrics for this prediction
-                for metric_name, scores in per_item_metrics.items():
-                    if i < len(scores):
-                        pred_entry["metrics"][metric_name] = scores[i]
-                predictions_list.append(pred_entry)
-
-            predictions_data = {
-                "experiment": self.name,
-                "aggregate_metrics": metric_results,
-                "predictions": predictions_list,
-            }
-            with open(predictions_path, "w") as f:
-                json.dump(predictions_data, f, indent=2)
-            result.predictions_path = predictions_path
-
         # Save results
-        with open(results_path, "w") as f:
+        with open(self.results_path, "w") as f:
             json.dump(result.to_dict(), f, indent=2)
 
-        # Cleanup checkpoint
-        if checkpoint_path.exists():
-            checkpoint_path.unlink()
-
-        # Build dynamic metrics summary
+        # Log summary
         metrics_parts = []
         for key, val in result.metrics.items():
             if isinstance(val, float):
-                # Format as percentage for common metrics
                 if key in ("f1", "exact_match", "bertscore_f1", "bleurt", "llm_judge_qa"):
                     metrics_parts.append(f"{key}={val*100:.1f}%")
                 else:
@@ -339,24 +585,23 @@ class Experiment:
         metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
         logger.info("Done! %s (%.1fs)", metrics_str, duration)
 
-        return result
+        if self._callbacks.on_complete:
+            self._callbacks.on_complete(result)
 
-    def _save_checkpoint(
-        self, path: Path, predictions: List[str], references: List, questions: List[str]
-    ) -> None:
-        """Save checkpoint atomically."""
-        temp_path = path.with_suffix(".tmp")
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+
+    def _save_predictions(self, data: Dict[str, Any]) -> None:
+        """Save predictions atomically."""
+        temp_path = self.predictions_path.with_suffix(".tmp")
         with open(temp_path, "w") as f:
-            json.dump(
-                {
-                    "predictions": predictions,
-                    "references": references,
-                    "questions": questions,
-                    "timestamp": datetime.now().isoformat(),
-                },
-                f,
-            )
-        temp_path.replace(path)
+            json.dump(data, f, indent=2)
+        temp_path.replace(self.predictions_path)
+
+        if self._callbacks.on_checkpoint:
+            n = len(data.get("predictions", []))
+            self._callbacks.on_checkpoint(n, self.predictions_path)
 
     def _unload_model(self) -> None:
         """Unload model to free GPU memory."""
@@ -365,6 +610,35 @@ class Experiment:
         elif hasattr(self.agent, "model") and hasattr(self.agent.model, "unload"):
             self.agent.model.unload()
         ResourceManager.clear_gpu_memory()
+
+    def _load_result(self) -> ExperimentResult:
+        """Load result from results.json."""
+        with open(self.results_path) as f:
+            data = json.load(f)
+        return ExperimentResult(
+            name=self.name,
+            metrics=data.get("metrics", {}),
+            num_examples=data.get("num_examples", 0),
+            duration_seconds=data.get("duration_seconds", 0),
+            output_path=self.output_path,
+            predictions_path=self.predictions_path if self.predictions_path.exists() else None,
+            metadata=data.get("metadata", {}),
+        )
+
+    def _phases_from(self, phase: ExperimentPhase) -> List[ExperimentPhase]:
+        """Get list of phases starting from the given phase."""
+        all_phases = [
+            ExperimentPhase.INIT,
+            ExperimentPhase.GENERATING,
+            ExperimentPhase.GENERATED,
+            ExperimentPhase.COMPUTING_METRICS,
+            ExperimentPhase.COMPLETE,
+        ]
+        try:
+            idx = all_phases.index(phase)
+            return all_phases[idx:]
+        except ValueError:
+            return all_phases
 
     @classmethod
     def from_spec(
@@ -419,20 +693,11 @@ def run_experiments(
     for i, exp in enumerate(experiments, 1):
         logger.info("[%d/%d] %s", i, len(experiments), exp.name)
 
-        if skip_existing and (exp.output_dir / exp.name / "results.json").exists():
-            logger.info("Skipping %s (exists)", exp.name)
-            # Load existing result
-            with open(exp.output_dir / exp.name / "results.json") as f:
-                data = json.load(f)
-            results.append(
-                ExperimentResult(
-                    name=exp.name,
-                    metrics=data.get("metrics", {}),
-                    num_examples=data.get("num_examples", 0),
-                    duration_seconds=data.get("duration_seconds", 0),
-                    output_path=exp.output_dir / exp.name,
-                )
-            )
+        health = exp.check_health()
+
+        if skip_existing and health.is_complete:
+            logger.info("Skipping %s (complete)", exp.name)
+            results.append(exp._load_result())
             continue
 
         try:

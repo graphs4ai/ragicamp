@@ -4,11 +4,12 @@ A modular framework for experimenting with RAG (Retrieval-Augmented Generation) 
 
 ## Features
 
-- **Unified Experiment API** - Single `Experiment` class for all evaluations
+- **Phased Experiment Execution** - INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
+- **Automatic Resume** - Experiments resume from last checkpoint after crashes
+- **Health Monitoring** - Check experiment status, detect incomplete runs
 - **Multiple Agents** - DirectLLM (no retrieval) and FixedRAG baselines
 - **Multiple Models** - HuggingFace and OpenAI model support
 - **Batch Processing** - Parallel answer generation for faster experiments
-- **Checkpointing** - Automatic save/resume for long experiments
 - **Comprehensive Metrics** - F1, Exact Match, BERTScore, BLEURT, LLM-as-judge
 
 ## Quick Start
@@ -17,11 +18,14 @@ A modular framework for experimenting with RAG (Retrieval-Augmented Generation) 
 # Install
 uv sync
 
-# Run a study
-uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
+# Run a study (dry-run to check status)
+uv run ragicamp run conf/study/comprehensive_baseline.yaml --dry-run
 
-# Or use the CLI
+# Run for real (skips completed experiments)
 uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
+
+# Check health of experiments
+uv run ragicamp health outputs/comprehensive_baseline
 ```
 
 ## Project Structure
@@ -29,30 +33,68 @@ uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
 ```
 ragicamp/
 ├── src/ragicamp/          # Core library
-│   ├── experiment.py      # Unified Experiment class
+│   ├── experiment.py      # Phased Experiment class
+│   ├── experiment_state.py # State management (phases, health)
+│   ├── factory.py         # ComponentFactory
 │   ├── agents/            # RAG agents (DirectLLM, FixedRAG)
 │   ├── models/            # LLM backends (HuggingFace, OpenAI)
-│   ├── retrievers/        # Dense/Sparse retrieval
+│   ├── retrievers/        # Dense retrieval (FAISS)
 │   ├── datasets/          # QA datasets (NQ, TriviaQA, HotpotQA)
 │   ├── metrics/           # Evaluation metrics
-│   ├── evaluation/        # Evaluator class
+│   ├── analysis/          # Results loading and comparison
 │   └── cli/               # Command-line interface
 ├── conf/                  # Configuration files
-│   ├── study/             # Study configs
-│   ├── model/             # Model configs
-│   └── retriever/         # Retriever configs
+│   ├── study/             # Study configs (YAML)
+│   └── prompts/           # Few-shot examples
 ├── scripts/               # Utility scripts
-│   └── experiments/       # Experiment runners
-├── artifacts/             # Saved indexes and models
-└── outputs/               # Experiment results
+├── artifacts/             # Saved indexes
+├── outputs/               # Experiment results
+└── notebooks/             # Analysis notebooks
 ```
 
-## Running Experiments
+## Experiment Lifecycle
 
-### Using Python API
+Each experiment goes through phases, with artifacts saved at each step:
+
+| Phase | Artifacts | Description |
+|-------|-----------|-------------|
+| `INIT` | `state.json`, `questions.json`, `metadata.json` | Config saved, questions exported |
+| `GENERATING` | `predictions.json` (partial) | Answers being generated |
+| `GENERATED` | `predictions.json` (complete) | All predictions done |
+| `COMPUTING_METRICS` | `predictions.json` + per-item metrics | Metrics computed |
+| `COMPLETE` | `results.json` | Final summary |
+
+If an experiment crashes, it resumes from the last saved state.
+
+## CLI Commands
+
+```bash
+# Run study from config
+ragicamp run <config.yaml> [--dry-run] [--skip-existing]
+
+# Check experiment health
+ragicamp health <output_dir> [--metrics f1,exact_match]
+
+# Resume incomplete experiments
+ragicamp resume <output_dir> [--dry-run]
+
+# Recompute metrics for an experiment
+ragicamp metrics <exp_dir> -m f1,llm_judge
+
+# Build retrieval index
+ragicamp index --corpus simple --embedding minilm --chunk-size 512
+
+# Compare results
+ragicamp compare <output_dir> --metric f1 --group-by model
+
+# Compute metrics on predictions file
+ragicamp evaluate predictions.json --metrics f1 exact_match llm_judge_qa
+```
+
+## Python API
 
 ```python
-from ragicamp import Experiment, ComponentFactory
+from ragicamp import Experiment, ComponentFactory, check_health
 from ragicamp.metrics import F1Metric, ExactMatchMetric
 
 # Create components
@@ -81,11 +123,16 @@ exp = Experiment(
     metrics=[F1Metric(), ExactMatchMetric()],
 )
 
-result = exp.run(batch_size=8, checkpoint_every=50)
-print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
+# Check health first
+health = exp.check_health()
+if health.is_complete:
+    print("Already done!")
+else:
+    result = exp.run(batch_size=8)
+    print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
 ```
 
-### Using Study Config
+## Study Config
 
 ```yaml
 # conf/study/my_study.yaml
@@ -98,51 +145,33 @@ direct:
   enabled: true
   models:
     - hf:google/gemma-2b-it
-  prompts: [default, concise]
+  prompts: [default, concise, fewshot]
+  quantization: [4bit, 8bit]
+
+rag:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+  retrievers:
+    - simple_minilm_recursive_512
+  top_k_values: [3, 5, 10]
+  prompts: [default, fewshot]
   quantization: [4bit]
 
-metrics: [f1, exact_match]
+metrics: [f1, exact_match, bertscore, llm_judge]
+llm_judge:
+  model: openai:gpt-4o-mini
+  type: binary
+
 output_dir: outputs/my_study
 ```
 
-```bash
-uv run ragicamp run conf/study/my_study.yaml
-```
-
-## CLI Commands
-
-```bash
-# Run study
-ragicamp run <config.yaml> [--dry-run] [--skip-existing]
-
-# Build index
-ragicamp index --corpus simple --embedding minilm --chunk-size 512
-
-# Compare results
-ragicamp compare outputs/my_study/
-
-# Compute metrics on predictions
-ragicamp evaluate predictions.json --metrics f1 exact_match
-```
-
-## Configuration
-
-### Study Config
-
-| Field | Description | Default |
-|-------|-------------|---------|
-| `name` | Study name | required |
-| `num_questions` | Limit per dataset | null (all) |
-| `datasets` | List of datasets | `[nq]` |
-| `batch_size` | Batch size for inference | 8 |
-| `metrics` | Metrics to compute | `[f1, exact_match]` |
-
-### Model Spec Format
+## Model Spec Format
 
 - HuggingFace: `hf:google/gemma-2b-it`
 - OpenAI: `openai:gpt-4o-mini`
 
-### Quantization
+## Quantization
 
 - `4bit` - 4-bit quantization (faster, less VRAM)
 - `8bit` - 8-bit quantization
@@ -154,6 +183,7 @@ ragicamp evaluate predictions.json --metrics f1 exact_match
 - [Getting Started](docs/GETTING_STARTED.md)
 - [Agents Guide](docs/guides/AGENTS.md)
 - [Metrics Guide](docs/guides/METRICS.md)
+- [Cheatsheet](CHEATSHEET.md)
 
 ## Development
 
@@ -162,8 +192,7 @@ ragicamp evaluate predictions.json --metrics f1 exact_match
 uv sync --extra dev
 
 # Format code
-uv run black src/ tests/ scripts/
-uv run isort src/ tests/ scripts/
+uv run ruff format src/ tests/ scripts/
 
 # Run tests
 uv run pytest

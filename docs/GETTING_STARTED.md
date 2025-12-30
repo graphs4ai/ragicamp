@@ -4,7 +4,13 @@ Welcome to RAGiCamp! This guide will help you get started quickly.
 
 ## What is RAGiCamp?
 
-RAGiCamp is a modular framework for experimenting with Retrieval-Augmented Generation (RAG) approaches, from simple baselines to complex adaptive systems using bandits and reinforcement learning.
+RAGiCamp is a modular framework for experimenting with Retrieval-Augmented Generation (RAG) approaches. It provides:
+
+- **Phased experiment execution** with automatic checkpointing and resume
+- **Multiple agents**: DirectLLM (no retrieval) and FixedRAG baselines
+- **Multiple models**: HuggingFace and OpenAI support
+- **Comprehensive metrics**: F1, Exact Match, BERTScore, BLEURT, LLM-as-judge
+- **Health monitoring**: Detect incomplete experiments and resume from failures
 
 ## Installation
 
@@ -16,221 +22,215 @@ cd ragicamp
 uv sync
 
 # Optional: Install with additional dependencies
-uv sync --extra dev --extra metrics --extra viz
-
-# Or use pip if you prefer
-# pip install -e ".[dev,metrics,viz]"
+uv sync --extra dev
 ```
 
 ## 5-Minute Quickstart
 
-### 1. Simple Example
+### 1. Run Your First Study (Dry Run)
 
-Create a file `demo.py`:
+```bash
+# Preview what will run (no actual execution)
+uv run ragicamp run conf/study/simple_hf.yaml --dry-run
+```
+
+This shows the experiment status:
+- ✓ Complete experiments
+- ○ Incomplete/pending experiments
+
+### 2. Run the Study
+
+```bash
+# Run experiments (skips completed ones)
+uv run ragicamp run conf/study/simple_hf.yaml --skip-existing
+```
+
+### 3. Check Experiment Health
+
+```bash
+# See status of all experiments
+uv run ragicamp health outputs/simple_hf
+```
+
+### 4. Compare Results
+
+```bash
+# Compare by model
+uv run ragicamp compare outputs/simple_hf --metric f1
+```
+
+## Python API Example
 
 ```python
-import sys
-sys.path.insert(0, "src")
+from ragicamp import Experiment, ComponentFactory
+from ragicamp.metrics import F1Metric, ExactMatchMetric
 
-from ragicamp.agents.direct_llm import DirectLLMAgent
+# Create components using factory
+model = ComponentFactory.create_model({
+    "type": "huggingface",
+    "model_name": "google/gemma-2b-it",
+    "load_in_4bit": True,
+})
 
-# Mock model for demonstration
-class SimpleModel:
-    def __init__(self):
-        self.model_name = "demo"
-    
-    def generate(self, prompt, **kwargs):
-        return "Paris"  # Example answer
-    
-    def get_embeddings(self, texts):
-        import numpy as np
-        return np.random.randn(len(texts), 384).tolist()
+agent = ComponentFactory.create_agent(
+    {"type": "direct_llm", "name": "my_baseline"},
+    model=model,
+)
 
-# Create agent
-model = SimpleModel()
-agent = DirectLLMAgent(name="demo", model=model)
+dataset = ComponentFactory.create_dataset({
+    "name": "natural_questions",
+    "split": "validation",
+    "num_examples": 100,
+})
 
-# Ask question
-response = agent.answer("What is the capital of France?")
-print(f"Answer: {response.answer}")
-```
+# Create and run experiment
+exp = Experiment(
+    name="my_first_experiment",
+    agent=agent,
+    dataset=dataset,
+    metrics=[F1Metric(), ExactMatchMetric()],
+)
 
-Run it:
-```bash
-uv run python demo.py
-```
-
-### 2. Run the Gemma 2B Baseline
-
-```bash
-# Quick evaluation with Gemma 2B (no retrieval)
-uv run python experiments/scripts/run_gemma2b_baseline.py \
-    --dataset natural_questions \
-    --num-examples 100 \
-    --device cuda
-
-# Use CPU if no GPU available
-uv run python experiments/scripts/run_gemma2b_baseline.py \
-    --dataset natural_questions \
-    --num-examples 10 \
-    --device cpu
-
-# Use 8-bit quantization to save memory
-uv run python experiments/scripts/run_gemma2b_baseline.py \
-    --dataset natural_questions \
-    --num-examples 100 \
-    --load-in-8bit
-```
-
-### 3. Run Other Baseline Experiments
-
-```bash
-# Using config files
-uv run python experiments/scripts/run_experiment.py \
-    --config experiments/configs/baseline_direct.yaml \
-    --mode eval
+result = exp.run(batch_size=8)
+print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
 ```
 
 ## Core Concepts
 
-### Agents
-Different RAG strategies:
-- **DirectLLM**: No retrieval, just LLM
-- **FixedRAG**: Standard RAG with fixed parameters
-- **BanditRAG**: Adaptive parameter selection
-- **MDPRAG**: Iterative decision-making
+### Experiments
 
-### Models
-Unified LLM interface:
-- HuggingFace transformers
-- OpenAI API
-- Easy to extend to others
-
-### Retrievers
-Document retrieval:
-- Dense (embeddings + FAISS)
-- Sparse (TF-IDF)
-
-### Datasets
-QA datasets:
-- Natural Questions
-- HotpotQA
-- TriviaQA
-
-### Metrics
-Evaluation:
-- Exact Match, F1
-- BERTScore
-- LLM-as-a-judge
-
-### Policies
-For adaptive agents:
-- Bandits (Epsilon-Greedy, UCB)
-- MDP (Q-Learning)
-
-## Typical Workflow
+Experiments run in phases, with checkpoints at each step:
 
 ```
-1. Define experiment in YAML config
-   ↓
-2. Run baseline experiments
-   ↓
-3. Train adaptive agents
-   ↓
-4. Compare results
-   ↓
-5. Iterate and improve
+INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
+```
+
+If an experiment crashes, it automatically resumes from the last checkpoint.
+
+### Agents
+
+- **DirectLLMAgent**: No retrieval, directly queries the LLM
+- **FixedRAGAgent**: Retrieves context before answering
+
+### Models
+
+- **HuggingFaceModel**: Local models with optional quantization (4bit, 8bit)
+- **OpenAIModel**: OpenAI API models
+
+### Metrics
+
+- **F1Metric**, **ExactMatchMetric**: Token-level metrics
+- **BertScoreMetric**: Semantic similarity
+- **BLEURTMetric**: Learned metric
+- **LLMJudgeQAMetric**: LLM-as-judge evaluation
+
+### Datasets
+
+- Natural Questions (NQ)
+- TriviaQA
+- HotpotQA
+
+## Study Configuration
+
+Define experiments in YAML:
+
+```yaml
+# conf/study/my_study.yaml
+name: my_study
+description: "My first study"
+num_questions: 100
+datasets: [nq]
+
+direct:
+  enabled: true
+  models:
+    - hf:google/gemma-2b-it
+  prompts: [default, concise]
+  quantization: [4bit]
+
+metrics: [f1, exact_match]
+output_dir: outputs/my_study
+```
+
+Run it:
+```bash
+uv run ragicamp run conf/study/my_study.yaml
 ```
 
 ## Project Structure
 
 ```
 ragicamp/
-├── src/ragicamp/           # Core framework code
-│   ├── agents/             # RAG strategies
-│   ├── models/             # LLM interfaces
-│   ├── retrievers/         # Retrieval systems
-│   ├── datasets/           # Dataset loaders
-│   ├── metrics/            # Evaluation metrics
-│   ├── policies/           # Decision policies
-│   ├── training/           # Training utilities
-│   └── evaluation/         # Evaluation utilities
-├── experiments/            # Experiment configs & scripts
-│   ├── configs/            # YAML configurations
-│   └── scripts/            # Python scripts
-├── tests/                  # Unit tests
-└── notebooks/              # Jupyter notebooks
+├── src/ragicamp/          # Core library
+│   ├── experiment.py      # Phased Experiment class
+│   ├── experiment_state.py # State management
+│   ├── agents/            # DirectLLM, FixedRAG
+│   ├── models/            # HuggingFace, OpenAI
+│   ├── retrievers/        # Dense retrieval
+│   ├── datasets/          # NQ, TriviaQA, HotpotQA
+│   ├── metrics/           # F1, EM, BERTScore, LLM-judge
+│   └── cli/               # Command-line interface
+├── conf/                  # Configuration files
+│   ├── study/             # Study configs
+│   └── prompts/           # Few-shot examples
+├── scripts/               # Utility scripts
+├── artifacts/             # Saved indexes
+├── outputs/               # Experiment results
+└── notebooks/             # Analysis notebooks
 ```
 
-## Key Design Principles
+## CLI Commands
 
-1. **Modularity**: Swap any component easily
-2. **Abstraction**: Clean interfaces, specialized implementations
-3. **Configuration**: Define experiments in YAML
-4. **Extensibility**: Easy to add new components
-
-## Example Use Cases
-
-### Baseline Comparison
-Compare direct LLM vs standard RAG:
 ```bash
-python experiments/scripts/compare_baselines.py
-```
+# Run study
+ragicamp run <config.yaml> [--dry-run] [--skip-existing]
 
-### Adaptive RAG Training
-Train a bandit agent to learn optimal retrieval parameters:
-```bash
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/bandit_rag.yaml \
-    --mode train
-```
+# Check health
+ragicamp health <output_dir>
 
-### MDP-based Iterative RAG
-Train an agent that decides when to retrieve, reformulate, or answer:
-```bash
-python experiments/scripts/run_experiment.py \
-    --config experiments/configs/mdp_rag.yaml \
-    --mode train
+# Recompute metrics
+ragicamp metrics <exp_dir> -m f1,llm_judge
+
+# Compare results
+ragicamp compare <output_dir> --metric f1
+
+# Build index
+ragicamp index --corpus simple --embedding minilm
 ```
 
 ## Next Steps
 
 1. **Read the docs**:
-   - `USAGE.md` - Detailed usage guide
-   - `ARCHITECTURE.md` - System design
-   - `TODO.md` - Planned features
+   - [Architecture](ARCHITECTURE.md) - System design
+   - [Cheatsheet](../CHEATSHEET.md) - Quick reference
+   - [Metrics Guide](guides/METRICS.md) - Evaluation details
 
-2. **Explore examples**:
-   - Check `experiments/configs/` for example configurations
-   - Run `experiments/scripts/compare_baselines.py`
-   - Open `notebooks/quickstart.ipynb`
+2. **Run the comprehensive baseline**:
+   ```bash
+   uv run ragicamp run conf/study/comprehensive_baseline.yaml --dry-run
+   ```
 
-3. **Customize**:
-   - Add your own datasets
-   - Implement custom agents
-   - Create new metrics
-   - Design novel policies
+3. **Analyze results**:
+   - Open `notebooks/experiment_analysis.ipynb`
+   - Use `ragicamp compare` CLI
 
-4. **Experiment**:
-   - Try different model sizes
-   - Test various retrieval strategies
-   - Tune policy hyperparameters
-   - Compare on different datasets
+4. **Customize**:
+   - Create your own study config
+   - Add custom metrics
+   - Extend with new models
 
-## Need Help?
+## Common Issues
 
-- Check `USAGE.md` for detailed examples
-- Read source code - it's well-documented!
-- Look at configuration files in `experiments/configs/`
-- Explore test files in `tests/` for usage patterns
+### Out of Memory (OOM)
+- Use `load_in_4bit: true` for quantization
+- Reduce `batch_size`
 
-## Contributing
+### Experiment Crashed
+- Just re-run - experiments auto-resume from checkpoints
+- Check health: `ragicamp health <output_dir>`
 
-This is a research framework - feel free to:
-- Add new datasets, models, or agents
-- Implement new metrics
-- Improve existing components
-- Share your experiments!
+### Slow Inference
+- Increase `batch_size` (e.g., 8 or 16)
+- Use `--skip-existing` to avoid re-running completed experiments
 
 Happy experimenting! 🏕️
-

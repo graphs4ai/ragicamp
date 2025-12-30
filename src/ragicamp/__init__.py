@@ -31,6 +31,13 @@ from ragicamp.experiment import (
     ExperimentResult,
     run_experiments,
 )
+from ragicamp.experiment_state import (
+    ExperimentHealth,
+    ExperimentPhase,
+    ExperimentState,
+    check_health,
+    detect_state,
+)
 from ragicamp.factory import ComponentFactory
 
 __all__ = [
@@ -39,6 +46,12 @@ __all__ = [
     "ExperimentCallbacks",
     "ExperimentResult",
     "run_experiments",
+    # State management
+    "ExperimentPhase",
+    "ExperimentState",
+    "ExperimentHealth",
+    "check_health",
+    "detect_state",
     # Factory
     "ComponentFactory",
     # Version

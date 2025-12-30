@@ -9,7 +9,7 @@ RAGiCamp is a **research framework** for experimenting with RAG approaches. It p
 1. **Simplicity** - Easy to understand, easy to modify
 2. **Modularity** - Components can be swapped independently
 3. **Reproducibility** - Experiments should be reproducible via configs
-4. **Performance** - Efficient use of GPU resources
+4. **Reliability** - Phased execution with checkpointing for long experiments
 
 This is NOT:
 - A production RAG system
@@ -19,24 +19,44 @@ This is NOT:
 ## Architecture Overview
 
 ```
-Experiment (with ExperimentCallbacks)
+Experiment (phased execution with state management)
+    ├── Phases: INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
     ├── Agent (DirectLLM or FixedRAG)
     │   ├── Model (HuggingFace or OpenAI or custom)
     │   └── Retriever (optional, for RAG)
     ├── Dataset (NQ, TriviaQA, HotpotQA)
-    └── Metrics (F1, EM, BERTScore, etc.)
+    └── Metrics (F1, EM, BERTScore, LLM-as-judge, etc.)
 ```
 
 Key classes:
-- `Experiment` - Unified entry point for running evaluations
-- `ExperimentCallbacks` - Hooks for monitoring progress (on_batch_start, on_complete, etc.)
-- `Evaluator` - Lower-level evaluation with checkpointing
+- `Experiment` - Unified entry point with phased execution
+- `ExperimentState` - Persistent state tracking (phase, progress)
+- `ExperimentHealth` - Health check result (missing predictions, metrics)
+- `ExperimentCallbacks` - Hooks for monitoring (on_phase_start, on_batch_end, etc.)
 - `ComponentFactory` - Creates components from config dicts (supports plugin registration)
 
 Interfaces:
 - All base classes in `{module}/base.py`
 - Protocols in `core/protocols.py` for duck-typing
 - Exception hierarchy: `RAGiCampError` → `ConfigError`, `ModelError`, `EvaluationError`
+
+## Experiment Phases
+
+Each experiment progresses through phases, with artifacts saved at each step:
+
+```
+┌──────────┐   ┌────────────┐   ┌───────────┐   ┌──────────────┐   ┌──────────┐
+│   INIT   │──▶│ GENERATING │──▶│ GENERATED │──▶│ COMPUTING    │──▶│ COMPLETE │
+│          │   │            │   │           │   │   METRICS    │   │          │
+└──────────┘   └────────────┘   └───────────┘   └──────────────┘   └──────────┘
+     │               │               │                 │                 │
+     ▼               ▼               ▼                 ▼                 ▼
+ state.json     predictions.json predictions.json  predictions.json  results.json
+ questions.json  (partial)       (complete)       + per-item metrics (complete)
+ metadata.json
+```
+
+If an experiment crashes, it resumes from the last saved phase.
 
 ## Do's
 
@@ -48,9 +68,9 @@ Interfaces:
 
 ### Patterns to Follow
 - **Factory pattern** - Use `ComponentFactory` for creating components from configs
+- **State Machine** - Experiments use explicit phases with validated transitions
 - **Dataclasses** - Use for simple data containers (e.g., `ExperimentResult`)
-- **Context managers** - Use for resource cleanup (GPU memory)
-- **Checkpointing** - Long operations should save progress
+- **Checkpointing** - Long operations save progress to enable resume
 
 ### Adding New Components
 
@@ -80,6 +100,10 @@ class MyMetric(Metric):
     
     def compute(self, predictions: List[str], references: List[Any]) -> Dict[str, float]:
         ...
+    
+    def get_per_item_scores(self) -> List[float]:
+        # Return per-item scores for detailed analysis
+        return self._scores
 ```
 
 New Dataset:
@@ -94,13 +118,34 @@ class MyDataset(QADataset):
 
 ```python
 from ragicamp import Experiment, ExperimentCallbacks
+from ragicamp.experiment_state import ExperimentPhase
 
 callbacks = ExperimentCallbacks(
-    on_batch_start=lambda i, n: print(f"Batch {i}/{n}"),
+    on_phase_start=lambda p: print(f"Starting phase: {p.value}"),
+    on_batch_end=lambda i, n, preds: print(f"Batch {i}/{n} done"),
     on_complete=lambda r: send_slack_notification(f"Done! F1={r.f1:.3f}"),
 )
 
 result = exp.run(batch_size=8, callbacks=callbacks)
+```
+
+### Using Health Checks
+
+```python
+from ragicamp import Experiment, check_health
+
+# Check experiment health before running
+health = exp.check_health()
+
+if health.is_complete:
+    print("Already done!")
+elif health.can_resume:
+    print(f"Resuming from {health.resume_phase.value}")
+    print(f"Missing predictions: {len(health.missing_predictions)}")
+    print(f"Missing metrics: {health.metrics_missing}")
+    result = exp.run(resume=True)
+else:
+    result = exp.run()
 ```
 
 ### Configuration
@@ -152,7 +197,7 @@ result = exp.run(batch_size=8, callbacks=callbacks)
 - **Complex inheritance hierarchies** - Prefer composition
 - **Singleton patterns** - Use dependency injection instead
 - **Magic strings everywhere** - Use constants or enums
-- **Mutable default arguments** - `def f(x=[])`  is a bug waiting to happen
+- **Mutable default arguments** - `def f(x=[])` is a bug waiting to happen
 
 ## Logging vs Print
 
@@ -227,27 +272,29 @@ def mock_model():
 
 ```
 src/ragicamp/
-├── agents/          # RAG agents (base, direct_llm, fixed_rag)
-├── models/          # LLM backends (base, huggingface, openai)
-├── retrievers/      # Dense/Sparse retrieval
-├── datasets/        # QA datasets (base, nq, triviaqa, hotpotqa)
-├── metrics/         # Evaluation metrics (F1, EM, BERTScore, LLM-judge)
-├── corpus/          # Document corpus and chunking
-├── evaluation/      # Evaluator class (two-phase evaluation)
-├── experiment.py    # Experiment + ExperimentCallbacks + ExperimentResult
-├── factory.py       # ComponentFactory with plugin registration
-├── cli/             # Command-line interface (main.py, study.py)
-├── core/            # Logging, exceptions (3 classes), protocols
-├── config/          # Pydantic schemas only
-└── utils/           # ResourceManager, paths, prompts, formatting
+├── agents/           # RAG agents (base, direct_llm, fixed_rag)
+├── models/           # LLM backends (base, huggingface, openai)
+├── retrievers/       # Dense retrieval (FAISS)
+├── datasets/         # QA datasets (base, nq, triviaqa, hotpotqa)
+├── metrics/          # Evaluation metrics (F1, EM, BERTScore, LLM-judge)
+├── corpus/           # Document corpus and chunking
+├── analysis/         # Results loading, comparison, visualization
+├── evaluation/       # compute_metrics_from_file utility
+├── experiment.py     # Experiment + ExperimentCallbacks + ExperimentResult
+├── experiment_state.py # ExperimentPhase, ExperimentState, ExperimentHealth
+├── factory.py        # ComponentFactory with plugin registration
+├── cli/              # Command-line interface (main.py, study.py)
+├── core/             # Logging, exceptions, protocols
+├── config/           # Pydantic schemas
+└── utils/            # ResourceManager, paths, prompts, formatting
 
 scripts/
-└── experiments/     # Standalone experiment scripts
+├── experiments/      # run_study.py
+└── data/             # build_all_indexes.py
 
 conf/
-├── study/           # Study configurations (comprehensive_baseline, etc.)
-├── prompts/         # Few-shot examples
-└── retriever/       # Retriever configs (pre-built indexes)
+├── study/            # Study configurations (comprehensive_baseline.yaml)
+└── prompts/          # Few-shot examples (fewshot_examples.yaml)
 ```
 
 ## Prompt Engineering
@@ -321,19 +368,24 @@ Few-shot examples are in `conf/prompts/fewshot_examples.yaml`.
 
 ## Running Experiments
 
-### Quick test
+### Quick test (dry-run)
 ```bash
-uv run python scripts/experiments/run_study.py conf/study/simple_hf.yaml --dry-run
+uv run ragicamp run conf/study/simple_hf.yaml --dry-run
 ```
 
 ### Full study
 ```bash
-uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing
+uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
 ```
 
-### With MLflow tracking
+### Check health
 ```bash
-uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --mlflow
+uv run ragicamp health outputs/comprehensive_baseline
+```
+
+### Recompute metrics
+```bash
+uv run ragicamp metrics outputs/comprehensive_baseline/my_exp -m f1,llm_judge
 ```
 
 ## Analyzing Results
@@ -348,9 +400,6 @@ uv run ragicamp compare outputs/comprehensive_baseline --group-by retriever
 
 # Pivot table: model performance across datasets
 uv run ragicamp compare outputs/comprehensive_baseline --pivot model dataset
-
-# Export to CSV
-uv run python scripts/analysis/compare_baseline.py outputs/comprehensive_baseline --csv results.csv
 ```
 
 ### Python API
@@ -384,7 +433,7 @@ tracker.backfill_from_results(results)
 # Open http://localhost:5000
 ```
 
-### Using Python API
+### Python API
 ```python
 from ragicamp import Experiment
 from ragicamp.agents import DirectLLMAgent
@@ -423,3 +472,7 @@ print(f"F1: {result.f1:.3f}")
 - Run with `--dry-run` first
 - Check model spec format: `hf:model/name` or `openai:model-name`
 
+### Experiment stuck/crashed
+- Check health: `ragicamp health <output_dir>`
+- Resume: experiments auto-resume from last checkpoint
+- Recompute metrics only: `ragicamp metrics <exp_dir> -m f1,llm_judge`
