@@ -19,6 +19,21 @@ jobs:
   # ============================================================================
   # FAST CHECKS (run in parallel, fail fast)
   # ============================================================================
+
+  secrets-scan:
+    name: Secret Scan (TruffleHog)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for scanning all commits
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
   
   lint:
     name: Lint & Format
@@ -242,13 +257,14 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, import-check, validate-configs, test]
+    needs: [secrets-scan, lint, import-check, validate-configs, test]
     if: always()
     
     steps:
       - name: Check all jobs
         run: |
           echo "Job Results:"
+          echo "  Secrets Scan: ${{ needs.secrets-scan.result }}"
           echo "  Lint: ${{ needs.lint.result }}"
           echo "  Import Check: ${{ needs.import-check.result }}"
           echo "  Validate Configs: ${{ needs.validate-configs.result }}"
@@ -256,6 +272,11 @@ jobs:
           echo ""
           
           # Fail if any required job failed
+          if [ "${{ needs.secrets-scan.result }}" != "success" ]; then
+            echo "❌ Secret scan failed - potential secrets detected!"
+            exit 1
+          fi
+          
           if [ "${{ needs.lint.result }}" != "success" ]; then
             echo "❌ Lint failed"
             exit 1
