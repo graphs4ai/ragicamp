@@ -2,10 +2,11 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from ragicamp.retrievers.base import Document
+    from ragicamp.core.schemas import RAGResponseMeta
 
 
 @dataclass
@@ -34,14 +35,26 @@ class RAGResponse:
         context: The RAG context used
         prompt: The full prompt sent to the model (for debugging/analysis)
         confidence: Optional confidence score
-        metadata: Additional response information (timing, token counts, etc.)
+        metadata: Response metadata - can be Dict or typed RAGResponseMeta.
+                  Use metadata_dict property for consistent dict access.
     """
 
     answer: str
     context: RAGContext
     prompt: Optional[str] = None
     confidence: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Union[Dict[str, Any], "RAGResponseMeta"] = field(default_factory=dict)
+
+    @property
+    def metadata_dict(self) -> Dict[str, Any]:
+        """Get metadata as a dict (for backwards compatibility).
+        
+        Works whether metadata is a dict or RAGResponseMeta.
+        """
+        if isinstance(self.metadata, dict):
+            return self.metadata
+        # RAGResponseMeta has to_dict()
+        return self.metadata.to_dict() if hasattr(self.metadata, "to_dict") else {}
 
 
 class RAGAgent(ABC):

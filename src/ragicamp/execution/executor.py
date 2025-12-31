@@ -203,10 +203,11 @@ class ResilientExecutor:
                         "prompt": getattr(resp, "prompt", None),
                         "error": None,
                     }
-                    # Include retrieved context if available (for RAG)
-                    metadata = getattr(resp, "metadata", {}) or {}
-                    if "retrieved_context" in metadata:
-                        result_item["retrieved_context"] = metadata["retrieved_context"]
+                    # Include retrieved docs if available (for RAG)
+                    # Use metadata_dict property for consistent access
+                    metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                    if "retrieved_docs" in metadata:
+                        result_item["retrieved_docs"] = metadata["retrieved_docs"]
                     results.append(result_item)
 
                 pbar.update(len(batch))
@@ -342,10 +343,11 @@ class ResilientExecutor:
                     "prompt": getattr(resp, "prompt", None),
                     "error": None,
                 }
-                # Include retrieved context if available (for RAG)
-                metadata = getattr(resp, "metadata", {}) or {}
-                if "retrieved_context" in metadata:
-                    result_item["retrieved_context"] = metadata["retrieved_context"]
+                # Include retrieved docs if available (for RAG)
+                # Use metadata_dict property for consistent access
+                metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                if "retrieved_docs" in metadata:
+                    result_item["retrieved_docs"] = metadata["retrieved_docs"]
                 results.append(result_item)
             except Exception as e:
                 results.append(
@@ -389,10 +391,11 @@ class ResilientExecutor:
                     "prompt": getattr(resp, "prompt", None),
                     "error": None,
                 }
-                # Include retrieved context if available (for RAG)
-                metadata = getattr(resp, "metadata", {}) or {}
-                if "retrieved_context" in metadata:
-                    result_item["retrieved_context"] = metadata["retrieved_context"]
+                # Include retrieved docs if available (for RAG)
+                # Use metadata_dict property for consistent access
+                metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                if "retrieved_docs" in metadata:
+                    result_item["retrieved_docs"] = metadata["retrieved_docs"]
                 results.append(result_item)
             except Exception as e:
                 results.append(

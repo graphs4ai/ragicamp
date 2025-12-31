@@ -96,11 +96,12 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         )
 
         # Call LLM asynchronously
+        # Use 500 tokens to avoid truncation errors
         if hasattr(self.judge_model, "agenerate_single"):
             judgment = await self.judge_model.agenerate_single(
                 prompt,
                 temperature=0.0,
-                max_tokens=200,
+                max_tokens=500,
             )
         else:
             # Fallback to sync if async not available
@@ -108,7 +109,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
             loop = asyncio.get_event_loop()
             judgment = await loop.run_in_executor(
-                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=200)
+                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=500)
             )
 
         # Extract categorical judgment

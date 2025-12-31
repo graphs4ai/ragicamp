@@ -436,9 +436,9 @@ class Experiment:
                         "prompt": r.get("prompt"),
                         "metrics": {},
                     }
-                    # Include retrieved context for RAG experiments
-                    if "retrieved_context" in r:
-                        pred_item["retrieved_context"] = r["retrieved_context"]
+                    # Include retrieved docs for RAG experiments
+                    if "retrieved_docs" in r:
+                        pred_item["retrieved_docs"] = r["retrieved_docs"]
                     predictions_data["predictions"].append(pred_item)
                     completed_indices.add(r["idx"])
             self._state.predictions_complete = len(predictions_data["predictions"])

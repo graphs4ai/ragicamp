@@ -3,6 +3,7 @@
 from typing import Any, List, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from ragicamp.core.schemas import RAGResponseMeta, RetrievedDoc, AgentType
 from ragicamp.models.base import LanguageModel
 from ragicamp.retrievers.base import Document, Retriever
 from ragicamp.retrievers.dense import DenseRetriever
@@ -103,16 +104,26 @@ class FixedRAGAgent(RAGAgent):
         # Generate answer
         answer = self.model.generate(prompt, **kwargs)
 
-        # Return response with prompt and retrieved context for analysis
+        # Build structured retrieved docs for typed metadata
+        retrieved_structured = [
+            RetrievedDoc(
+                rank=i + 1,
+                content=doc.content,
+                score=getattr(doc, "score", None),
+            )
+            for i, doc in enumerate(retrieved_docs)
+        ]
+
+        # Return response with typed metadata
         return RAGResponse(
             answer=answer,
             context=context,
             prompt=prompt,
-            metadata={
-                "agent_type": "fixed_rag",
-                "num_docs_used": len(retrieved_docs),
-                "retrieved_context": context_text,  # Include for saving
-            },
+            metadata=RAGResponseMeta(
+                agent_type=AgentType.FIXED_RAG,
+                num_docs_used=len(retrieved_docs),
+                retrieved_docs=retrieved_structured,
+            ),
         )
 
     def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
@@ -156,16 +167,26 @@ class FixedRAGAgent(RAGAgent):
         for query, prompt, answer, context, docs, ctx_text in zip(
             queries, prompts, answers, contexts, all_docs, context_texts
         ):
+            # Build structured retrieved docs for typed metadata
+            retrieved_structured = [
+                RetrievedDoc(
+                    rank=i + 1,
+                    content=doc.content,
+                    score=getattr(doc, "score", None),
+                )
+                for i, doc in enumerate(docs)
+            ]
+            
             response = RAGResponse(
                 answer=answer,
                 context=context,
                 prompt=prompt,
-                metadata={
-                    "agent_type": "fixed_rag",
-                    "num_docs_used": len(docs),
-                    "batch_processing": True,
-                    "retrieved_context": ctx_text,  # Include for saving
-                },
+                metadata=RAGResponseMeta(
+                    agent_type=AgentType.FIXED_RAG,
+                    num_docs_used=len(docs),
+                    batch_processing=True,
+                    retrieved_docs=retrieved_structured,
+                ),
             )
             responses.append(response)
 

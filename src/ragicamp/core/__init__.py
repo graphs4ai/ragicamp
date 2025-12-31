@@ -1,6 +1,7 @@
 """Core infrastructure for RAGiCamp.
 
 This module provides foundational components:
+- Schemas: Data contracts (PredictionRecord, RetrievedDoc, etc.)
 - Exceptions: Custom exception hierarchy
 - Logging: Structured logging configuration
 - Protocols: Type-checkable interfaces
@@ -22,8 +23,21 @@ from ragicamp.core.exceptions import (
     RAGiCampError,
 )
 from ragicamp.core.logging import configure_logging, get_logger
+from ragicamp.core.schemas import (
+    ExperimentSpec,
+    PredictionRecord,
+    PromptStyle,
+    RAGResponseMeta,
+    RetrievedDoc,
+)
 
 __all__ = [
+    # Schemas (data contracts)
+    "PredictionRecord",
+    "RetrievedDoc",
+    "RAGResponseMeta",
+    "ExperimentSpec",
+    "PromptStyle",
     # Exceptions
     "RAGiCampError",
     "ConfigError",

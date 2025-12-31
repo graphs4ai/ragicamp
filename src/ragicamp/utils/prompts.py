@@ -4,12 +4,8 @@ This module provides a centralized way to build prompts for different
 experiment types (direct, RAG) with support for few-shot examples.
 
 Usage:
-    # Create prompt builder from config
     builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
-    
-    # Build prompts
-    direct_prompt = builder.build_direct(query="What is AI?")
-    rag_prompt = builder.build_rag(query="What is AI?", context="...")
+    prompt = builder.build_direct(query="What is AI?")
 """
 
 from dataclasses import dataclass, field
@@ -22,144 +18,110 @@ import yaml
 @dataclass
 class FewShotExample:
     """A single few-shot example."""
-
     question: str
     answer: str
-
-    def format(self) -> str:
-        """Format as Question/Answer pair."""
-        return f"Question: {self.question}\nAnswer: {self.answer}"
 
 
 @dataclass
 class PromptConfig:
-    """Configuration for prompt building.
-
-    Attributes:
-        system_prompt: System-level instruction
-        style: Answer style instruction (e.g., "Give ONLY the answer")
-        stop_instruction: Instruction to stop generating
-        knowledge_instruction: For RAG, whether to use own knowledge
-        examples: Few-shot examples
-    """
-
-    system_prompt: str = "You are a helpful assistant."
+    """Configuration for prompt building."""
     style: str = ""
     stop_instruction: str = ""
     knowledge_instruction: str = ""
     examples: List[FewShotExample] = field(default_factory=list)
 
-    @property
-    def examples_text(self) -> str:
-        """Format all examples as text."""
-        if not self.examples:
-            return ""
-        return "\n\n".join(ex.format() for ex in self.examples) + "\n\n"
-
-    @property
-    def instruction_text(self) -> str:
-        """Combine style and stop instructions."""
-        parts = []
-        if self.style:
-            parts.append(self.style)
-        if self.stop_instruction:
-            parts.append(self.stop_instruction)
-        return "\n".join(parts)
-
 
 class PromptBuilder:
-    """Builds prompts for direct and RAG experiments.
+    """Builds clean, well-structured prompts for QA experiments.
 
-    This is the single source of truth for prompt construction.
-    Supports default, concise, and few-shot prompt styles.
-
-    Example:
-        >>> builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
-        >>> prompt = builder.build_direct("What is the capital of France?")
-        >>> print(prompt)
-        You are a helpful assistant.
-
-        Give ONLY the final answer...
-        IMPORTANT: Give only ONE short answer...
-
-        Question: What government position...
-        Answer: Deputy Prime Minister of Israel
-
-        ...
-
-        Question: What is the capital of France?
-        Answer:
+    Design principles:
+    1. Clear task instruction at the top
+    2. Examples in a labeled section (if fewshot)
+    3. Clear transition to the actual question
+    4. Consistent formatting throughout
     """
 
-    # Cache for loaded fewshot examples
     _fewshot_cache: Optional[Dict[str, Any]] = None
 
     def __init__(self, config: PromptConfig):
-        """Initialize with a prompt configuration.
-
-        Args:
-            config: PromptConfig with all prompt settings
-        """
         self.config = config
 
     def build_direct(self, query: str) -> str:
-        """Build prompt for direct (no RAG) experiments.
+        """Build prompt for direct (no retrieval) QA.
 
-        Args:
-            query: The question to answer
+        Structure:
+            [Task instruction - use your knowledge]
 
-        Returns:
-            Complete prompt string
+            [Examples section - if fewshot]
+
+            Question: {query}
+            Answer:
         """
-        parts = [self.config.system_prompt]
+        parts = []
 
-        # Add instructions if present
-        if self.config.instruction_text:
-            parts.append(self.config.instruction_text)
+        # Task instruction - emphasize using own knowledge (no context!)
+        task = "Answer the question using your knowledge."
+        if self.config.style:
+            task += f" {self.config.style}"
+        if self.config.stop_instruction:
+            task += f" {self.config.stop_instruction}"
+        task += " If you don't know, answer 'Unknown'."
+        parts.append(task)
 
-        # Add few-shot examples
+        # Examples section (if any)
         if self.config.examples:
-            parts.append(self.config.examples_text.rstrip())
+            parts.append(self._format_examples())
 
-        # Add the actual question
+        # The actual question
         parts.append(f"Question: {query}\nAnswer:")
 
         return "\n\n".join(parts)
 
     def build_rag(self, query: str, context: str) -> str:
-        """Build prompt for RAG experiments with retrieved context.
+        """Build prompt for RAG (with retrieved context).
 
-        Args:
-            query: The question to answer
-            context: Retrieved context (formatted documents)
+        Structure:
+            [Task instruction - use context + own knowledge]
 
-        Returns:
-            Complete prompt string with context
+            [Examples section - if fewshot]
+
+            Context:
+            {retrieved documents}
+
+            Question: {query}
+            Answer:
         """
-        parts = [self.config.system_prompt]
+        parts = []
 
-        # RAG-specific instruction
-        rag_instruction = "Use the context to answer."
+        # Task instruction - encourage using both context AND own knowledge
+        task = "Answer the question using the context below and your own knowledge."
         if self.config.knowledge_instruction:
-            rag_instruction += f" {self.config.knowledge_instruction}"
+            task += f" {self.config.knowledge_instruction}"
         if self.config.style:
-            rag_instruction += f" {self.config.style}"
-
-        parts.append(rag_instruction)
-
-        # Add stop instruction
+            task += f" {self.config.style}"
         if self.config.stop_instruction:
-            parts.append(self.config.stop_instruction)
+            task += f" {self.config.stop_instruction}"
+        task += " If you don't know, answer 'Unknown'."
+        parts.append(task)
 
-        # Add few-shot examples (before context)
+        # Examples section (if any)
         if self.config.examples:
-            parts.append(self.config.examples_text.rstrip())
+            parts.append(self._format_examples())
 
-        # Add context and question
+        # Context and question
         parts.append(f"Context:\n{context}")
         parts.append(f"Question: {query}\nAnswer:")
 
         return "\n\n".join(parts)
+
+    def _format_examples(self) -> str:
+        """Format examples in a clear, labeled section."""
+        lines = ["Examples:"]
+        for ex in self.config.examples:
+            lines.append(f"Q: {ex.question}")
+            lines.append(f"A: {ex.answer}")
+            lines.append("")  # blank line between examples
+        return "\n".join(lines).rstrip()
 
     @classmethod
     def _load_fewshot_file(cls) -> Dict[str, Any]:
@@ -167,7 +129,6 @@ class PromptBuilder:
         if cls._fewshot_cache is not None:
             return cls._fewshot_cache
 
-        # Try multiple locations
         paths = [
             Path(__file__).parent.parent.parent.parent / "conf" / "prompts" / "fewshot_examples.yaml",
             Path("conf/prompts/fewshot_examples.yaml"),
@@ -183,46 +144,32 @@ class PromptBuilder:
         return cls._fewshot_cache
 
     @classmethod
-    def from_config(
-        cls,
-        prompt_type: str = "default",
-        dataset: str = "nq",
-        system_prompt: str = "You are a helpful assistant.",
-    ) -> "PromptBuilder":
+    def from_config(cls, prompt_type: str = "default", dataset: str = "nq") -> "PromptBuilder":
         """Create a PromptBuilder from a config type.
 
         Args:
-            prompt_type: One of "default", "concise", "fewshot", "fewshot_3", "fewshot_1"
+            prompt_type: "default", "concise", "fewshot", "fewshot_3", "fewshot_1"
             dataset: Dataset name for loading appropriate fewshot examples
-            system_prompt: Base system prompt
 
         Returns:
             Configured PromptBuilder
-
-        Example:
-            >>> builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
         """
         if prompt_type == "default":
             return cls(PromptConfig(
-                system_prompt=system_prompt,
-                style="Give ONLY the answer, nothing else.",
+                style="Give only the answer, no explanations.",
             ))
 
         if prompt_type == "concise":
             return cls(PromptConfig(
-                system_prompt=system_prompt,
-                style="Give ONLY the answer - no explanations.",
+                style="Reply with just the answer.",
             ))
 
         if prompt_type.startswith("fewshot"):
-            # Determine number of examples
             n_examples = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(prompt_type, 5)
 
-            # Load dataset-specific config
             fewshot_data = cls._load_fewshot_file()
             dataset_config = fewshot_data.get(dataset, {})
 
-            # Extract examples
             raw_examples = dataset_config.get("examples", [])[:n_examples]
             examples = [
                 FewShotExample(question=ex["question"], answer=ex["answer"])
@@ -230,26 +177,19 @@ class PromptBuilder:
             ]
 
             return cls(PromptConfig(
-                system_prompt=system_prompt,
                 style=dataset_config.get("style", "Give a short, direct answer."),
                 stop_instruction=dataset_config.get("stop_instruction", ""),
                 knowledge_instruction=dataset_config.get("knowledge_instruction", ""),
                 examples=examples,
             ))
 
-        # Default fallback
-        return cls(PromptConfig(system_prompt=system_prompt))
+        return cls(PromptConfig())
 
-    # =========================================================================
-    # Legacy factory methods (for backwards compatibility)
-    # =========================================================================
-
+    # Legacy compatibility
     @staticmethod
     def create_default() -> "PromptBuilder":
-        """Create a prompt builder with default settings."""
         return PromptBuilder.from_config("default")
 
     @staticmethod
     def create_concise() -> "PromptBuilder":
-        """Create a prompt builder for concise answers."""
         return PromptBuilder.from_config("concise")

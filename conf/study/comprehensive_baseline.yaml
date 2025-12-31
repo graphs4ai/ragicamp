@@ -1,33 +1,25 @@
 # Comprehensive Baseline Study
-# Full baseline with multiple HF models, OpenAI, and corpus variations
+# Comparing models across families, sizes, and generations
 #
-# Run: python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml
+# Run: uv run ragicamp run conf/study/comprehensive_baseline.yaml
 #
-# Experiment matrix (with quantization variations):
-#   DirectLLM: 4 HF models × 4 prompts × 2 quant × 3 datasets = 96 experiments
-#   RAG: 1 HF model × 6 retrievers × 3 top_k × 2 prompts × 2 quant × 3 datasets = 216 experiments
-#        + 1 OpenAI × 6 retrievers × 3 top_k × 2 prompts × 3 datasets = 108 experiments
-#   Total: ~420 experiments
+# Comparison Axes:
+#   - Model sizes: SLM (1-3B) vs Medium (7-9B) vs Large (32-70B)
+#   - Providers: Google, Meta, Mistral, Qwen, DeepSeek
+#   - RAG vs Direct: With and without retrieval
+#   - Architectures: Dense vs MoE (Mixtral)
+#
+# Hardware: A100 40GB - can run 70B with 4-bit quantization
 #
 # Prompt types:
-#   - default: Standard QA prompt
 #   - concise: Short answer format
 #   - fewshot: 5 dataset-specific in-context examples
-#   - fewshot_3: 3 dataset-specific in-context examples
-#
-# Quantization options (HF models only):
-#   - 4bit: Faster, less VRAM (~6GB for 7B model)
-#   - none: Full precision, slower, more VRAM (~14GB for 7B model)
-#
-# With 100 questions per dataset:
-#   - 100 questions × ~420 experiments = ~42,000 total inferences
-#   - Estimated time: 4-8 hours (depending on models/hardware)
 
 name: comprehensive_baseline
-description: "Full baseline study with HF + OpenAI models and multiple retrieval configurations"
+description: "Baseline study comparing model families, sizes (SLM to 70B), and generations"
 
 # Limit to 100 examples per dataset for faster iteration
-num_questions: 100  # null = full dataset, or set a cap for testing
+num_questions: 100
 
 # All three QA datasets
 datasets:
@@ -41,105 +33,117 @@ datasets:
 direct:
   enabled: true
   models:
-    # --- OpenAI (high quality, costs money) ---
-    #- openai:gpt-4o-mini       # Fast, cheap, good baseline
-    #- openai:gpt-4o            # SOTA, expensive but comprehensive
-    
-    # --- HuggingFace models (local, free) ---
-    # Small models (fast, good for baseline)
-    - hf:google/gemma-2b-it           # 2B params, good quality
-    #- hf:microsoft/phi-3-mini-4k-instruct  # 3.8B params, strong for size
-    
-    # Medium models (need more VRAM, better quality)
-    - hf:meta-llama/Llama-3.2-3B-Instruct  # 3B Llama, good instruction following
-    - hf:mistralai/Mistral-7B-Instruct-v0.3  # 7B, excellent quality
-    
-    # Large/capable models (quantized for reasonable VRAM) - RECOMMENDED
-    - hf:meta-llama/Llama-3.1-8B-Instruct   # 8B, very strong (needs 4bit)
-    - hf:Qwen/Qwen2.5-7B-Instruct           # 7B, excellent multilingual
-    - hf:google/gemma-2-9b-it               # 9B Gemma 2, excellent quality
-    
-    # Very capable models (need 4bit quantization) - optional
-    # - hf:meta-llama/Meta-Llama-3.1-70B-Instruct  # 70B, SOTA quality (needs 4bit, ~35GB)
-    # - hf:Qwen/Qwen2.5-32B-Instruct               # 32B, very strong (needs 4bit, ~20GB)
-    # - hf:mistralai/Mixtral-8x7B-Instruct-v0.1    # MoE, excellent (needs 4bit, ~25GB)
-    
+    # ----------------------------------------------------------------------
+    # OpenAI (API) - Commercial baseline
+    # ----------------------------------------------------------------------
+    #- openai:gpt-4o-mini          # Fast, cheap, good baseline
+
+    # ----------------------------------------------------------------------
+    # Google Gemma - Compare generations (1 vs 2)
+    # ----------------------------------------------------------------------
+    - hf:google/gemma-2b-it       # Gemma 1, 2B (SLM baseline)
+    - hf:google/gemma-2-9b-it     # Gemma 2, 9B (LLM, much improved)
+
+    # ----------------------------------------------------------------------
+    # Meta LLaMA - Compare sizes (3B vs 8B, same generation)
+    # ----------------------------------------------------------------------
+    - hf:meta-llama/Llama-3.2-3B-Instruct # Llama 3.2, 3B (SLM)
+    - hf:meta-llama/Llama-3.1-8B-Instruct # Llama 3.1, 8B (LLM)
+
+    # ----------------------------------------------------------------------
+    # Mistral - Compare versions
+    # ----------------------------------------------------------------------
+    - hf:mistralai/Mistral-7B-Instruct-v0.2  # v0.2 (older)
+    - hf:mistralai/Mistral-7B-Instruct-v0.3  # v0.3 (current)
+
+    # ----------------------------------------------------------------------
+    # Qwen - Compare sizes (SLM vs LLM)
+    # ----------------------------------------------------------------------
+    - hf:Qwen/Qwen2.5-1.5B-Instruct  # 1.5B (SLM)
+    - hf:Qwen/Qwen2.5-7B-Instruct    # 7B (LLM)
+
+    # ----------------------------------------------------------------------
+    # DeepSeek - Strong reasoning models
+    # ----------------------------------------------------------------------
+    - hf:deepseek-ai/deepseek-llm-7b-chat  # 7B chat model
+
+    # ----------------------------------------------------------------------
+    # Falcon - Historical reference (older architecture)
+    # ----------------------------------------------------------------------
+    - hf:tiiuae/falcon-7b-instruct  # 7B, older but interesting comparison
+
+    # ----------------------------------------------------------------------
+    # LARGE MODELS (32-70B) - Requires 4-bit quantization
+    # These run on A100 40GB with 4-bit
+    # ----------------------------------------------------------------------
+    - hf:meta-llama/Llama-3.1-70B-Instruct   # 70B, SOTA open model (~35GB 4-bit)
+    - hf:Qwen/Qwen2.5-32B-Instruct           # 32B, very strong (~18GB 4-bit)
+    - hf:mistralai/Mixtral-8x7B-Instruct-v0.1  # MoE 8x7B (~25GB 4-bit)
+
   prompts:
-    #- default    # Standard QA prompt
-    - concise    # "Answer briefly"
-    - fewshot    # 5 dataset-specific examples (few-shot learning)
-    #- fewshot_3  # 3 dataset-specific examples
-  
-  # Quantization options for HF models (OpenAI is unaffected)
-  # NOTE: 8bit may have occasional CUDA errors, but executor will handle gracefully
+    - concise    # Short answers
+    - fewshot    # 5 in-context examples
+
   quantization:
-    #- 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
-    - none  # Full precision, ~14GB VRAM for 7B models
+    - 4bit       # Required for large models (70B, 32B)
+    - none       # Full precision for smaller models
 
 # ============================================================================
 # RAG Experiments (with retrieval)
 # ============================================================================
 rag:
   enabled: true
-  
-  # Models for RAG (keep this smaller - focus on best models)
+
   models:
-    #- openai:gpt-4o-mini   # Good balance of quality/cost
-    - hf:google/gemma-2b-it    # Small baseline
-    - hf:Qwen/Qwen2.5-7B-Instruct  # Strong 7B model (with 4bit)
-    - hf:google/gemma-2-9b-it      # 9B Gemma 2 (with 4bit)
-    - hf:meta-llama/Llama-3.1-8B-Instruct  # 8B Llama (with 4bit)
-  
-  # Retriever variations (6 indexes on Simple Wikipedia)
-  # Format: {corpus}_{embedding}_{strategy}_{chunk_size}
+    # API baseline
+    #- openai:gpt-4o-mini
+
+    # Medium models (7-9B) - Best from each family
+    - hf:google/gemma-2-9b-it             # Google - best Gemma
+    - hf:meta-llama/Llama-3.1-8B-Instruct # Meta - best Llama  
+    - hf:Qwen/Qwen2.5-7B-Instruct         # Alibaba - best Qwen
+    - hf:mistralai/Mistral-7B-Instruct-v0.3  # Mistral - latest
+    - hf:deepseek-ai/deepseek-llm-7b-chat    # DeepSeek - reasoning
+
+    # Large models (for RAG quality comparison)
+    - hf:meta-llama/Llama-3.1-70B-Instruct   # 70B SOTA (4-bit)
+    - hf:Qwen/Qwen2.5-32B-Instruct           # 32B strong (4-bit)
+
   retrievers:
-    # MiniLM embeddings (fast, 384 dims)
-    #- simple_minilm_recursive_512      # Small chunks
-    - simple_minilm_recursive_1024     # Larger chunks
-    
-    # MPNet embeddings (better quality, 768 dims)
-    - simple_mpnet_recursive_512       # Small chunks
-    #- simple_mpnet_recursive_1024      # Larger chunks
-    
-    # E5 embeddings (SOTA, 384 dims)
-    - simple_e5_recursive_512          # Small chunks
-    #- simple_e5_recursive_1024         # Larger chunks
-  
-  # How many docs to retrieve
+    # One representative from each embedding family
+    - simple_minilm_recursive_1024   # MiniLM (fast, 384d)
+    - simple_mpnet_recursive_512     # MPNet (balanced, 768d)
+    - simple_e5_recursive_512        # E5 (SOTA, 384d)
+
   top_k_values:
-    - 3    # Minimal context
-    #- 5    # Balanced
-    #- 10   # Rich context
-  
-  # RAG-specific prompts
+    - 3    # Focused context
+
   prompts:
-    - default
-    - fewshot    # 5 dataset-specific examples
-  
-  # Quantization for RAG (only affects HF models)
-  # NOTE: 8bit may have occasional CUDA errors, but executor will handle gracefully
+    - concise    # Short answers
+    - fewshot    # 5 in-context examples
+
   quantization:
-    #- 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
-    - none  # Full precision, ~14GB VRAM (may OOM on 16GB GPUs)
+    - 4bit       # For large models (70B, 32B)
+    - none       # For medium models (7-9B)
 
 # ============================================================================
 # Metrics
 # ============================================================================
 metrics:
-  # Core metrics (always run)
+  # Core metrics
   - f1
   - exact_match
-  
-  # Semantic metrics (run after generation)
+
+  # Semantic metrics
   - bertscore
   - bleurt
-  
-  # LLM-as-judge (final evaluation)
+
+  # LLM-as-judge
   - llm_judge
 
 llm_judge:
-  model: openai:gpt-5-mini  # Fixed typo (was gpt-5-mini)
-  type: binary  # CORRECT/INCORRECT
+  model: openai:gpt-5-mini
+  type: binary
 
 # ============================================================================
 # Output
@@ -149,18 +153,9 @@ output_dir: outputs/comprehensive_baseline
 # ============================================================================
 # Execution options
 # ============================================================================
-
-# Batch size configuration
-# If a subprocess crashes (e.g., CUDA error), it retries with halved batch size
 batch_size: 32
-
-# Minimum batch size (floor for auto-reduction)
-# Retry stops when this floor is reached
 min_batch_size: 1
 
 options:
-  # Save predictions after each experiment (for recovery)
   save_intermediate: true
-  
-  # Skip if output already exists
   skip_existing: true

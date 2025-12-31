@@ -3,6 +3,7 @@
 from typing import Any, List, Optional, Union
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from ragicamp.core.schemas import RAGResponseMeta, AgentType
 from ragicamp.models.base import LanguageModel
 from ragicamp.utils.prompts import PromptBuilder
 
@@ -76,7 +77,7 @@ class DirectLLMAgent(RAGAgent):
             answer=answer,
             context=context,
             prompt=prompt,
-            metadata={"agent_type": "direct_llm"},
+            metadata=RAGResponseMeta(agent_type=AgentType.DIRECT_LLM),
         )
 
     def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
@@ -102,7 +103,10 @@ class DirectLLMAgent(RAGAgent):
                 answer=answer,
                 context=context,
                 prompt=prompt,
-                metadata={"agent_type": "direct_llm", "batch_processing": True},
+                metadata=RAGResponseMeta(
+                    agent_type=AgentType.DIRECT_LLM,
+                    batch_processing=True,
+                ),
             )
             responses.append(response)
 

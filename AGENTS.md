@@ -1,6 +1,6 @@
 # RAGiCamp Development Guidelines
 
-This document describes the repository philosophy, patterns, and guidelines for both contributors and users.
+This document describes the repository philosophy, patterns, and guidelines for both contributors and AI agents.
 
 ## Repository Goals
 
@@ -16,463 +16,424 @@ This is NOT:
 - A comprehensive evaluation suite
 - An MLOps platform
 
-## Architecture Overview
+---
+
+## 🏗️ Architecture Overview
 
 ```
-Experiment (phased execution with state management)
-    ├── Phases: INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
-    ├── Agent (DirectLLM or FixedRAG)
-    │   ├── Model (HuggingFace or OpenAI or custom)
-    │   └── Retriever (optional, for RAG)
-    ├── Dataset (NQ, TriviaQA, HotpotQA)
-    └── Metrics (F1, EM, BERTScore, LLM-as-judge, etc.)
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLI (cli/study.py)                      │
+│                    Thin orchestration layer                      │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Experiment (experiment.py)                    │
+│           Phases: INIT → GENERATING → COMPUTING_METRICS          │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            ▼                   ▼                   ▼
+    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+    │    Agent     │    │   Dataset    │    │   Metrics    │
+    │  (DirectLLM  │    │ (NQ, HotpotQA│    │ (F1, EM,     │
+    │   FixedRAG)  │    │  TriviaQA)   │    │  BERTScore)  │
+    └──────────────┘    └──────────────┘    └──────────────┘
+            │
+    ┌───────┴───────┐
+    ▼               ▼
+┌────────┐    ┌───────────┐
+│ Model  │    │ Retriever │
+│ (HF,   │    │ (Dense,   │
+│ OpenAI)│    │  Sparse)  │
+└────────┘    └───────────┘
 ```
-
-Key classes:
-- `Experiment` - Unified entry point with phased execution
-- `ExperimentState` - Persistent state tracking (phase, progress)
-- `ExperimentHealth` - Health check result (missing predictions, metrics)
-- `ExperimentCallbacks` - Hooks for monitoring (on_phase_start, on_batch_end, etc.)
-- `ComponentFactory` - Creates components from config dicts (supports plugin registration)
-
-Interfaces:
-- All base classes in `{module}/base.py`
-- Protocols in `core/protocols.py` for duck-typing
-- Exception hierarchy: `RAGiCampError` → `ConfigError`, `ModelError`, `EvaluationError`
-
-## Experiment Phases
-
-Each experiment progresses through phases, with artifacts saved at each step:
-
-```
-┌──────────┐   ┌────────────┐   ┌───────────┐   ┌──────────────┐   ┌──────────┐
-│   INIT   │──▶│ GENERATING │──▶│ GENERATED │──▶│ COMPUTING    │──▶│ COMPLETE │
-│          │   │            │   │           │   │   METRICS    │   │          │
-└──────────┘   └────────────┘   └───────────┘   └──────────────┘   └──────────┘
-     │               │               │                 │                 │
-     ▼               ▼               ▼                 ▼                 ▼
- state.json     predictions.json predictions.json  predictions.json  results.json
- questions.json  (partial)       (complete)       + per-item metrics (complete)
- metadata.json
-```
-
-If an experiment crashes, it resumes from the last saved phase.
-
-## Do's
-
-### Code Style
-- **Keep functions small** - If a function is >50 lines, split it
-- **Use type hints** - All public APIs should have type hints
-- **Document with docstrings** - Google style, include examples
-- **Fail fast** - Validate inputs early, not deep in the stack
-
-### Patterns to Follow
-- **Factory pattern** - Use `ComponentFactory` for creating components from configs
-- **State Machine** - Experiments use explicit phases with validated transitions
-- **Dataclasses** - Use for simple data containers (e.g., `ExperimentResult`)
-- **Checkpointing** - Long operations save progress to enable resume
-
-### Adding New Components
-
-New Model (with plugin registration):
-```python
-from ragicamp import ComponentFactory
-from ragicamp.models.base import LanguageModel
-
-@ComponentFactory.register_model("anthropic")
-class AnthropicModel(LanguageModel):
-    def generate(self, prompt: str, **kwargs) -> str:
-        ...
-    
-    def unload(self) -> None:
-        # Clean up GPU memory
-        ...
-
-# Now usable in configs: {"type": "anthropic", "model_name": "claude-3"}
-```
-
-New Metric:
-```python
-class MyMetric(Metric):
-    @property
-    def name(self) -> str:
-        return "my_metric"
-    
-    def compute(self, predictions: List[str], references: List[Any]) -> Dict[str, float]:
-        ...
-    
-    def get_per_item_scores(self) -> List[float]:
-        # Return per-item scores for detailed analysis
-        return self._scores
-```
-
-New Dataset:
-```python
-class MyDataset(QADataset):
-    def load(self) -> None:
-        # Load data into self.examples
-        ...
-```
-
-### Using Callbacks for Monitoring
-
-```python
-from ragicamp import Experiment, ExperimentCallbacks
-from ragicamp.experiment_state import ExperimentPhase
-
-callbacks = ExperimentCallbacks(
-    on_phase_start=lambda p: print(f"Starting phase: {p.value}"),
-    on_batch_end=lambda i, n, preds: print(f"Batch {i}/{n} done"),
-    on_complete=lambda r: send_slack_notification(f"Done! F1={r.f1:.3f}"),
-)
-
-result = exp.run(batch_size=8, callbacks=callbacks)
-```
-
-### Using Health Checks
-
-```python
-from ragicamp import Experiment, check_health
-
-# Check experiment health before running
-health = exp.check_health()
-
-if health.is_complete:
-    print("Already done!")
-elif health.can_resume:
-    print(f"Resuming from {health.resume_phase.value}")
-    print(f"Missing predictions: {len(health.missing_predictions)}")
-    print(f"Missing metrics: {health.metrics_missing}")
-    result = exp.run(resume=True)
-else:
-    result = exp.run()
-```
-
-### Configuration
-- **YAML for study configs** - Human readable, easy to version control
-- **Dict for component configs** - Passed to factories
-- **Use defaults** - Components should work with minimal config
-
-## Don'ts
-
-### Anti-patterns to Avoid
-
-1. **Don't over-abstract**
-   ```python
-   # Bad: AbstractFactoryBuilder pattern
-   # Good: Simple function that creates a thing
-   ```
-
-2. **Don't catch broad exceptions**
-   ```python
-   # Bad
-   except Exception as e:
-       print(f"Error: {e}")
-   
-   # Good
-   except FileNotFoundError:
-       logger.error("Index not found: %s", path)
-       raise
-   ```
-
-3. **Don't add dependencies for small features**
-   ```python
-   # Bad: Add rich for slightly nicer progress bars
-   # Good: Use tqdm which is already a dependency
-   ```
-
-4. **Don't duplicate code across scripts**
-   ```python
-   # Bad: Copy model loading code to every script
-   # Good: Use ComponentFactory.create_model()
-   ```
-
-5. **Don't optimize prematurely**
-   ```python
-   # Bad: Async everything "for performance"
-   # Good: Batch processing with existing sync code
-   ```
-
-### Things to Avoid
-- **Complex inheritance hierarchies** - Prefer composition
-- **Singleton patterns** - Use dependency injection instead
-- **Magic strings everywhere** - Use constants or enums
-- **Mutable default arguments** - `def f(x=[])` is a bug waiting to happen
-
-## Logging vs Print
-
-**Use print() for:**
-- CLI output meant for users
-- Progress messages in scripts
-- Interactive feedback
-
-**Use logger for:**
-- Library code in `src/ragicamp/`
-- Debug information
-- Error context that should be in log files
-
-```python
-# In CLI/scripts
-print(f"Running {len(experiments)} experiments...")
-
-# In library code
-logger = get_logger(__name__)
-logger.debug("Loading model: %s", model_name)
-```
-
-## Resource Management
-
-Always clean up GPU memory:
-
-```python
-from ragicamp.utils.resource_manager import ResourceManager
-
-# After model use
-if hasattr(model, "unload"):
-    model.unload()
-ResourceManager.clear_gpu_memory()
-
-# Or use context manager
-from ragicamp.utils.resource_manager import managed_model
-
-with managed_model(lambda: HuggingFaceModel(...)) as model:
-    result = model.generate(prompt)
-# Automatically cleaned up
-```
-
-## Error Handling
-
-```python
-# Specific exceptions
-from ragicamp.core.exceptions import ModelLoadError, EvaluationError
-
-try:
-    model = load_model(path)
-except FileNotFoundError:
-    raise ModelLoadError(f"Model not found: {path}")
-
-# Let unexpected errors propagate - don't silence them
-```
-
-## Testing
-
-- **Unit tests** - For individual components
-- **Skip GPU tests** - Use `@pytest.mark.skipif` for GPU-dependent tests
-- **Mock external services** - Don't hit real OpenAI API in tests
-
-```python
-@pytest.fixture
-def mock_model():
-    model = Mock(spec=LanguageModel)
-    model.generate.return_value = "answer"
-    return model
-```
-
-## File Organization
-
-```
-src/ragicamp/
-├── agents/           # RAG agents (base, direct_llm, fixed_rag)
-├── models/           # LLM backends (base, huggingface, openai)
-├── retrievers/       # Dense retrieval (FAISS)
-├── datasets/         # QA datasets (base, nq, triviaqa, hotpotqa)
-├── metrics/          # Evaluation metrics (F1, EM, BERTScore, LLM-judge)
-├── corpus/           # Document corpus and chunking
-├── analysis/         # Results loading, comparison, visualization
-├── evaluation/       # compute_metrics_from_file utility
-├── experiment.py     # Experiment + ExperimentCallbacks + ExperimentResult
-├── experiment_state.py # ExperimentPhase, ExperimentState, ExperimentHealth
-├── factory.py        # ComponentFactory with plugin registration
-├── cli/              # Command-line interface (main.py, study.py)
-├── core/             # Logging, exceptions, protocols
-├── config/           # Pydantic schemas
-└── utils/            # ResourceManager, paths, prompts, formatting
-
-scripts/
-├── experiments/      # run_study.py
-└── data/             # build_all_indexes.py
-
-conf/
-├── study/            # Study configurations (comprehensive_baseline.yaml)
-└── prompts/          # Few-shot examples (fewshot_examples.yaml)
-```
-
-## Prompt Engineering
 
 ### Key Principles
 
-1. **Explicit stop instructions** - Tell the model to give ONE answer only
-2. **Use "Question/Answer" format** - Avoid "Q:/A:" which models continue
-3. **Stop sequences in code** - Truncate at `\nQuestion:` etc.
-4. **Short, concrete examples** - Show exact answer format expected
+1. **Data Contracts** - Use typed dataclasses from `core/schemas.py`
+2. **Single Source of Truth** - Each concept lives in ONE place
+3. **Required Dependencies** - Don't make critical things optional
+4. **Separation of Concerns** - Each layer has one job
 
-### What NOT to do in prompts
+---
 
+## 📦 Data Contracts (CRITICAL)
+
+All data flowing through the system MUST use these schemas from `core/schemas.py`:
+
+### PredictionRecord
+```python
+from ragicamp.core.schemas import PredictionRecord, RetrievedDoc
+
+# This is what predictions.json contains
+record = PredictionRecord(
+    idx=0,
+    question="What is the capital of France?",
+    prediction="Paris",
+    expected=["Paris"],
+    prompt="Answer the question: What is the capital of France?",
+    retrieved_docs=[  # Only for RAG
+        RetrievedDoc(rank=1, content="Paris is the capital...", score=0.95)
+    ],
+    metrics={"f1": 1.0, "exact_match": 1.0},
+)
 ```
-# BAD: Model will continue generating Q&A pairs
-Q: when did ww1 end
-A: 1918
 
-Q: who was president
-A: Wilson
-...
-
-# GOOD: Explicit instruction to stop
-Question: when did ww1 end
-Answer: 1918
+### RetrievedDoc
+```python
+# Structured format for retrieved documents
+doc = RetrievedDoc(
+    rank=1,           # Position (1-indexed)
+    content="...",    # Document text
+    score=0.95,       # Retrieval score (optional)
+    source="wiki",    # Source identifier (optional)
+)
 ```
 
-### Current prompt structure
+### ⚠️ Don't Use Dict[str, Any]
+```python
+# BAD: No contract, easy to make mistakes
+metadata = {"retrieved_context": "...", "num_docs": 5}
+
+# GOOD: Typed, validated at compile time
+from ragicamp.core.schemas import RAGResponseMeta
+metadata = RAGResponseMeta(
+    agent_type=AgentType.FIXED_RAG,
+    num_docs_used=5,
+    retrieved_docs=[...]
+)
+```
+
+---
+
+## 🎯 Prompt Building
+
+### Single Source of Truth: PromptBuilder
+
+ALL prompts MUST be built using `PromptBuilder` from `utils/prompts.py`:
 
 ```python
-# Direct (no context)
-"{style}
-{stop_instruction}
+from ragicamp.utils.prompts import PromptBuilder
 
-{examples}
-Question: {question}
-Answer:"
+# Create builder for a prompt style + dataset
+builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
 
-# RAG (with context)  
-"Use the context to answer. {style}
-{stop_instruction}
+# Build prompts
+direct_prompt = builder.build_direct(query="What is AI?")
+rag_prompt = builder.build_rag(query="What is AI?", context="...")
+```
 
-{examples}
-Context: {context}
+### Prompt Structure
+
+**Direct (no retrieval):**
+```
+Answer the question using your knowledge. [style instruction] If you don't know, answer 'Unknown'.
+
+[Examples: (if fewshot)
+Q: ...
+A: ...]
 
 Question: {query}
-Answer:"
+Answer:
 ```
 
-Few-shot examples are in `conf/prompts/fewshot_examples.yaml`.
+**RAG (with context):**
+```
+Answer the question using the context below and your own knowledge. [style instruction] If you don't know, answer 'Unknown'.
 
-## Adding a New Feature
+[Examples: (if fewshot)]
 
-1. **Ask: Is this core functionality?**
-   - Yes → Add to `src/ragicamp/`
-   - No → Add as a script or separate tool
+Context:
+{retrieved documents}
 
-2. **Ask: Does this need a new dependency?**
-   - If possible, use existing dependencies
-   - If new dep needed, make it optional
-
-3. **Ask: Can users do this themselves easily?**
-   - Yes → Don't build it, document how
-   - No → Build the minimum viable version
-
-4. **Implementation:**
-   - Write the simplest thing that works
-   - Add a test
-   - Add a docstring with example
-   - Update CHANGELOG
-
-## Running Experiments
-
-### Quick test (dry-run)
-```bash
-uv run ragicamp run conf/study/simple_hf.yaml --dry-run
+Question: {query}
+Answer:
 ```
 
-### Full study
-```bash
-uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
-```
-
-### Check health
-```bash
-uv run ragicamp health outputs/comprehensive_baseline
-```
-
-### Recompute metrics
-```bash
-uv run ragicamp metrics outputs/comprehensive_baseline/my_exp -m f1,llm_judge
-```
-
-## Analyzing Results
-
-### CLI comparison
-```bash
-# Basic comparison by model
-uv run ragicamp compare outputs/comprehensive_baseline
-
-# Compare by different dimensions
-uv run ragicamp compare outputs/comprehensive_baseline --group-by retriever
-
-# Pivot table: model performance across datasets
-uv run ragicamp compare outputs/comprehensive_baseline --pivot model dataset
-```
-
-### Python API
+### ⚠️ Don't Build Prompts in Agents
 ```python
-from ragicamp.analysis import ResultsLoader, compare_results, best_by, pivot_results
+# BAD: Prompt logic scattered
+class MyAgent:
+    def answer(self, query):
+        prompt = f"You are helpful. Answer: {query}"  # NO!
 
-# Load results
-loader = ResultsLoader("outputs/comprehensive_baseline")
-results = loader.load_all()
-
-# Compare by model
-stats = compare_results(results, group_by="model", metric="f1")
-
-# Get top 10 by exact match
-top = best_by(results, metric="exact_match", n=10)
-
-# Pivot table: rows=model, cols=dataset
-pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
+# GOOD: Use PromptBuilder
+class MyAgent:
+    def __init__(self, prompt_builder: PromptBuilder):
+        self.prompt_builder = prompt_builder  # REQUIRED
+    
+    def answer(self, query):
+        prompt = self.prompt_builder.build_direct(query)
 ```
 
-### MLflow tracking
+---
+
+## 🤖 Agent Guidelines
+
+### Required Constructor Arguments
+
+Agents MUST accept these as **required** (not optional):
+
 ```python
-from ragicamp.analysis import MLflowTracker
+class DirectLLMAgent(RAGAgent):
+    def __init__(
+        self,
+        name: str,
+        model: LanguageModel,
+        prompt_builder: PromptBuilder,  # REQUIRED
+    ):
+        ...
 
-# Backfill existing results
-tracker = MLflowTracker("my_study")
-tracker.backfill_from_results(results)
-
-# View in MLflow UI
-# $ mlflow ui
-# Open http://localhost:5000
+class FixedRAGAgent(RAGAgent):
+    def __init__(
+        self,
+        name: str,
+        model: LanguageModel,
+        retriever: Retriever,
+        prompt_builder: PromptBuilder,  # REQUIRED
+        top_k: int = 5,
+    ):
+        ...
 ```
 
-### Python API
+### RAGResponse Must Be Complete
+
 ```python
-from ragicamp import Experiment
-from ragicamp.agents import DirectLLMAgent
-from ragicamp.models import HuggingFaceModel
-from ragicamp.datasets import NaturalQuestionsDataset
-from ragicamp.metrics import F1Metric, ExactMatchMetric
-
-model = HuggingFaceModel("google/gemma-2b-it", load_in_4bit=True)
-agent = DirectLLMAgent("baseline", model)
-dataset = NaturalQuestionsDataset(split="validation")
-
-exp = Experiment(
-    name="my_exp",
-    agent=agent,
-    dataset=dataset,
-    metrics=[F1Metric(), ExactMatchMetric()],
+# Agents MUST return complete responses
+return RAGResponse(
+    answer=answer,
+    prompt=prompt,  # REQUIRED: Full prompt for debugging
+    context=context,
+    metadata=RAGResponseMeta(
+        agent_type=AgentType.FIXED_RAG,
+        num_docs_used=len(docs),
+        retrieved_docs=[  # REQUIRED for RAG
+            RetrievedDoc(rank=i+1, content=d.content, score=d.score)
+            for i, d in enumerate(docs)
+        ],
+    ),
 )
-
-result = exp.run(batch_size=8)
-print(f"F1: {result.f1:.3f}")
 ```
 
-## Common Issues
+---
 
-### OOM (Out of Memory)
-- Reduce `batch_size`
-- Use `load_in_4bit=True`
-- Clear cache between experiments: `ResourceManager.clear_gpu_memory()`
+## 📁 File Organization
 
-### Slow experiments
-- Use batch processing: `batch_size=8`
-- Use `--skip-existing` to resume
-- Reduce `num_questions` for testing
+```
+src/ragicamp/
+├── core/
+│   ├── schemas.py      # ⭐ Data contracts (PredictionRecord, RetrievedDoc)
+│   ├── protocols.py    # Interface definitions
+│   ├── exceptions.py   # Exception hierarchy
+│   ├── constants.py    # Enums and constants
+│   └── logging.py      # Logging utilities
+│
+├── agents/
+│   ├── base.py         # RAGAgent, RAGResponse, RAGContext
+│   ├── direct_llm.py   # DirectLLMAgent (requires PromptBuilder)
+│   └── fixed_rag.py    # FixedRAGAgent (requires PromptBuilder)
+│
+├── utils/
+│   └── prompts.py      # ⭐ PromptBuilder (single source of truth)
+│
+├── execution/
+│   └── executor.py     # ResilientExecutor (batch + retry logic)
+│
+├── experiment.py       # Experiment runner
+├── experiment_state.py # Phase tracking
+└── factory.py          # ComponentFactory
+```
 
-### Config errors
-- Run with `--dry-run` first
-- Check model spec format: `hf:model/name` or `openai:model-name`
+---
 
-### Experiment stuck/crashed
-- Check health: `ragicamp health <output_dir>`
-- Resume: experiments auto-resume from last checkpoint
-- Recompute metrics only: `ragicamp metrics <exp_dir> -m f1,llm_judge`
+## ✅ Do's
+
+### Use Data Contracts
+```python
+# Always use PredictionRecord for predictions
+from ragicamp.core.schemas import PredictionRecord
+pred = PredictionRecord(idx=0, question=q, prediction=p, ...)
+```
+
+### Use PromptBuilder
+```python
+# Always use PromptBuilder for prompts
+builder = PromptBuilder.from_config("fewshot", dataset="nq")
+prompt = builder.build_direct(query)
+```
+
+### Type Everything
+```python
+# Use type hints for all public APIs
+def run(self, batch_size: int = 8) -> ExperimentResult:
+```
+
+### Fail Fast
+```python
+# Validate early
+if prompt_builder is None:
+    raise ValueError("prompt_builder is required")
+```
+
+---
+
+## ❌ Don'ts
+
+### Don't Use Dict[str, Any] for Structured Data
+```python
+# BAD
+metadata = {"stuff": "things"}
+
+# GOOD
+metadata = RAGResponseMeta(agent_type=AgentType.DIRECT_LLM)
+```
+
+### Don't Build Prompts Inline
+```python
+# BAD
+prompt = f"Answer: {query}"
+
+# GOOD
+prompt = self.prompt_builder.build_direct(query)
+```
+
+### Don't Make Critical Parameters Optional
+```python
+# BAD
+def __init__(self, model=None, prompt_builder=None):
+
+# GOOD
+def __init__(self, model: LanguageModel, prompt_builder: PromptBuilder):
+```
+
+### Don't Duplicate Logic
+```python
+# BAD: Same prompt logic in multiple places
+# study.py: get_prompt()
+# agents/direct_llm.py: build_prompt()
+# utils/prompts.py: PromptBuilder
+
+# GOOD: Single source in PromptBuilder
+```
+
+### Don't Ignore Return Values
+```python
+# BAD: Agent ignores prompt_template parameter (what we fixed!)
+def __init__(self, prompt_template=None):
+    pass  # Ignored!
+
+# GOOD: Actually use it
+def __init__(self, prompt_builder: PromptBuilder):
+    self.prompt_builder = prompt_builder
+```
+
+---
+
+## 🔧 Adding New Components
+
+### New Agent
+
+```python
+from ragicamp.agents.base import RAGAgent, RAGResponse
+from ragicamp.utils.prompts import PromptBuilder
+from ragicamp.core.schemas import RAGResponseMeta, AgentType
+
+class MyAgent(RAGAgent):
+    def __init__(
+        self,
+        name: str,
+        model: LanguageModel,
+        prompt_builder: PromptBuilder,  # REQUIRED
+    ):
+        super().__init__(name)
+        self.model = model
+        self.prompt_builder = prompt_builder
+    
+    def answer(self, query: str, **kwargs) -> RAGResponse:
+        prompt = self.prompt_builder.build_direct(query)
+        answer = self.model.generate(prompt)
+        
+        return RAGResponse(
+            answer=answer,
+            prompt=prompt,  # REQUIRED
+            context=RAGContext(query=query),
+            metadata=RAGResponseMeta(agent_type=AgentType.DIRECT_LLM),
+        )
+```
+
+### New Prompt Style
+
+Add to `conf/prompts/fewshot_examples.yaml`:
+```yaml
+my_dataset:
+  style: "Give a concise answer."
+  stop_instruction: "Answer with just the fact."
+  examples:
+    - question: "Example Q1"
+      answer: "Example A1"
+```
+
+Then use:
+```python
+builder = PromptBuilder.from_config("fewshot", dataset="my_dataset")
+```
+
+---
+
+## 🧪 Testing
+
+### Mock PromptBuilder
+```python
+from unittest.mock import Mock
+from ragicamp.utils.prompts import PromptBuilder, PromptConfig
+
+# Create a simple mock
+mock_builder = PromptBuilder(PromptConfig())
+```
+
+### Test Agents Return Complete Data
+```python
+def test_agent_returns_complete_response():
+    response = agent.answer("What is AI?")
+    
+    assert response.answer is not None
+    assert response.prompt is not None  # Check prompt is saved
+    assert response.metadata is not None
+```
+
+---
+
+## 📊 Experiment Output Format
+
+### predictions.json Schema
+```json
+{
+  "experiment": "direct_hf_gemma_default_nq",
+  "predictions": [
+    {
+      "idx": 0,
+      "question": "What is the capital of France?",
+      "prediction": "Paris",
+      "expected": ["Paris"],
+      "prompt": "Answer the question using your knowledge...",
+      "retrieved_docs": [
+        {"rank": 1, "content": "Paris is...", "score": 0.95}
+      ],
+      "metrics": {"f1": 1.0, "exact_match": 1.0}
+    }
+  ],
+  "aggregate_metrics": {"f1": 0.85, "exact_match": 0.80}
+}
+```
+
+---
+
+## 🚨 Common Mistakes to Avoid
+
+1. **Ignoring constructor parameters** - If you accept a param, USE it
+2. **Building prompts in multiple places** - Use PromptBuilder only
+3. **Using Dict for structured data** - Use dataclasses from schemas.py
+4. **Making required things optional** - If it's needed, require it
+5. **Not saving the prompt** - Always include prompt in RAGResponse
+6. **Saving context as string** - Use RetrievedDoc list instead
