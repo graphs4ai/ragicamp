@@ -195,16 +195,19 @@ class ResilientExecutor:
                 responses = self.agent.batch_answer(batch_queries, **kwargs)
 
                 for (orig_idx, query, expected), resp in zip(batch, responses):
-                    results.append(
-                        {
-                            "idx": orig_idx,
-                            "query": query,
-                            "prediction": resp.answer,
-                            "expected": expected,
-                            "prompt": getattr(resp, "prompt", None),
-                            "error": None,
-                        }
-                    )
+                    result_item = {
+                        "idx": orig_idx,
+                        "query": query,
+                        "prediction": resp.answer,
+                        "expected": expected,
+                        "prompt": getattr(resp, "prompt", None),
+                        "error": None,
+                    }
+                    # Include retrieved context if available (for RAG)
+                    metadata = getattr(resp, "metadata", {}) or {}
+                    if "retrieved_context" in metadata:
+                        result_item["retrieved_context"] = metadata["retrieved_context"]
+                    results.append(result_item)
 
                 pbar.update(len(batch))
                 idx += self.current_batch_size
@@ -331,16 +334,19 @@ class ResilientExecutor:
         for orig_idx, query, expected in tqdm(queries, desc="Generating", disable=not progress):
             try:
                 resp = self.agent.answer(query, **kwargs)
-                results.append(
-                    {
-                        "idx": orig_idx,
-                        "query": query,
-                        "prediction": resp.answer,
-                        "expected": expected,
-                        "prompt": getattr(resp, "prompt", None),
-                        "error": None,
-                    }
-                )
+                result_item = {
+                    "idx": orig_idx,
+                    "query": query,
+                    "prediction": resp.answer,
+                    "expected": expected,
+                    "prompt": getattr(resp, "prompt", None),
+                    "error": None,
+                }
+                # Include retrieved context if available (for RAG)
+                metadata = getattr(resp, "metadata", {}) or {}
+                if "retrieved_context" in metadata:
+                    result_item["retrieved_context"] = metadata["retrieved_context"]
+                results.append(result_item)
             except Exception as e:
                 results.append(
                     {
@@ -375,16 +381,19 @@ class ResilientExecutor:
         for orig_idx, query, expected in batch:
             try:
                 resp = self.agent.answer(query, **kwargs)
-                results.append(
-                    {
-                        "idx": orig_idx,
-                        "query": query,
-                        "prediction": resp.answer,
-                        "expected": expected,
-                        "prompt": getattr(resp, "prompt", None),
-                        "error": None,
-                    }
-                )
+                result_item = {
+                    "idx": orig_idx,
+                    "query": query,
+                    "prediction": resp.answer,
+                    "expected": expected,
+                    "prompt": getattr(resp, "prompt", None),
+                    "error": None,
+                }
+                # Include retrieved context if available (for RAG)
+                metadata = getattr(resp, "metadata", {}) or {}
+                if "retrieved_context" in metadata:
+                    result_item["retrieved_context"] = metadata["retrieved_context"]
+                results.append(result_item)
             except Exception as e:
                 results.append(
                     {

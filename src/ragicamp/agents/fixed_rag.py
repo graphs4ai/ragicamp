@@ -26,8 +26,10 @@ class FixedRAGAgent(RAGAgent):
         model: LanguageModel,
         retriever: Retriever,
         top_k: int = 5,
+        prompt_builder: Optional[PromptBuilder] = None,
+        # Legacy parameters for backwards compatibility
         system_prompt: str = "You are a helpful assistant. Use the provided context to answer questions accurately.",
-        context_template: str = "Context:\n{context}\n\nQuestion: {query}\n\nAnswer:",
+        context_template: Optional[str] = None,
         **kwargs: Any,
     ):
         """Initialize the fixed RAG agent.
@@ -37,17 +39,37 @@ class FixedRAGAgent(RAGAgent):
             model: The language model to use
             retriever: The retriever for finding relevant documents
             top_k: Number of documents to retrieve
-            system_prompt: System prompt for the LLM
-            context_template: Template for formatting retrieved context
+            prompt_builder: PromptBuilder instance for building prompts.
+                          If not provided, creates default.
+            system_prompt: (Legacy) System prompt for the LLM
+            context_template: (Legacy) Template with {context} and {query} placeholders
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
         self.model = model
         self.retriever = retriever
         self.top_k = top_k
-        self.prompt_builder = PromptBuilder(
-            system_prompt=system_prompt, context_template=context_template
-        )
+
+        # Use provided prompt_builder or create from legacy params
+        if prompt_builder is not None:
+            self.prompt_builder = prompt_builder
+        else:
+            from ragicamp.utils.prompts import PromptConfig
+            self.prompt_builder = PromptBuilder(PromptConfig(system_prompt=system_prompt))
+
+        # Legacy template support (for backwards compat with study.py)
+        self._legacy_template = context_template
+        self._system_prompt = system_prompt
+
+    def _build_prompt(self, query: str, context_text: str) -> str:
+        """Build prompt from template with context and query."""
+        # If legacy template provided, use it directly
+        if self._legacy_template:
+            formatted = self._legacy_template.format(context=context_text, query=query)
+            return f"{self._system_prompt}\n\n{formatted}"
+
+        # Use prompt builder
+        return self.prompt_builder.build_rag(query, context_text)
 
     def answer(self, query: str, **kwargs: Any) -> RAGResponse:
         """Generate an answer using fixed RAG pipeline.
@@ -65,29 +87,32 @@ class FixedRAGAgent(RAGAgent):
         # Format context using utility
         context_text = ContextFormatter.format_numbered(retrieved_docs)
 
-        # Build prompt using utility
-        prompt = self.prompt_builder.build_prompt(query=query, context=context_text)
+        # Build prompt
+        prompt = self._build_prompt(query, context_text)
 
-        # Create context with prompt included
+        # Create context with retrieved docs info
         context = RAGContext(
             query=query,
             retrieved_docs=retrieved_docs,
             metadata={
                 "top_k": self.top_k,
-                "prompt": prompt,  # Store the actual prompt used
-                "context_text": context_text,  # Store formatted context
+                "context_text": context_text,
             },
         )
 
         # Generate answer
         answer = self.model.generate(prompt, **kwargs)
 
-        # Return response with prompt for debugging/analysis
+        # Return response with prompt and retrieved context for analysis
         return RAGResponse(
             answer=answer,
             context=context,
             prompt=prompt,
-            metadata={"agent_type": "fixed_rag", "num_docs_used": len(retrieved_docs)},
+            metadata={
+                "agent_type": "fixed_rag",
+                "num_docs_used": len(retrieved_docs),
+                "retrieved_context": context_text,  # Include for saving
+            },
         )
 
     def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
@@ -103,21 +128,23 @@ class FixedRAGAgent(RAGAgent):
         Returns:
             List of RAGResponse objects, one per query
         """
-        # Retrieve documents for all queries (parallelizable in future)
+        # Retrieve documents for all queries
         all_docs = [self.retriever.retrieve(q, top_k=self.top_k) for q in queries]
 
         # Format contexts and build prompts
         prompts = []
         contexts = []
+        context_texts = []
         for query, docs in zip(queries, all_docs):
             context_text = ContextFormatter.format_numbered(docs)
-            prompt = self.prompt_builder.build_prompt(query=query, context=context_text)
+            context_texts.append(context_text)
+            prompt = self._build_prompt(query, context_text)
             prompts.append(prompt)
             contexts.append(
                 RAGContext(
                     query=query,
                     retrieved_docs=docs,
-                    metadata={"top_k": self.top_k, "prompt": prompt, "context_text": context_text},
+                    metadata={"top_k": self.top_k, "context_text": context_text},
                 )
             )
 
@@ -126,8 +153,8 @@ class FixedRAGAgent(RAGAgent):
 
         # Create responses with prompts for debugging/analysis
         responses = []
-        for query, prompt, answer, context, docs in zip(
-            queries, prompts, answers, contexts, all_docs
+        for query, prompt, answer, context, docs, ctx_text in zip(
+            queries, prompts, answers, contexts, all_docs, context_texts
         ):
             response = RAGResponse(
                 answer=answer,
@@ -137,6 +164,7 @@ class FixedRAGAgent(RAGAgent):
                     "agent_type": "fixed_rag",
                     "num_docs_used": len(docs),
                     "batch_processing": True,
+                    "retrieved_context": ctx_text,  # Include for saving
                 },
             )
             responses.append(response)
@@ -162,8 +190,7 @@ class FixedRAGAgent(RAGAgent):
             "name": self.name,
             "top_k": self.top_k,
             "retriever_artifact": retriever_artifact_name,
-            "system_prompt": self.prompt_builder.system_prompt,
-            "context_template": self.prompt_builder.context_template,
+            "system_prompt": self._system_prompt,
         }
         manager.save_json(config, artifact_path / "config.json")
 
@@ -203,7 +230,6 @@ class FixedRAGAgent(RAGAgent):
             retriever=retriever,
             top_k=config["top_k"],
             system_prompt=config["system_prompt"],
-            context_template=config["context_template"],
         )
 
         print(f"✓ Loaded agent from: {artifact_path}")

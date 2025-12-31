@@ -42,13 +42,13 @@ direct:
   enabled: true
   models:
     # --- OpenAI (high quality, costs money) ---
-    - openai:gpt-4o-mini       # Fast, cheap, good baseline
+    #- openai:gpt-4o-mini       # Fast, cheap, good baseline
     #- openai:gpt-4o            # SOTA, expensive but comprehensive
     
     # --- HuggingFace models (local, free) ---
     # Small models (fast, good for baseline)
     - hf:google/gemma-2b-it           # 2B params, good quality
-    - hf:microsoft/phi-3-mini-4k-instruct  # 3.8B params, strong for size
+    #- hf:microsoft/phi-3-mini-4k-instruct  # 3.8B params, strong for size
     
     # Medium models (need more VRAM, better quality)
     - hf:meta-llama/Llama-3.2-3B-Instruct  # 3B Llama, good instruction following
@@ -65,7 +65,7 @@ direct:
     # - hf:mistralai/Mixtral-8x7B-Instruct-v0.1    # MoE, excellent (needs 4bit, ~25GB)
     
   prompts:
-    - default    # Standard QA prompt
+    #- default    # Standard QA prompt
     - concise    # "Answer briefly"
     - fewshot    # 5 dataset-specific examples (few-shot learning)
     #- fewshot_3  # 3 dataset-specific examples
@@ -73,7 +73,7 @@ direct:
   # Quantization options for HF models (OpenAI is unaffected)
   # NOTE: 8bit may have occasional CUDA errors, but executor will handle gracefully
   quantization:
-    - 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
+    #- 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
     - none  # Full precision, ~14GB VRAM for 7B models
 
 # ============================================================================
@@ -108,8 +108,8 @@ rag:
   # How many docs to retrieve
   top_k_values:
     - 3    # Minimal context
-    - 5    # Balanced
-    - 10   # Rich context
+    #- 5    # Balanced
+    #- 10   # Rich context
   
   # RAG-specific prompts
   prompts:
@@ -119,7 +119,7 @@ rag:
   # Quantization for RAG (only affects HF models)
   # NOTE: 8bit may have occasional CUDA errors, but executor will handle gracefully
   quantization:
-    - 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
+    #- 8bit  # 8-bit quantization, ~8GB VRAM for 7B models
     - none  # Full precision, ~14GB VRAM (may OOM on 16GB GPUs)
 
 # ============================================================================

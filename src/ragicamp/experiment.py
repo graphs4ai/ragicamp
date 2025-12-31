@@ -428,16 +428,18 @@ class Experiment:
             # Convert executor results to predictions format
             for r in results:
                 if r["idx"] not in completed_indices:
-                    predictions_data["predictions"].append(
-                        {
-                            "idx": r["idx"],
-                            "question": r["query"],
-                            "prediction": r["prediction"],
-                            "expected": r["expected"],
-                            "prompt": r.get("prompt"),
-                            "metrics": {},
-                        }
-                    )
+                    pred_item = {
+                        "idx": r["idx"],
+                        "question": r["query"],
+                        "prediction": r["prediction"],
+                        "expected": r["expected"],
+                        "prompt": r.get("prompt"),
+                        "metrics": {},
+                    }
+                    # Include retrieved context for RAG experiments
+                    if "retrieved_context" in r:
+                        pred_item["retrieved_context"] = r["retrieved_context"]
+                    predictions_data["predictions"].append(pred_item)
                     completed_indices.add(r["idx"])
             self._state.predictions_complete = len(predictions_data["predictions"])
             self._save_predictions(predictions_data)
@@ -456,16 +458,18 @@ class Experiment:
         # Add results to predictions (if not already added via checkpoint)
         for r in results:
             if r["idx"] not in completed_indices:
-                predictions_data["predictions"].append(
-                    {
-                        "idx": r["idx"],
-                        "question": r["query"],
-                        "prediction": r["prediction"],
-                        "expected": r["expected"],
-                        "prompt": r.get("prompt"),
-                        "metrics": {},
-                    }
-                )
+                pred_item = {
+                    "idx": r["idx"],
+                    "question": r["query"],
+                    "prediction": r["prediction"],
+                    "expected": r["expected"],
+                    "prompt": r.get("prompt"),
+                    "metrics": {},
+                }
+                # Include retrieved context for RAG experiments
+                if "retrieved_context" in r:
+                    pred_item["retrieved_context"] = r["retrieved_context"]
+                predictions_data["predictions"].append(pred_item)
 
         # Final save
         self._state.predictions_complete = len(predictions_data["predictions"])

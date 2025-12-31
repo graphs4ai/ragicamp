@@ -1,6 +1,6 @@
 """Direct LLM agent - Baseline 1: No retrieval, just ask the LLM."""
 
-from typing import Any, List
+from typing import Any, List, Optional, Union
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
 from ragicamp.models.base import LanguageModel
@@ -18,7 +18,10 @@ class DirectLLMAgent(RAGAgent):
         self,
         name: str,
         model: LanguageModel,
+        prompt_builder: Optional[PromptBuilder] = None,
+        # Legacy parameters for backwards compatibility
         system_prompt: str = "You are a helpful assistant. Answer questions accurately and concisely.",
+        prompt_template: Optional[str] = None,
         **kwargs: Any,
     ):
         """Initialize the direct LLM agent.
@@ -26,12 +29,34 @@ class DirectLLMAgent(RAGAgent):
         Args:
             name: Agent identifier
             model: The language model to use
-            system_prompt: System prompt for the LLM
+            prompt_builder: PromptBuilder instance for building prompts.
+                          If not provided, creates default from system_prompt.
+            system_prompt: (Legacy) System prompt for the LLM
+            prompt_template: (Legacy) Custom template - ignored if prompt_builder provided
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
         self.model = model
-        self.prompt_builder = PromptBuilder(system_prompt=system_prompt)
+
+        # Use provided prompt_builder or create from legacy params
+        if prompt_builder is not None:
+            self.prompt_builder = prompt_builder
+        else:
+            # Legacy: create basic builder
+            from ragicamp.utils.prompts import PromptConfig
+            self.prompt_builder = PromptBuilder(PromptConfig(system_prompt=system_prompt))
+
+        # Legacy template support (for backwards compat with study.py)
+        self._legacy_template = prompt_template
+
+    def _build_prompt(self, query: str) -> str:
+        """Build prompt for a query."""
+        # If legacy template provided, use it directly
+        if self._legacy_template:
+            return f"{self.prompt_builder.config.system_prompt}\n\n{self._legacy_template.format(question=query)}"
+
+        # Use prompt builder
+        return self.prompt_builder.build_direct(query)
 
     def answer(self, query: str, **kwargs: Any) -> RAGResponse:
         """Generate an answer by directly querying the LLM.
@@ -43,16 +68,10 @@ class DirectLLMAgent(RAGAgent):
         Returns:
             RAGResponse with the LLM's answer
         """
-        # Create context (no retrieval for this baseline)
         context = RAGContext(query=query)
-
-        # Build prompt using utility
-        prompt = self.prompt_builder.build_direct_prompt(query)
-
-        # Generate answer
+        prompt = self._build_prompt(query)
         answer = self.model.generate(prompt, **kwargs)
 
-        # Return response with prompt for debugging/analysis
         return RAGResponse(
             answer=answer,
             context=context,
@@ -73,13 +92,9 @@ class DirectLLMAgent(RAGAgent):
         Returns:
             List of RAGResponse objects, one per query
         """
-        # Build prompts for all queries
-        prompts = [self.prompt_builder.build_direct_prompt(q) for q in queries]
-
-        # Batch generate (single forward pass!)
+        prompts = [self._build_prompt(q) for q in queries]
         answers = self.model.generate(prompts, **kwargs)
 
-        # Create responses with prompts for debugging/analysis
         responses = []
         for query, prompt, answer in zip(queries, prompts, answers):
             context = RAGContext(query=query)

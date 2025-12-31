@@ -122,56 +122,26 @@ from ragicamp.retrievers import DenseRetriever
 from ragicamp.utils.resource_manager import ResourceManager
 
 # ============================================================================
-# Few-shot prompts
+# Prompt configuration
 # ============================================================================
 
-_FEWSHOT_CACHE: Dict[str, Any] = {}
 
+def get_prompt_builder(prompt_type: str, dataset: str):
+    """Get a PromptBuilder configured for the given prompt type and dataset.
 
-def load_fewshot() -> Dict[str, Any]:
-    """Load few-shot examples."""
-    if _FEWSHOT_CACHE:
-        return _FEWSHOT_CACHE
-    path = Path(__file__).parent.parent.parent.parent / "conf" / "prompts" / "fewshot_examples.yaml"
-    if path.exists():
-        with open(path) as f:
-            _FEWSHOT_CACHE.update(yaml.safe_load(f))
-    return _FEWSHOT_CACHE
+    This is the single entry point for prompt configuration. Uses the centralized
+    PromptBuilder from utils/prompts.py.
 
+    Args:
+        prompt_type: One of "default", "concise", "fewshot", "fewshot_3", "fewshot_1"
+        dataset: Dataset name (for loading appropriate fewshot examples)
 
-def get_prompt(key: str, dataset: str) -> Optional[str]:
-    """Get prompt template."""
-    if key == "default":
-        return None
-    if key == "concise":
-        return "Answer with ONLY the answer, nothing else.\n\nQuestion: {question}\nAnswer:"
-    if key.startswith("fewshot"):
-        n = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(key, 5)
-        data = load_fewshot().get(dataset, {})
-        examples = data.get("examples", [])[:n]
-        style = data.get("style", "")
-        stop_inst = data.get("stop_instruction", "")
-        ex = "".join(f"Question: {e['question']}\nAnswer: {e['answer']}\n\n" for e in examples)
-        return f"{style}\n{stop_inst}\n\n{ex}Question: {{question}}\nAnswer:"
-    return None
+    Returns:
+        Configured PromptBuilder instance
+    """
+    from ragicamp.utils.prompts import PromptBuilder
 
-
-def get_rag_template(key: str, dataset: str) -> str:
-    """Get RAG context template."""
-    if key == "default":
-        return "Use the context to answer. Give ONLY the answer, nothing else.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
-    if key == "concise":
-        return "Answer with ONLY the answer from the context, nothing else.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
-    if key.startswith("fewshot"):
-        n = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(key, 5)
-        data = load_fewshot().get(dataset, {})
-        examples = data.get("examples", [])[:n]
-        style = data.get("style", "")
-        stop_inst = data.get("stop_instruction", "")
-        knowledge_inst = data.get("knowledge_instruction", "")
-        ex = "".join(f"Question: {e['question']}\nAnswer: {e['answer']}\n\n" for e in examples)
-        return f"Use the context to answer. {knowledge_inst} {style}\n{stop_inst}\n\n{ex}Context:\n{{context}}\n\nQuestion: {{query}}\nAnswer:"
-    return "Use the context to answer, but you may also use your own knowledge. Give ONLY the answer, nothing else.\n\nContext:\n{context}\n\nQuestion: {query}\nAnswer:"
+    return PromptBuilder.from_config(prompt_type, dataset=dataset)
 
 
 # ============================================================================
@@ -524,14 +494,15 @@ def run_spec(
 
         model = create_model(spec.model, spec.quant)
 
+        # Get prompt builder for this experiment
+        prompt_builder = get_prompt_builder(spec.prompt, spec.dataset)
+
         if spec.exp_type == "direct":
-            prompt = get_prompt(spec.prompt, spec.dataset)
-            agent = DirectLLMAgent(name=spec.name, model=model, prompt_template=prompt)
+            agent = DirectLLMAgent(name=spec.name, model=model, prompt_builder=prompt_builder)
         else:
             retriever = DenseRetriever.load_index(spec.retriever)
-            template = get_rag_template(spec.prompt, spec.dataset)
             agent = FixedRAGAgent(
-                spec.name, model, retriever, spec.top_k, context_template=template
+                spec.name, model, retriever, spec.top_k, prompt_builder=prompt_builder
             )
 
         metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)

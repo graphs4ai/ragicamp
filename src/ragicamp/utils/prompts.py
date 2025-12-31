@@ -1,158 +1,255 @@
-"""Prompt building utilities for RAG systems."""
+"""Prompt building utilities for RAG systems.
 
-from typing import Any, Dict, Optional
+This module provides a centralized way to build prompts for different
+experiment types (direct, RAG) with support for few-shot examples.
+
+Usage:
+    # Create prompt builder from config
+    builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
+    
+    # Build prompts
+    direct_prompt = builder.build_direct(query="What is AI?")
+    rag_prompt = builder.build_rag(query="What is AI?", context="...")
+"""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+
+@dataclass
+class FewShotExample:
+    """A single few-shot example."""
+
+    question: str
+    answer: str
+
+    def format(self) -> str:
+        """Format as Question/Answer pair."""
+        return f"Question: {self.question}\nAnswer: {self.answer}"
+
+
+@dataclass
+class PromptConfig:
+    """Configuration for prompt building.
+
+    Attributes:
+        system_prompt: System-level instruction
+        style: Answer style instruction (e.g., "Give ONLY the answer")
+        stop_instruction: Instruction to stop generating
+        knowledge_instruction: For RAG, whether to use own knowledge
+        examples: Few-shot examples
+    """
+
+    system_prompt: str = "You are a helpful assistant."
+    style: str = ""
+    stop_instruction: str = ""
+    knowledge_instruction: str = ""
+    examples: List[FewShotExample] = field(default_factory=list)
+
+    @property
+    def examples_text(self) -> str:
+        """Format all examples as text."""
+        if not self.examples:
+            return ""
+        return "\n\n".join(ex.format() for ex in self.examples) + "\n\n"
+
+    @property
+    def instruction_text(self) -> str:
+        """Combine style and stop instructions."""
+        parts = []
+        if self.style:
+            parts.append(self.style)
+        if self.stop_instruction:
+            parts.append(self.stop_instruction)
+        return "\n".join(parts)
 
 
 class PromptBuilder:
-    """Utility class for building prompts for RAG systems.
+    """Builds prompts for direct and RAG experiments.
 
-    Centralizes prompt construction logic that was previously duplicated
-    across agent implementations.
+    This is the single source of truth for prompt construction.
+    Supports default, concise, and few-shot prompt styles.
+
+    Example:
+        >>> builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
+        >>> prompt = builder.build_direct("What is the capital of France?")
+        >>> print(prompt)
+        You are a helpful assistant.
+
+        Give ONLY the final answer...
+        IMPORTANT: Give only ONE short answer...
+
+        Question: What government position...
+        Answer: Deputy Prime Minister of Israel
+
+        ...
+
+        Question: What is the capital of France?
+        Answer:
     """
 
-    def __init__(
-        self,
+    # Cache for loaded fewshot examples
+    _fewshot_cache: Optional[Dict[str, Any]] = None
+
+    def __init__(self, config: PromptConfig):
+        """Initialize with a prompt configuration.
+
+        Args:
+            config: PromptConfig with all prompt settings
+        """
+        self.config = config
+
+    def build_direct(self, query: str) -> str:
+        """Build prompt for direct (no RAG) experiments.
+
+        Args:
+            query: The question to answer
+
+        Returns:
+            Complete prompt string
+        """
+        parts = [self.config.system_prompt]
+
+        # Add instructions if present
+        if self.config.instruction_text:
+            parts.append(self.config.instruction_text)
+
+        # Add few-shot examples
+        if self.config.examples:
+            parts.append(self.config.examples_text.rstrip())
+
+        # Add the actual question
+        parts.append(f"Question: {query}\nAnswer:")
+
+        return "\n\n".join(parts)
+
+    def build_rag(self, query: str, context: str) -> str:
+        """Build prompt for RAG experiments with retrieved context.
+
+        Args:
+            query: The question to answer
+            context: Retrieved context (formatted documents)
+
+        Returns:
+            Complete prompt string with context
+        """
+        parts = [self.config.system_prompt]
+
+        # RAG-specific instruction
+        rag_instruction = "Use the context to answer."
+        if self.config.knowledge_instruction:
+            rag_instruction += f" {self.config.knowledge_instruction}"
+        if self.config.style:
+            rag_instruction += f" {self.config.style}"
+
+        parts.append(rag_instruction)
+
+        # Add stop instruction
+        if self.config.stop_instruction:
+            parts.append(self.config.stop_instruction)
+
+        # Add few-shot examples (before context)
+        if self.config.examples:
+            parts.append(self.config.examples_text.rstrip())
+
+        # Add context and question
+        parts.append(f"Context:\n{context}")
+        parts.append(f"Question: {query}\nAnswer:")
+
+        return "\n\n".join(parts)
+
+    @classmethod
+    def _load_fewshot_file(cls) -> Dict[str, Any]:
+        """Load fewshot examples from YAML file (cached)."""
+        if cls._fewshot_cache is not None:
+            return cls._fewshot_cache
+
+        # Try multiple locations
+        paths = [
+            Path(__file__).parent.parent.parent.parent / "conf" / "prompts" / "fewshot_examples.yaml",
+            Path("conf/prompts/fewshot_examples.yaml"),
+        ]
+
+        for path in paths:
+            if path.exists():
+                with open(path) as f:
+                    cls._fewshot_cache = yaml.safe_load(f) or {}
+                    return cls._fewshot_cache
+
+        cls._fewshot_cache = {}
+        return cls._fewshot_cache
+
+    @classmethod
+    def from_config(
+        cls,
+        prompt_type: str = "default",
+        dataset: str = "nq",
         system_prompt: str = "You are a helpful assistant.",
-        context_template: str = "Context:\n{context}\n\nQuestion: {query}\n\nAnswer:",
-        separator: str = "\n\n",
-    ):
-        """Initialize prompt builder.
+    ) -> "PromptBuilder":
+        """Create a PromptBuilder from a config type.
 
         Args:
-            system_prompt: System-level instruction for the model
-            context_template: Template for question+context prompts
-            separator: Separator between system prompt and context template
-        """
-        self.system_prompt = system_prompt
-        self.context_template = context_template
-        self.separator = separator
-
-    def build_prompt(self, query: str, context: Optional[str] = None, **kwargs: Any) -> str:
-        """Build a complete prompt for the LLM.
-
-        Args:
-            query: The user's question
-            context: Retrieved context (optional)
-            **kwargs: Additional variables for template formatting
+            prompt_type: One of "default", "concise", "fewshot", "fewshot_3", "fewshot_1"
+            dataset: Dataset name for loading appropriate fewshot examples
+            system_prompt: Base system prompt
 
         Returns:
-            Complete formatted prompt
-
-        Examples:
-            >>> builder = PromptBuilder()
-            >>> builder.build_prompt("What is AI?", "AI stands for Artificial Intelligence")
-            'You are a helpful assistant.\\n\\nContext:\\nAI stands for Artificial Intelligence\\n\\nQuestion: What is AI?\\n\\nAnswer:'
-        """
-        # Prepare template variables
-        template_vars = {"query": query, **kwargs}
-
-        if context is not None:
-            template_vars["context"] = context
-
-        # Build the prompt
-        parts = [self.system_prompt]
-
-        # Format the context template
-        formatted_template = self.context_template.format(**template_vars)
-        parts.append(formatted_template)
-
-        return self.separator.join(parts)
-
-    def build_direct_prompt(self, query: str, **kwargs: Any) -> str:
-        """Build a prompt without context (direct LLM).
-
-        Args:
-            query: The user's question
-            **kwargs: Additional variables
-
-        Returns:
-            Prompt for direct LLM query
+            Configured PromptBuilder
 
         Example:
-            >>> builder = PromptBuilder()
-            >>> builder.build_direct_prompt("What is AI?")
-            'You are a helpful assistant.\\n\\nQuestion: What is AI?\\n\\nAnswer:'
+            >>> builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
         """
-        template = "Question: {query}\n\nAnswer:"
-        formatted = template.format(query=query, **kwargs)
-        return f"{self.system_prompt}{self.separator}{formatted}"
+        if prompt_type == "default":
+            return cls(PromptConfig(
+                system_prompt=system_prompt,
+                style="Give ONLY the answer, nothing else.",
+            ))
 
-    def build_rag_prompt(
-        self, query: str, context: str, instruction: Optional[str] = None, **kwargs: Any
-    ) -> str:
-        """Build a RAG prompt with context.
+        if prompt_type == "concise":
+            return cls(PromptConfig(
+                system_prompt=system_prompt,
+                style="Give ONLY the answer - no explanations.",
+            ))
 
-        Args:
-            query: The user's question
-            context: Retrieved context
-            instruction: Optional additional instruction
-            **kwargs: Additional variables
+        if prompt_type.startswith("fewshot"):
+            # Determine number of examples
+            n_examples = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(prompt_type, 5)
 
-        Returns:
-            Complete RAG prompt
+            # Load dataset-specific config
+            fewshot_data = cls._load_fewshot_file()
+            dataset_config = fewshot_data.get(dataset, {})
 
-        Example:
-            >>> builder = PromptBuilder()
-            >>> builder.build_rag_prompt(
-            ...     "What is AI?",
-            ...     "AI stands for Artificial Intelligence",
-            ...     instruction="Answer concisely"
-            ... )
-        """
-        parts = [self.system_prompt]
+            # Extract examples
+            raw_examples = dataset_config.get("examples", [])[:n_examples]
+            examples = [
+                FewShotExample(question=ex["question"], answer=ex["answer"])
+                for ex in raw_examples
+            ]
 
-        if instruction:
-            parts.append(instruction)
+            return cls(PromptConfig(
+                system_prompt=system_prompt,
+                style=dataset_config.get("style", "Give a short, direct answer."),
+                stop_instruction=dataset_config.get("stop_instruction", ""),
+                knowledge_instruction=dataset_config.get("knowledge_instruction", ""),
+                examples=examples,
+            ))
 
-        formatted = self.context_template.format(query=query, context=context, **kwargs)
-        parts.append(formatted)
+        # Default fallback
+        return cls(PromptConfig(system_prompt=system_prompt))
 
-        return self.separator.join(parts)
+    # =========================================================================
+    # Legacy factory methods (for backwards compatibility)
+    # =========================================================================
 
     @staticmethod
     def create_default() -> "PromptBuilder":
-        """Create a prompt builder with default settings.
-
-        Returns:
-            PromptBuilder with standard RAG settings
-        """
-        return PromptBuilder(
-            system_prompt="You are a helpful assistant. Use the provided context to answer questions accurately.",
-            context_template="Context:\n{context}\n\nQuestion: {query}\n\nAnswer:",
-        )
+        """Create a prompt builder with default settings."""
+        return PromptBuilder.from_config("default")
 
     @staticmethod
     def create_concise() -> "PromptBuilder":
-        """Create a prompt builder optimized for concise answers.
-
-        Returns:
-            PromptBuilder configured for brief responses
-        """
-        return PromptBuilder(
-            system_prompt="You are a helpful assistant. Answer questions concisely and accurately based on the provided context.",
-            context_template="Context:\n{context}\n\nQuestion: {query}\n\nProvide a brief, accurate answer:",
-        )
-
-    @staticmethod
-    def create_detailed() -> "PromptBuilder":
-        """Create a prompt builder optimized for detailed answers.
-
-        Returns:
-            PromptBuilder configured for comprehensive responses
-        """
-        return PromptBuilder(
-            system_prompt="You are a knowledgeable assistant. Provide detailed, well-explained answers based on the given context.",
-            context_template="Context:\n{context}\n\nQuestion: {query}\n\nProvide a detailed answer with explanations:",
-        )
-
-    @staticmethod
-    def create_extractive() -> "PromptBuilder":
-        """Create a prompt builder for extractive QA.
-
-        Returns:
-            PromptBuilder configured for extracting answers from context
-        """
-        return PromptBuilder(
-            system_prompt="You are an assistant that extracts exact answers from the given context.",
-            context_template="Context:\n{context}\n\nQuestion: {query}\n\nExtract the answer from the context above. If the answer is not in the context, say 'Not found'.\n\nAnswer:",
-        )
+        """Create a prompt builder for concise answers."""
+        return PromptBuilder.from_config("concise")
