@@ -209,7 +209,7 @@ return RAGResponse(
         agent_type=AgentType.FIXED_RAG,
         num_docs_used=len(docs),
         retrieved_docs=[  # REQUIRED for RAG
-            RetrievedDoc(rank=i+1, content=d.content, score=d.score)
+            RetrievedDoc(rank=i+1, content=d.text, score=d.score)
             for i, d in enumerate(docs)
         ],
     ),

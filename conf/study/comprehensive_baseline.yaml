@@ -76,9 +76,9 @@ direct:
     # LARGE MODELS (32-70B) - Requires 4-bit quantization
     # These run on A100 40GB with 4-bit
     # ----------------------------------------------------------------------
-    - hf:meta-llama/Llama-3.1-70B-Instruct   # 70B, SOTA open model (~35GB 4-bit)
-    - hf:Qwen/Qwen2.5-32B-Instruct           # 32B, very strong (~18GB 4-bit)
-    - hf:mistralai/Mixtral-8x7B-Instruct-v0.1  # MoE 8x7B (~25GB 4-bit)
+    #- hf:meta-llama/Llama-3.1-70B-Instruct   # 70B, SOTA open model (~35GB 4-bit)
+    #- hf:Qwen/Qwen2.5-32B-Instruct           # 32B, very strong (~18GB 4-bit)
+    #- hf:mistralai/Mixtral-8x7B-Instruct-v0.1  # MoE 8x7B (~25GB 4-bit)
 
   prompts:
     - concise    # Short answers
@@ -106,8 +106,8 @@ rag:
     - hf:deepseek-ai/deepseek-llm-7b-chat    # DeepSeek - reasoning
 
     # Large models (for RAG quality comparison)
-    - hf:meta-llama/Llama-3.1-70B-Instruct   # 70B SOTA (4-bit)
-    - hf:Qwen/Qwen2.5-32B-Instruct           # 32B strong (4-bit)
+    #- hf:meta-llama/Llama-3.1-70B-Instruct   # 70B SOTA (4-bit)
+    #- hf:Qwen/Qwen2.5-32B-Instruct           # 32B strong (4-bit)
 
   retrievers:
     # One representative from each embedding family

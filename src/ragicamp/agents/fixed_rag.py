@@ -108,7 +108,7 @@ class FixedRAGAgent(RAGAgent):
         retrieved_structured = [
             RetrievedDoc(
                 rank=i + 1,
-                content=doc.content,
+                content=doc.text,
                 score=getattr(doc, "score", None),
             )
             for i, doc in enumerate(retrieved_docs)
@@ -171,7 +171,7 @@ class FixedRAGAgent(RAGAgent):
             retrieved_structured = [
                 RetrievedDoc(
                     rank=i + 1,
-                    content=doc.content,
+                    content=doc.text,
                     score=getattr(doc, "score", None),
                 )
                 for i, doc in enumerate(docs)
