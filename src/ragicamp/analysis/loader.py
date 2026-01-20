@@ -60,7 +60,8 @@ class ExperimentResult:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExperimentResult":
         """Create from dictionary (comparison.json format)."""
-        results = data.get("results", {})
+        # Support both "results" (old format) and "metrics" (new format)
+        results = data.get("results", {}) or data.get("metrics", {})
         retriever = data.get("retriever")
 
         # Parse RAG details from retriever name
