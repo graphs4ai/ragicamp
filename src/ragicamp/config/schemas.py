@@ -11,13 +11,54 @@ from pydantic import BaseModel, Field, validator
 
 
 class ModelConfig(BaseModel):
-    """Model configuration."""
+    """Model configuration.
 
-    type: str = Field(default="huggingface", description="Model type")
+    Supports three model types:
+    - huggingface: Standard HuggingFace transformers (with optional BitsAndBytes quantization)
+    - vllm: vLLM backend with PagedAttention (recommended for long context)
+    - openai: OpenAI API models
+    """
+
+    type: str = Field(default="huggingface", description="Model type: huggingface, vllm, openai")
     model_name: str = Field(..., description="Model identifier")
-    device: str = Field(default="cuda", description="Device (cuda/cpu)")
-    load_in_8bit: bool = Field(default=False, description="Use 8-bit quantization")
-    load_in_4bit: bool = Field(default=False, description="Use 4-bit quantization")
+    device: str = Field(default="cuda", description="Device (cuda/cpu) - for huggingface only")
+
+    # HuggingFace-specific quantization (BitsAndBytes)
+    load_in_8bit: bool = Field(default=False, description="Use 8-bit quantization (HuggingFace)")
+    load_in_4bit: bool = Field(default=False, description="Use 4-bit quantization (HuggingFace)")
+
+    # vLLM-specific options
+    dtype: str = Field(
+        default="bfloat16",
+        description="Model dtype for vLLM: 'bfloat16', 'float16', 'float32', 'auto'",
+    )
+    quantization: Optional[str] = Field(
+        default=None,
+        description="vLLM quantization: 'awq', 'gptq', 'squeezellm', or None (no quantization)",
+    )
+    gpu_memory_utilization: float = Field(
+        default=0.90,
+        description="Fraction of GPU memory to use (vLLM). Default 0.90 leaves 10% headroom.",
+    )
+    max_model_len: Optional[int] = Field(
+        default=None,
+        description="Maximum context length (vLLM). If None, uses model's default.",
+    )
+    tensor_parallel_size: int = Field(
+        default=1,
+        description="Number of GPUs for tensor parallelism (vLLM).",
+    )
+    kv_cache_dtype: Optional[str] = Field(
+        default=None,
+        description="KV cache dtype (vLLM): 'auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'. "
+        "Use 'fp8' for ~2x KV cache memory reduction without weight quantization.",
+    )
+    enable_prefix_caching: bool = Field(
+        default=True,
+        description="Enable automatic prefix caching for efficiency (vLLM).",
+    )
+
+    # Generation parameters
     max_tokens: Optional[int] = Field(default=None, description="Max tokens to generate")
     temperature: float = Field(default=0.7, description="Sampling temperature")
 

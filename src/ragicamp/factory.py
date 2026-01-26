@@ -23,7 +23,7 @@ from ragicamp.datasets import (
     TriviaQADataset,
 )
 from ragicamp.metrics import Metric
-from ragicamp.models import HuggingFaceModel, LanguageModel, OpenAIModel
+from ragicamp.models import HuggingFaceModel, LanguageModel, OpenAIModel, VLLMModel, _VLLM_AVAILABLE
 from ragicamp.retrievers import DenseRetriever, Retriever
 
 
@@ -37,10 +37,13 @@ def validate_model_config(config: Dict[str, Any]) -> None:
         ValueError: If config is invalid
     """
     model_type = config.get("type", "huggingface")
-    if model_type not in ("huggingface", "openai"):
-        raise ValueError(f"Invalid model type: {model_type}. Valid: huggingface, openai")
+    valid_types = ("huggingface", "openai", "vllm")
+    if model_type not in valid_types:
+        raise ValueError(f"Invalid model type: {model_type}. Valid: {', '.join(valid_types)}")
     if model_type == "huggingface" and not config.get("model_name"):
         raise ValueError("HuggingFace model requires 'model_name'")
+    if model_type == "vllm" and not config.get("model_name"):
+        raise ValueError("vLLM model requires 'model_name'")
     if model_type == "openai" and not config.get("name"):
         raise ValueError("OpenAI model requires 'name'")
 
@@ -113,21 +116,24 @@ class ComponentFactory:
     @staticmethod
     def parse_model_spec(
         spec: str,
-        quantization: str = "4bit",
+        quantization: str = "none",
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Parse a model spec string into a config dict.
 
         Args:
-            spec: Model spec like 'hf:google/gemma-2b-it' or 'openai:gpt-4o-mini'
-            quantization: Quantization for HF models ('4bit', '8bit', 'none')
+            spec: Model spec like 'hf:google/gemma-2b-it', 'vllm:meta-llama/Llama-2-7b',
+                  or 'openai:gpt-4o-mini'
+            quantization: Quantization setting:
+                         - For HuggingFace: '4bit', '8bit', 'none' (default: 'none')
+                         - For vLLM: 'awq', 'gptq', 'squeezellm', 'none' (default: 'none')
             **kwargs: Additional model parameters
 
         Returns:
             Config dict suitable for create_model()
 
         Example:
-            >>> config = ComponentFactory.parse_model_spec("hf:google/gemma-2b-it", "4bit")
+            >>> config = ComponentFactory.parse_model_spec("vllm:meta-llama/Llama-2-7b")
             >>> model = ComponentFactory.create_model(config)
         """
         if ":" in spec:
@@ -142,6 +148,15 @@ class ComponentFactory:
                 "load_in_4bit": quantization == "4bit",
                 "load_in_8bit": quantization == "8bit",
             }
+        elif provider == "vllm":
+            config = {
+                "type": "vllm",
+                "model_name": model_name,
+                "dtype": "bfloat16",  # Full precision by default
+            }
+            # Only set quantization if explicitly requested
+            if quantization and quantization != "none":
+                config["quantization"] = quantization
         elif provider == "openai":
             config = {
                 "type": "openai",
@@ -149,7 +164,7 @@ class ComponentFactory:
                 "temperature": 0.0,
             }
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'hf:' or 'openai:'")
+            raise ValueError(f"Unknown provider: {provider}. Use 'hf:', 'vllm:', or 'openai:'")
 
         config.update(kwargs)
         return config
@@ -228,10 +243,17 @@ class ComponentFactory:
         # Built-in types
         if model_type == "huggingface":
             return HuggingFaceModel(**config_copy)
+        elif model_type == "vllm":
+            if not _VLLM_AVAILABLE:
+                raise ImportError(
+                    "vLLM is not installed. Install it with: pip install vllm\n"
+                    "Note: vLLM requires CUDA and a compatible GPU."
+                )
+            return VLLMModel(**config_copy)
         elif model_type == "openai":
             return OpenAIModel(**config_copy)
         else:
-            available = ["huggingface", "openai"] + list(cls._custom_models.keys())
+            available = ["huggingface", "vllm", "openai"] + list(cls._custom_models.keys())
             raise ValueError(f"Unknown model type: {model_type}. Available: {available}")
 
     @classmethod
