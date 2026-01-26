@@ -1,0 +1,157 @@
+"""Modular RAG pipeline orchestrator.
+
+The RAGPipeline combines:
+- Query transformation (HyDE, multi-query, or passthrough)
+- Retrieval (dense, sparse, hybrid, or hierarchical)
+- Reranking (cross-encoder)
+
+This modular design allows mixing and matching components to find
+the best configuration for your use case.
+
+Example usage:
+    pipeline = RAGPipeline(
+        retriever=HybridRetriever("my_index"),
+        query_transformer=HyDETransformer(llm),
+        reranker=CrossEncoderReranker("bge"),
+        top_k_retrieve=20,
+        top_k_final=5,
+    )
+
+    docs = pipeline.retrieve("What is the capital of France?")
+"""
+
+from typing import TYPE_CHECKING, Dict, List, Optional, Set
+
+from ragicamp.core.logging import get_logger
+from ragicamp.rag.query_transform.base import PassthroughTransformer, QueryTransformer
+from ragicamp.rag.rerankers.base import Reranker
+
+if TYPE_CHECKING:
+    from ragicamp.retrievers.base import Document, Retriever
+
+logger = get_logger(__name__)
+
+
+class RAGPipeline:
+    """Modular RAG pipeline with pluggable components.
+
+    The pipeline executes in stages:
+    1. Query Transformation: Expand/modify the query (HyDE, multi-query)
+    2. Retrieval: Get candidate documents from all query variations
+    3. Deduplication: Merge results from multiple queries
+    4. Reranking: Reorder candidates using a cross-encoder
+    5. Top-K Selection: Return final documents
+
+    Each component is optional and can be swapped out.
+    """
+
+    def __init__(
+        self,
+        retriever: "Retriever",
+        query_transformer: Optional[QueryTransformer] = None,
+        reranker: Optional[Reranker] = None,
+        top_k_retrieve: int = 20,
+        top_k_final: int = 5,
+    ):
+        """Initialize the RAG pipeline.
+
+        Args:
+            retriever: The retriever to use (dense, hybrid, hierarchical)
+            query_transformer: Optional query transformer (HyDE, multi-query)
+            reranker: Optional reranker (cross-encoder)
+            top_k_retrieve: Number of docs to retrieve per query (before reranking)
+            top_k_final: Final number of docs to return (after reranking)
+        """
+        self.retriever = retriever
+        self.query_transformer = query_transformer or PassthroughTransformer()
+        self.reranker = reranker
+        self.top_k_retrieve = top_k_retrieve
+        self.top_k_final = top_k_final
+
+    def retrieve(self, query: str) -> List["Document"]:
+        """Execute the full retrieval pipeline.
+
+        Args:
+            query: The user's query
+
+        Returns:
+            List of top-k documents after all pipeline stages
+        """
+        # Stage 1: Query transformation
+        transformed_queries = self.query_transformer.transform(query)
+        logger.debug(
+            "Query transformation: %d queries generated",
+            len(transformed_queries),
+        )
+
+        # Stage 2: Retrieval from all query variations
+        all_docs: List["Document"] = []
+        seen_ids: Set[str] = set()
+
+        for q in transformed_queries:
+            docs = self.retriever.retrieve(q, top_k=self.top_k_retrieve)
+            for doc in docs:
+                # Deduplicate by document ID
+                if doc.id not in seen_ids:
+                    all_docs.append(doc)
+                    seen_ids.add(doc.id)
+
+        logger.debug(
+            "Retrieved %d unique documents from %d queries",
+            len(all_docs),
+            len(transformed_queries),
+        )
+
+        # If no reranker, sort by score and return top-k
+        if self.reranker is None:
+            # Sort by existing scores (if available)
+            sorted_docs = sorted(
+                all_docs,
+                key=lambda d: getattr(d, "score", 0),
+                reverse=True,
+            )
+            return sorted_docs[: self.top_k_final]
+
+        # Stage 3: Reranking
+        # Use original query for reranking (not transformed versions)
+        reranked_docs = self.reranker.rerank(
+            query=query,
+            documents=all_docs,
+            top_k=self.top_k_final,
+        )
+
+        logger.debug(
+            "Reranked to %d documents",
+            len(reranked_docs),
+        )
+
+        return reranked_docs
+
+    def batch_retrieve(self, queries: List[str]) -> List[List["Document"]]:
+        """Retrieve documents for multiple queries.
+
+        Args:
+            queries: List of user queries
+
+        Returns:
+            List of document lists, one per query
+        """
+        return [self.retrieve(q) for q in queries]
+
+    def get_config(self) -> Dict:
+        """Get pipeline configuration for logging/debugging."""
+        return {
+            "retriever": repr(self.retriever),
+            "query_transformer": repr(self.query_transformer),
+            "reranker": repr(self.reranker) if self.reranker else None,
+            "top_k_retrieve": self.top_k_retrieve,
+            "top_k_final": self.top_k_final,
+        }
+
+    def __repr__(self) -> str:
+        components = [f"retriever={self.retriever.name}"]
+        if not isinstance(self.query_transformer, PassthroughTransformer):
+            components.append(f"transformer={self.query_transformer.__class__.__name__}")
+        if self.reranker:
+            components.append(f"reranker={self.reranker.__class__.__name__}")
+        return f"RAGPipeline({', '.join(components)})"

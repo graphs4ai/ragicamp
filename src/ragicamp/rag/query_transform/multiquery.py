@@ -1,0 +1,132 @@
+"""Multi-query transformer for query expansion.
+
+Multi-query generates multiple variations of the original query
+to capture different phrasings and aspects of the user's intent.
+Results from all queries are merged and deduplicated.
+"""
+
+import re
+from typing import TYPE_CHECKING, List, Optional
+
+from ragicamp.rag.query_transform.base import QueryTransformer
+
+if TYPE_CHECKING:
+    from ragicamp.models.base import LanguageModel
+
+
+class MultiQueryTransformer(QueryTransformer):
+    """Rewrite query into multiple variations for better coverage.
+
+    This transformer asks an LLM to generate alternative phrasings
+    of the original question. Searching with multiple queries helps:
+    - Capture different vocabulary (synonyms, technical terms)
+    - Address different aspects of the question
+    - Improve recall by diversifying the search
+    """
+
+    DEFAULT_PROMPT = """You are an AI assistant helping to improve search queries.
+Given the following question, generate {num_queries} alternative versions of the same question.
+Each version should capture a different angle or use different words, but ask about the same thing.
+
+Original question: {query}
+
+Generate {num_queries} alternative questions, one per line. Only output the questions, no numbering or explanations.
+
+Alternative questions:"""
+
+    def __init__(
+        self,
+        llm: "LanguageModel",
+        num_queries: int = 3,
+        prompt_template: Optional[str] = None,
+        include_original: bool = True,
+        max_tokens: int = 200,
+    ):
+        """Initialize multi-query transformer.
+
+        Args:
+            llm: Language model to generate query variations
+            num_queries: Number of alternative queries to generate
+            prompt_template: Custom prompt template with {query} and {num_queries} placeholders
+            include_original: Whether to include the original query
+            max_tokens: Maximum tokens for generation
+        """
+        self.llm = llm
+        self.num_queries = num_queries
+        self.prompt_template = prompt_template or self.DEFAULT_PROMPT
+        self.include_original = include_original
+        self.max_tokens = max_tokens
+
+    def transform(self, query: str) -> List[str]:
+        """Generate multiple query variations.
+
+        Args:
+            query: The original user query
+
+        Returns:
+            List of query variations including original (if enabled)
+        """
+        queries = []
+
+        # Include original query first
+        if self.include_original:
+            queries.append(query)
+
+        # Generate variations
+        prompt = self.prompt_template.format(query=query, num_queries=self.num_queries)
+
+        response = self.llm.generate(
+            prompt,
+            max_tokens=self.max_tokens,
+            temperature=0.7,
+        )
+
+        # Parse the response into individual queries
+        variations = self._parse_variations(response)
+
+        # Add unique variations
+        for variation in variations:
+            variation = variation.strip()
+            # Skip empty or duplicate queries
+            if variation and variation.lower() != query.lower() and variation not in queries:
+                queries.append(variation)
+
+        return queries
+
+    def _parse_variations(self, response: str) -> List[str]:
+        """Parse LLM response into individual query variations.
+
+        Args:
+            response: Raw LLM response
+
+        Returns:
+            List of parsed query strings
+        """
+        # Split by newlines
+        lines = response.strip().split("\n")
+
+        variations = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Remove common prefixes like "1.", "- ", "* ", etc.
+            line = re.sub(r"^[\d]+[.\)]\s*", "", line)
+            line = re.sub(r"^[-*•]\s*", "", line)
+            line = line.strip()
+
+            # Skip if it looks like a label or instruction
+            if line.lower().startswith(("alternative", "question", "version")):
+                continue
+
+            if line:
+                variations.append(line)
+
+        return variations[: self.num_queries]  # Limit to requested number
+
+    def __repr__(self) -> str:
+        return (
+            f"MultiQueryTransformer(num_queries={self.num_queries}, "
+            f"include_original={self.include_original})"
+        )

@@ -1,6 +1,6 @@
 """Fixed RAG agent - Baseline 2: Standard RAG with fixed parameters."""
 
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
 from ragicamp.core.schemas import RAGResponseMeta, RetrievedDoc, AgentType
@@ -11,14 +11,25 @@ from ragicamp.utils.artifacts import get_artifact_manager
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder
 
+if TYPE_CHECKING:
+    from ragicamp.rag.pipeline import RAGPipeline
+    from ragicamp.rag.query_transform.base import QueryTransformer
+    from ragicamp.rag.rerankers.base import Reranker
+
 
 class FixedRAGAgent(RAGAgent):
     """Baseline RAG agent with fixed retrieval parameters.
 
     This agent implements the standard RAG pipeline:
-    1. Retrieve top-k documents
-    2. Format context with retrieved documents
-    3. Generate answer using LLM with context
+    1. Retrieve top-k documents (optionally with query transformation)
+    2. Optionally rerank retrieved documents
+    3. Format context with retrieved documents
+    4. Generate answer using LLM with context
+
+    Supports advanced RAG features:
+    - Query transformation (HyDE, multi-query)
+    - Reranking (cross-encoder)
+    - Various retriever types (dense, hybrid, hierarchical)
     """
 
     def __init__(
@@ -28,6 +39,10 @@ class FixedRAGAgent(RAGAgent):
         retriever: Retriever,
         top_k: int = 5,
         prompt_builder: Optional[PromptBuilder] = None,
+        # Advanced RAG pipeline options
+        query_transformer: Optional["QueryTransformer"] = None,
+        reranker: Optional["Reranker"] = None,
+        top_k_retrieve: Optional[int] = None,
         # Legacy parameters for backwards compatibility
         system_prompt: str = "You are a helpful assistant. Use the provided context to answer questions accurately.",
         context_template: Optional[str] = None,
@@ -39,9 +54,13 @@ class FixedRAGAgent(RAGAgent):
             name: Agent identifier
             model: The language model to use
             retriever: The retriever for finding relevant documents
-            top_k: Number of documents to retrieve
+            top_k: Number of documents to use for generation (after reranking)
             prompt_builder: PromptBuilder instance for building prompts.
                           If not provided, creates default.
+            query_transformer: Optional query transformer (HyDE, multi-query)
+            reranker: Optional reranker (cross-encoder)
+            top_k_retrieve: Number of docs to retrieve before reranking.
+                           If None, uses top_k * 4 when reranker is present.
             system_prompt: (Legacy) System prompt for the LLM
             context_template: (Legacy) Template with {context} and {query} placeholders
             **kwargs: Additional configuration
@@ -50,6 +69,23 @@ class FixedRAGAgent(RAGAgent):
         self.model = model
         self.retriever = retriever
         self.top_k = top_k
+
+        # Advanced pipeline components
+        self.query_transformer = query_transformer
+        self.reranker = reranker
+        self.top_k_retrieve = top_k_retrieve or (top_k * 4 if reranker else top_k)
+
+        # Build pipeline if advanced features are used
+        self._pipeline: Optional["RAGPipeline"] = None
+        if query_transformer is not None or reranker is not None:
+            from ragicamp.rag.pipeline import RAGPipeline
+            self._pipeline = RAGPipeline(
+                retriever=retriever,
+                query_transformer=query_transformer,
+                reranker=reranker,
+                top_k_retrieve=self.top_k_retrieve,
+                top_k_final=top_k,
+            )
 
         # Use provided prompt_builder or create from legacy params
         if prompt_builder is not None:
@@ -82,8 +118,11 @@ class FixedRAGAgent(RAGAgent):
         Returns:
             RAGResponse with the answer and retrieved context
         """
-        # Retrieve documents
-        retrieved_docs = self.retriever.retrieve(query, top_k=self.top_k)
+        # Retrieve documents (use pipeline if available, otherwise direct retrieval)
+        if self._pipeline is not None:
+            retrieved_docs = self._pipeline.retrieve(query)
+        else:
+            retrieved_docs = self.retriever.retrieve(query, top_k=self.top_k)
 
         # Format context using utility
         context_text = ContextFormatter.format_numbered(retrieved_docs)
@@ -139,8 +178,11 @@ class FixedRAGAgent(RAGAgent):
         Returns:
             List of RAGResponse objects, one per query
         """
-        # Retrieve documents for all queries
-        all_docs = [self.retriever.retrieve(q, top_k=self.top_k) for q in queries]
+        # Retrieve documents for all queries (use pipeline if available)
+        if self._pipeline is not None:
+            all_docs = self._pipeline.batch_retrieve(queries)
+        else:
+            all_docs = [self.retriever.retrieve(q, top_k=self.top_k) for q in queries]
 
         # Format contexts and build prompts
         prompts = []

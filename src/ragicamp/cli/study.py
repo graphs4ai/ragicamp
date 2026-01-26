@@ -17,8 +17,8 @@ from ragicamp import Experiment
 # Validation
 # ============================================================================
 
-VALID_DATASETS = {"nq", "triviaqa", "hotpotqa"}
-VALID_PROVIDERS = {"hf", "openai"}
+VALID_DATASETS = {"nq", "triviaqa", "hotpotqa", "techqa", "pubmedqa"}
+VALID_PROVIDERS = {"hf", "openai", "vllm"}
 VALID_QUANTIZATIONS = {"4bit", "8bit", "none"}
 
 

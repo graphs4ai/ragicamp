@@ -77,6 +77,11 @@ gpu = [
     "vllm>=0.6.0",
     "flash-attn>=2.5.0",
 ]
+# Advanced RAG features (reranking, BM25)
+# Note: Cross-encoders are included in sentence-transformers
+rag = [
+    "rank-bm25>=0.2.2",  # Proper BM25 implementation for hybrid retrieval
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true

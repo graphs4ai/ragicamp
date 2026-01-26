@@ -19,12 +19,14 @@ from ragicamp.agents import (
 from ragicamp.datasets import (
     HotpotQADataset,
     NaturalQuestionsDataset,
+    PubMedQADataset,
     QADataset,
+    TechQADataset,
     TriviaQADataset,
 )
 from ragicamp.metrics import Metric
 from ragicamp.models import HuggingFaceModel, LanguageModel, OpenAIModel, VLLMModel, _VLLM_AVAILABLE
-from ragicamp.retrievers import DenseRetriever, Retriever
+from ragicamp.retrievers import DenseRetriever, HierarchicalRetriever, HybridRetriever, Retriever
 
 
 def validate_model_config(config: Dict[str, Any]) -> None:
@@ -196,6 +198,8 @@ class ComponentFactory:
             "nq": "natural_questions",
             "triviaqa": "triviaqa",
             "hotpotqa": "hotpotqa",
+            "techqa": "techqa",
+            "pubmedqa": "pubmedqa",
             "natural_questions": "natural_questions",
         }
         full_name = name_map.get(name, name)
@@ -329,10 +333,14 @@ class ComponentFactory:
             dataset_class = TriviaQADataset
         elif dataset_name == "hotpotqa":
             dataset_class = HotpotQADataset
+        elif dataset_name == "techqa":
+            dataset_class = TechQADataset
+        elif dataset_name == "pubmedqa":
+            dataset_class = PubMedQADataset
         else:
             raise ValueError(
                 f"Unknown dataset: {dataset_name}. "
-                f"Available: natural_questions, triviaqa, hotpotqa"
+                f"Available: natural_questions, triviaqa, hotpotqa, techqa, pubmedqa"
             )
 
         # Load dataset
@@ -511,6 +519,12 @@ class ComponentFactory:
         Example:
             >>> config = {"type": "dense", "embedding_model": "all-MiniLM-L6-v2"}
             >>> retriever = ComponentFactory.create_retriever(config)
+
+            >>> config = {"type": "hybrid", "embedding_model": "BAAI/bge-large-en-v1.5"}
+            >>> retriever = ComponentFactory.create_retriever(config)
+
+            >>> config = {"type": "hierarchical", "parent_chunk_size": 1024}
+            >>> retriever = ComponentFactory.create_retriever(config)
         """
         retriever_type = config.get("type", "dense")
         config_copy = dict(config)
@@ -522,7 +536,12 @@ class ComponentFactory:
             from ragicamp.retrievers import SparseRetriever
 
             return SparseRetriever(**config_copy)
+        elif retriever_type == "hybrid":
+            return HybridRetriever(**config_copy)
+        elif retriever_type == "hierarchical":
+            return HierarchicalRetriever(**config_copy)
         else:
             raise ValueError(
-                f"Unknown retriever type: {retriever_type}. " f"Available: dense, sparse"
+                f"Unknown retriever type: {retriever_type}. "
+                f"Available: dense, sparse, hybrid, hierarchical"
             )
