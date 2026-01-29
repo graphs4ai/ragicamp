@@ -22,6 +22,8 @@ from ragicamp.execution.runner import (
     build_specs,
     run_spec,
     run_spec_subprocess,
+    run_generation,
+    run_metrics_only,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "build_specs",
     "run_spec",
     "run_spec_subprocess",
+    "run_generation",
+    "run_metrics_only",
 ]

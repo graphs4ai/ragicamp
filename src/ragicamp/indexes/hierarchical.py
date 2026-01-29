@@ -211,6 +211,75 @@ class HierarchicalIndex(Index):
         faiss.normalize_L2(embedding)
         return embedding[0]
 
+    def batch_encode_queries(self, queries: List[str]) -> np.ndarray:
+        """Encode multiple queries at once (much faster than sequential).
+
+        Args:
+            queries: List of query texts
+
+        Returns:
+            Normalized query embeddings, shape (n_queries, embedding_dim)
+        """
+        embeddings = self.encoder.encode(queries, show_progress_bar=False).astype("float32")
+        faiss.normalize_L2(embeddings)
+        return embeddings
+
+    def batch_search(
+        self, query_embeddings: np.ndarray, top_k: int = 10
+    ) -> List[List[Tuple[int, float, int]]]:
+        """Search children for multiple queries and return parent indices.
+
+        Args:
+            query_embeddings: Query vectors, shape (n_queries, embedding_dim)
+            top_k: Number of parent results per query
+
+        Returns:
+            List of [(parent_idx, score, best_child_idx), ...] for each query
+        """
+        if self.index is None or self.index.ntotal == 0:
+            return [[] for _ in range(len(query_embeddings))]
+
+        # Search more children than needed (multiple may map to same parent)
+        num_children = top_k * 5
+
+        scores_batch, indices_batch = self.index.search(
+            query_embeddings.astype("float32"), num_children
+        )
+
+        all_results = []
+        for q_idx in range(len(query_embeddings)):
+            # Map children to parents and track best scores
+            parent_scores: Dict[str, float] = {}
+            parent_best_child: Dict[str, int] = {}
+
+            for idx, score in zip(indices_batch[q_idx], scores_batch[q_idx]):
+                if idx < 0 or idx >= len(self.child_docs):
+                    continue
+
+                child_doc = self.child_docs[idx]
+                parent_id = self.child_to_parent.get(child_doc.id)
+
+                if parent_id is None:
+                    continue
+
+                # Keep best score for each parent
+                if parent_id not in parent_scores or score > parent_scores[parent_id]:
+                    parent_scores[parent_id] = float(score)
+                    parent_best_child[parent_id] = int(idx)
+
+            # Sort by score and return top-k
+            sorted_parents = sorted(parent_scores.items(), key=lambda x: x[1], reverse=True)
+
+            results = []
+            for parent_id, score in sorted_parents[:top_k]:
+                parent_idx = self.parent_id_to_idx.get(parent_id)
+                if parent_idx is not None:
+                    results.append((parent_idx, score, parent_best_child[parent_id]))
+
+            all_results.append(results)
+
+        return all_results
+
     def get_parent(self, idx: int) -> Optional[Document]:
         """Get parent document by index."""
         if 0 <= idx < len(self.parent_docs):

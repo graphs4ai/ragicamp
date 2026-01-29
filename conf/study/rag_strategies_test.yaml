@@ -158,7 +158,7 @@ output_dir: outputs/rag_strategies_test
 # ============================================================================
 # Execution options
 # ============================================================================
-batch_size: 16
+batch_size: 64
 min_batch_size: 1
 
 options:

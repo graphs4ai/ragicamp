@@ -146,6 +146,65 @@ class HybridRetriever(Retriever):
 
         return results
 
+    def batch_retrieve(
+        self, queries: List[str], top_k: int = 5, **kwargs: Any
+    ) -> List[List[Document]]:
+        """Retrieve documents for multiple queries using batched dense encoding.
+
+        The dense encoding is batched for speed, while BM25 is still sequential
+        (but fast since it's CPU-bound).
+
+        Args:
+            queries: List of query strings
+            top_k: Number of documents to retrieve per query
+
+        Returns:
+            List of document lists, one per query
+        """
+        if self.index is None or len(self.index) == 0:
+            return [[] for _ in queries]
+
+        candidates = top_k * 3
+
+        # Batch encode all queries at once (major speedup)
+        query_embeddings = self.index.batch_encode_queries(queries)
+
+        # Batch search for dense results
+        all_dense_hits = self.index.batch_search(query_embeddings, top_k=candidates)
+
+        # Process each query
+        all_results = []
+        for i, query in enumerate(queries):
+            # Convert dense hits to documents
+            dense_results = []
+            for idx, score in all_dense_hits[i]:
+                doc = self.index.get_document(idx)
+                if doc:
+                    result = Document(
+                        id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score
+                    )
+                    dense_results.append(result)
+
+            # Sparse search (sequential, but fast)
+            sparse_results = self.sparse.retrieve(query, top_k=candidates)
+
+            # Compute RRF scores
+            rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
+
+            # Sort by RRF score and return top-k
+            sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+
+            results = []
+            for doc_id, score in sorted_docs[:top_k]:
+                doc = self._get_doc_by_id(doc_id, dense_results, sparse_results)
+                if doc:
+                    doc.score = score
+                    results.append(doc)
+
+            all_results.append(results)
+
+        return all_results
+
     def _reciprocal_rank_fusion(
         self,
         dense_results: List[Document],

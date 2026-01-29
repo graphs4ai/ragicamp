@@ -107,6 +107,56 @@ class HierarchicalRetriever(Retriever):
 
         return results
 
+    def batch_retrieve(
+        self, queries: List[str], top_k: int = 5, **kwargs: Any
+    ) -> List[List[Document]]:
+        """Retrieve parent chunks for multiple queries using batched encoding.
+
+        This is significantly faster than calling retrieve() for each query:
+        - Batch encodes all queries at once
+        - Single FAISS search call for all queries
+
+        Args:
+            queries: List of query strings
+            top_k: Number of parent documents to retrieve per query
+
+        Returns:
+            List of document lists, one per query
+        """
+        if self.index is None or len(self.index) == 0:
+            return [[] for _ in queries]
+
+        # Batch encode all queries at once (major speedup)
+        query_embeddings = self.index.batch_encode_queries(queries)
+
+        # Batch search (FAISS handles this efficiently)
+        all_hits = self.index.batch_search(query_embeddings, top_k=top_k)
+
+        # Build result documents for each query
+        all_results = []
+        for hits in all_hits:
+            results = []
+            for parent_idx, score, child_idx in hits:
+                parent_doc = self.index.get_parent(parent_idx)
+                child_doc = self.index.get_child(child_idx)
+
+                if parent_doc:
+                    result = Document(
+                        id=parent_doc.id,
+                        text=parent_doc.text,
+                        metadata={
+                            **parent_doc.metadata,
+                            "matched_child": child_doc.id if child_doc else None,
+                            "matched_child_text": child_doc.text[:200] if child_doc else None,
+                        },
+                        score=score,
+                    )
+                    results.append(result)
+
+            all_results.append(results)
+
+        return all_results
+
     @property
     def parent_docs(self) -> List[Document]:
         """Get parent documents (for backward compatibility)."""

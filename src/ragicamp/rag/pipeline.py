@@ -130,12 +130,38 @@ class RAGPipeline:
     def batch_retrieve(self, queries: List[str]) -> List[List["Document"]]:
         """Retrieve documents for multiple queries.
 
+        Optimized for speed when no query transformation is used.
+        Falls back to sequential processing when query transformation
+        is needed (as each query may generate multiple sub-queries).
+
         Args:
             queries: List of user queries
 
         Returns:
             List of document lists, one per query
         """
+        # If no query transformation, use batch retrieval for speed
+        if isinstance(self.query_transformer, PassthroughTransformer):
+            # Direct batch retrieval if supported
+            if hasattr(self.retriever, "batch_retrieve"):
+                all_docs = self.retriever.batch_retrieve(queries, top_k=self.top_k_retrieve)
+
+                # Apply reranking if present
+                if self.reranker is not None:
+                    reranked = []
+                    for query, docs in zip(queries, all_docs):
+                        reranked_docs = self.reranker.rerank(
+                            query=query,
+                            documents=docs,
+                            top_k=self.top_k_final,
+                        )
+                        reranked.append(reranked_docs)
+                    return reranked
+                else:
+                    # Just trim to final top_k
+                    return [docs[: self.top_k_final] for docs in all_docs]
+
+        # Fall back to sequential for query transformation cases
         return [self.retrieve(q) for q in queries]
 
     def get_config(self) -> Dict:

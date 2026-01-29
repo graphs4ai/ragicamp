@@ -75,6 +75,49 @@ class DenseRetriever(Retriever):
 
         return docs
 
+    def batch_retrieve(
+        self, queries: List[str], top_k: int = 5, **kwargs: Any
+    ) -> List[List[Document]]:
+        """Retrieve documents for multiple queries using batched encoding and search.
+
+        This is significantly faster than calling retrieve() for each query:
+        - Batch encodes all queries at once
+        - Single FAISS search call for all queries
+
+        Args:
+            queries: List of query strings
+            top_k: Number of documents to retrieve per query
+
+        Returns:
+            List of document lists, one per query
+        """
+        if self.index is None or len(self.index) == 0:
+            return [[] for _ in queries]
+
+        # Batch encode all queries at once (major speedup)
+        query_embeddings = self.index.batch_encode_queries(queries)
+
+        # Batch search (FAISS handles this efficiently)
+        all_results = self.index.batch_search(query_embeddings, top_k=top_k)
+
+        # Build result documents for each query
+        all_docs = []
+        for results in all_results:
+            docs = []
+            for idx, score in results:
+                doc = self.index.get_document(idx)
+                if doc:
+                    result = Document(
+                        id=doc.id,
+                        text=doc.text,
+                        metadata=doc.metadata.copy(),
+                        score=score,
+                    )
+                    docs.append(result)
+            all_docs.append(docs)
+
+        return all_docs
+
     @property
     def documents(self) -> List[Document]:
         """Get documents from index (for backward compatibility)."""

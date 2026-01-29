@@ -143,6 +143,46 @@ class EmbeddingIndex(Index):
         faiss.normalize_L2(embedding)
         return embedding[0]
 
+    def batch_encode_queries(self, queries: List[str]) -> np.ndarray:
+        """Encode multiple queries at once (much faster than sequential).
+
+        Args:
+            queries: List of query texts
+
+        Returns:
+            Normalized query embeddings, shape (n_queries, embedding_dim)
+        """
+        embeddings = self.encoder.encode(queries, show_progress_bar=False).astype("float32")
+        faiss.normalize_L2(embeddings)
+        return embeddings
+
+    def batch_search(
+        self, query_embeddings: np.ndarray, top_k: int = 10
+    ) -> List[List[Tuple[int, float]]]:
+        """Search the index with multiple queries at once.
+
+        Args:
+            query_embeddings: Query vectors, shape (n_queries, embedding_dim)
+            top_k: Number of results per query
+
+        Returns:
+            List of (document_idx, score) tuples for each query
+        """
+        if self.index is None or self.index.ntotal == 0:
+            return [[] for _ in range(len(query_embeddings))]
+
+        scores, indices = self.index.search(query_embeddings.astype("float32"), top_k)
+
+        all_results = []
+        for i in range(len(query_embeddings)):
+            results = []
+            for idx, score in zip(indices[i], scores[i]):
+                if 0 <= idx < len(self.documents):
+                    results.append((int(idx), float(score)))
+            all_results.append(results)
+
+        return all_results
+
     def get_document(self, idx: int) -> Optional[Document]:
         """Get document by index."""
         if 0 <= idx < len(self.documents):
