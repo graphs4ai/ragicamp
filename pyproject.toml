@@ -30,6 +30,7 @@ dependencies = [
     "bert-score>=0.3.13",
     "bleurt",
     "keras<3",
+    "protobuf>=3.19.0,<4.0.0",  # Pin for TensorFlow 2.x compatibility
     # Experiment tracking and optimization
     "mlflow>=2.8.0",  # Experiment tracking and model registry
     "ragas>=0.1.0",  # RAG-specific evaluation metrics

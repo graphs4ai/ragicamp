@@ -13,13 +13,11 @@ The combination is done using Reciprocal Rank Fusion (RRF) which
 is robust and doesn't require score calibration.
 """
 
-import pickle
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ragicamp.core.logging import get_logger
+from ragicamp.indexes.embedding import EmbeddingIndex
 from ragicamp.retrievers.base import Document, Retriever
-from ragicamp.retrievers.dense import DenseRetriever
 from ragicamp.retrievers.sparse import SparseRetriever
 from ragicamp.utils.artifacts import get_artifact_manager
 
@@ -34,11 +32,14 @@ class HybridRetriever(Retriever):
 
     RRF formula: score(d) = Σ 1/(k + rank(d))
     where k is a constant (typically 60) and rank is 1-indexed.
+
+    This is a thin wrapper around an EmbeddingIndex + BM25.
     """
 
     def __init__(
         self,
         name: str,
+        index: Optional[EmbeddingIndex] = None,
         embedding_model: str = "BAAI/bge-large-en-v1.5",
         alpha: float = 0.5,
         rrf_k: int = 60,
@@ -48,42 +49,55 @@ class HybridRetriever(Retriever):
 
         Args:
             name: Retriever identifier
-            embedding_model: Model for dense embeddings
+            index: Pre-built EmbeddingIndex to use (preferred)
+            embedding_model: Model name (used if building index)
             alpha: Weight for dense vs sparse (0=sparse only, 1=dense only)
-                   Note: When using RRF, alpha is less important
             rrf_k: RRF constant (higher = more weight to lower ranks)
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
 
-        self.embedding_model = embedding_model
+        self.index = index
+        self.embedding_model_name = embedding_model
         self.alpha = alpha
         self.rrf_k = rrf_k
 
-        # Initialize component retrievers
-        self.dense = DenseRetriever(
-            name=f"{name}_dense",
-            embedding_model=embedding_model,
-        )
-        self.sparse = SparseRetriever(name=f"{name}_sparse")
+        # Sparse retriever (BM25) - built on demand
+        self._sparse: Optional[SparseRetriever] = None
 
-        self.documents: List[Document] = []
+    @property
+    def sparse(self) -> SparseRetriever:
+        """Get or create sparse retriever."""
+        if self._sparse is None:
+            self._sparse = SparseRetriever(name=f"{self.name}_sparse")
+            # Index with current documents if available
+            if self.index and len(self.index) > 0:
+                self._sparse.index_documents(self.index.documents)
+        return self._sparse
+
+    @property
+    def documents(self) -> List[Document]:
+        """Get documents from index."""
+        if self.index is None:
+            return []
+        return self.index.documents
 
     def index_documents(self, documents: List[Document]) -> None:
-        """Index documents in both dense and sparse indices.
+        """Build index from documents.
 
-        Args:
-            documents: List of documents to index
+        Note: Prefer building the index separately and passing to __init__.
         """
-        self.documents = documents
+        if self.index is None:
+            self.index = EmbeddingIndex(
+                name=self.name,
+                embedding_model=self.embedding_model_name,
+            )
+        self.index.build(documents)
 
-        logger.info("Indexing %d documents in hybrid retriever", len(documents))
+        # Reset sparse to rebuild
+        self._sparse = None
 
-        # Index in both retrievers
-        self.dense.index_documents(documents)
-        self.sparse.index_documents(documents)
-
-        logger.info("Hybrid indexing complete")
+        logger.info("Hybrid indexing complete: %d documents", len(documents))
 
     def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
         """Retrieve documents using hybrid search with RRF fusion.
@@ -96,15 +110,26 @@ class HybridRetriever(Retriever):
         Returns:
             List of top-k documents ranked by RRF score
         """
-        if len(self.documents) == 0:
+        if self.index is None or len(self.index) == 0:
             return []
 
-        # Retrieve more candidates from each retriever
-        candidates_per_retriever = top_k * 3
+        # Retrieve more candidates from each method
+        candidates = top_k * 3
 
-        # Get results from both retrievers
-        dense_results = self.dense.retrieve(query, top_k=candidates_per_retriever)
-        sparse_results = self.sparse.retrieve(query, top_k=candidates_per_retriever)
+        # Dense search
+        query_embedding = self.index.encode_query(query)
+        dense_hits = self.index.search(query_embedding, top_k=candidates)
+
+        # Convert to documents for RRF
+        dense_results = []
+        for idx, score in dense_hits:
+            doc = self.index.get_document(idx)
+            if doc:
+                result = Document(id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score)
+                dense_results.append(result)
+
+        # Sparse search
+        sparse_results = self.sparse.retrieve(query, top_k=candidates)
 
         # Compute RRF scores
         rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
@@ -114,7 +139,6 @@ class HybridRetriever(Retriever):
 
         results = []
         for doc_id, score in sorted_docs[:top_k]:
-            # Find the original document
             doc = self._get_doc_by_id(doc_id, dense_results, sparse_results)
             if doc:
                 doc.score = score
@@ -127,16 +151,9 @@ class HybridRetriever(Retriever):
         dense_results: List[Document],
         sparse_results: List[Document],
     ) -> Dict[str, float]:
-        """Compute RRF scores for documents from both retrievers.
+        """Compute RRF scores.
 
         RRF formula: score(d) = Σ 1/(k + rank(d))
-
-        Args:
-            dense_results: Results from dense retriever (ranked)
-            sparse_results: Results from sparse retriever (ranked)
-
-        Returns:
-            Dict mapping document ID to RRF score
         """
         rrf_scores: Dict[str, float] = {}
 
@@ -158,70 +175,55 @@ class HybridRetriever(Retriever):
         dense_results: List[Document],
         sparse_results: List[Document],
     ) -> Optional[Document]:
-        """Find a document by ID from the result lists.
-
-        Args:
-            doc_id: Document ID to find
-            dense_results: Dense retrieval results
-            sparse_results: Sparse retrieval results
-
-        Returns:
-            Document if found, None otherwise
-        """
-        # Check dense results first
+        """Find a document by ID."""
         for doc in dense_results:
             if doc.id == doc_id:
                 return doc
-
-        # Check sparse results
         for doc in sparse_results:
             if doc.id == doc_id:
                 return doc
-
         return None
 
     def save(self, artifact_name: str) -> str:
-        """Save the hybrid retriever index.
+        """Save retriever config (index should be saved separately).
 
         Args:
             artifact_name: Name for this retriever artifact
 
         Returns:
-            Path where the artifact was saved
+            Path where saved
         """
         manager = get_artifact_manager()
         artifact_path = manager.get_retriever_path(artifact_name)
 
-        # Save component retrievers
-        self.dense.save(f"{artifact_name}_dense")
-        # Sparse retriever doesn't persist well, save documents instead
-
-        # Save documents and config
-        with open(artifact_path / "documents.pkl", "wb") as f:
-            pickle.dump(self.documents, f)
-
         config = {
             "name": self.name,
             "type": "hybrid",
-            "embedding_model": self.embedding_model,
+            "embedding_index": self.index.name if self.index else None,
+            "embedding_model": self.embedding_model_name,
             "alpha": self.alpha,
             "rrf_k": self.rrf_k,
-            "num_documents": len(self.documents),
+            "num_documents": len(self.index) if self.index else 0,
         }
         manager.save_json(config, artifact_path / "config.json")
 
-        logger.info("Saved hybrid retriever to: %s", artifact_path)
+        logger.info("Saved hybrid retriever config to: %s", artifact_path)
         return str(artifact_path)
 
     @classmethod
-    def load(cls, artifact_name: str) -> "HybridRetriever":
-        """Load a previously saved hybrid retriever.
+    def load(
+        cls,
+        artifact_name: str,
+        index: Optional[EmbeddingIndex] = None,
+    ) -> "HybridRetriever":
+        """Load a hybrid retriever.
 
         Args:
-            artifact_name: Name of the retriever artifact to load
+            artifact_name: Name of the retriever artifact
+            index: Optional pre-loaded index
 
         Returns:
-            Loaded HybridRetriever instance
+            Loaded HybridRetriever
         """
         manager = get_artifact_manager()
         artifact_path = manager.get_retriever_path(artifact_name)
@@ -229,20 +231,33 @@ class HybridRetriever(Retriever):
         # Load config
         config = manager.load_json(artifact_path / "config.json")
 
-        # Create retriever
+        # Load index if not provided
+        if index is None:
+            index_name = config.get("embedding_index")
+            if index_name:
+                logger.info("Loading index: %s", index_name)
+                index = EmbeddingIndex.load(index_name)
+            else:
+                # Legacy format - need to rebuild from documents.pkl
+                import pickle
+                docs_path = artifact_path / "documents.pkl"
+                if docs_path.exists():
+                    logger.info("Loading legacy hybrid retriever")
+                    with open(docs_path, "rb") as f:
+                        documents = pickle.load(f)
+                    index = EmbeddingIndex(
+                        name=artifact_name,
+                        embedding_model=config.get("embedding_model", "BAAI/bge-large-en-v1.5"),
+                    )
+                    index.build(documents)
+
         retriever = cls(
             name=config["name"],
-            embedding_model=config["embedding_model"],
-            alpha=config["alpha"],
+            index=index,
+            embedding_model=config.get("embedding_model", "BAAI/bge-large-en-v1.5"),
+            alpha=config.get("alpha", 0.5),
             rrf_k=config.get("rrf_k", 60),
         )
 
-        # Load documents
-        with open(artifact_path / "documents.pkl", "rb") as f:
-            documents = pickle.load(f)
-
-        # Reindex (sparse index can't be persisted easily)
-        retriever.index_documents(documents)
-
-        logger.info("Loaded hybrid retriever: %s (%d docs)", artifact_name, len(documents))
+        logger.info("Loaded hybrid retriever: %s (%d docs)", artifact_name, len(index) if index else 0)
         return retriever

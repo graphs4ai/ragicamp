@@ -1,4 +1,12 @@
-"""Document retrieval systems."""
+"""Document retrieval systems.
+
+Architecture:
+- Indexes (ragicamp.indexes): Store documents + embeddings (expensive, reusable)
+- Retrievers (this module): Search strategies (cheap, configurable)
+
+Retrievers are thin wrappers around Indexes. Multiple retrievers can share
+the same index with different search parameters.
+"""
 
 from ragicamp.retrievers.base import Document, Retriever
 from ragicamp.retrievers.dense import DenseRetriever
