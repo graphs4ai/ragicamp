@@ -22,7 +22,7 @@ num_questions: 100
 # Test on 2 diverse datasets
 datasets:
   - nq          # Natural Questions (Wikipedia-based, open-domain)
-  - hotpotqa    # Multi-hop reasoning
+  #- hotpotqa    # Multi-hop reasoning
 
 # ============================================================================
 # SLM Models - Use ONE model to reduce experiment matrix
@@ -34,7 +34,7 @@ models: &slm_models
 
 # Uncomment for full model comparison after finding best strategies:
 # models_full: &slm_models_full
-#   - hf:google/gemma-2b-it
+  - hf:google/gemma-2b-it
 #   - hf:Qwen/Qwen2.5-1.5B-Instruct
 #   - hf:meta-llama/Llama-3.2-3B-Instruct
 
@@ -128,10 +128,8 @@ rag:
     - 3   # Minimal context (less noise)
     - 5   # Standard
     - 10  # More context (test if SLMs can handle it)
-    - 15
 
   prompts:
-    - default
     - concise
     - fewshot_3
 
