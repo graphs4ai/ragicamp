@@ -18,11 +18,8 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 # Reuse existing abstractions - NO DUPLICATION
-from ragicamp.cli.study import (
-    ExpSpec,
-    create_judge_model,
-    run_spec,
-)
+from ragicamp.execution.runner import ExpSpec, run_spec
+from ragicamp.cli.study import create_judge_model
 
 
 def main():
@@ -56,6 +53,9 @@ def main():
         quant=spec_dict.get("quant", "4bit"),
         retriever=spec_dict.get("retriever"),
         top_k=spec_dict.get("top_k", 5),
+        query_transform=spec_dict.get("query_transform"),
+        reranker=spec_dict.get("reranker"),
+        reranker_model=spec_dict.get("reranker_model"),
         batch_size=spec_dict.get("batch_size", 8),
         min_batch_size=spec_dict.get("min_batch_size", 1),
     )

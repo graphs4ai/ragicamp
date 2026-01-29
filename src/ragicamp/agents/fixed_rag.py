@@ -92,7 +92,7 @@ class FixedRAGAgent(RAGAgent):
             self.prompt_builder = prompt_builder
         else:
             from ragicamp.utils.prompts import PromptConfig
-            self.prompt_builder = PromptBuilder(PromptConfig(system_prompt=system_prompt))
+            self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
 
         # Legacy template support (for backwards compat with study.py)
         self._legacy_template = context_template

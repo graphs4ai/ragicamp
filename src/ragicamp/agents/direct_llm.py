@@ -43,9 +43,9 @@ class DirectLLMAgent(RAGAgent):
         if prompt_builder is not None:
             self.prompt_builder = prompt_builder
         else:
-            # Legacy: create basic builder
+            # Legacy: create basic builder using style field
             from ragicamp.utils.prompts import PromptConfig
-            self.prompt_builder = PromptBuilder(PromptConfig(system_prompt=system_prompt))
+            self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
 
         # Legacy template support (for backwards compat with study.py)
         self._legacy_template = prompt_template
@@ -54,7 +54,8 @@ class DirectLLMAgent(RAGAgent):
         """Build prompt for a query."""
         # If legacy template provided, use it directly
         if self._legacy_template:
-            return f"{self.prompt_builder.config.system_prompt}\n\n{self._legacy_template.format(question=query)}"
+            style = self.prompt_builder.config.style or ""
+            return f"{style}\n\n{self._legacy_template.format(question=query)}"
 
         # Use prompt builder
         return self.prompt_builder.build_direct(query)

@@ -1,4 +1,4 @@
-"""Configuration schemas for experiments."""
+"""Configuration schemas and validation for experiments."""
 
 from ragicamp.config.schemas import (
     AgentConfig,
@@ -11,8 +11,18 @@ from ragicamp.config.schemas import (
     RetrieverConfig,
     TrainingConfig,
 )
+from ragicamp.config.validation import (
+    ConfigError,
+    validate_config,
+    validate_dataset,
+    validate_model_spec,
+    VALID_DATASETS,
+    VALID_PROVIDERS,
+    VALID_QUANTIZATIONS,
+)
 
 __all__ = [
+    # Schemas
     "ExperimentConfig",
     "ModelConfig",
     "DatasetConfig",
@@ -22,4 +32,12 @@ __all__ = [
     "EvaluationConfig",
     "OutputConfig",
     "TrainingConfig",
+    # Validation
+    "ConfigError",
+    "validate_config",
+    "validate_dataset",
+    "validate_model_spec",
+    "VALID_DATASETS",
+    "VALID_PROVIDERS",
+    "VALID_QUANTIZATIONS",
 ]

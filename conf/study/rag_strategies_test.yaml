@@ -1,22 +1,22 @@
-# RAG Strategies Test
-# Fast iteration testing for new RAG capabilities
-#
+# RAG Strategies Test - Focused Ablation Study
+# 
 # Run: uv run ragicamp run conf/study/rag_strategies_test.yaml
 #
-# Purpose: Test different RAG strategies with minimal compute:
+# Purpose: Systematic ablation study of RAG components:
 #   - Retriever types: Dense, Hybrid, Hierarchical
 #   - Query transforms: None, HyDE, Multi-query  
 #   - Reranking: With and without cross-encoder
-#   - Chunking: Recursive, Semantic
+#   - Top-k variations: 3, 5, 10
 #
-# Uses SLMs (1-3B) for fast iteration and Wikipedia corpus for retrieval
+# Design principle: Fix variables, vary one at a time for clear insights.
+# Focus on BGE (SOTA) for retrievers, test multiple top_k and advanced features.
 #
 # Hardware: Any GPU with 8GB+ VRAM (SLMs fit easily)
 
 name: rag_strategies_test
-description: "Test RAG strategies (indexers, retrievers, chunking) with SLMs"
+description: "Systematic ablation study of RAG strategies with SLMs"
 
-# Quick iteration: 100 examples per dataset
+# 100 examples for fast iteration
 num_questions: 100
 
 # Test on 2 diverse datasets
@@ -25,12 +25,18 @@ datasets:
   - hotpotqa    # Multi-hop reasoning
 
 # ============================================================================
-# SLM Models (Small, fast, fits on any GPU)
+# SLM Models - Use ONE model to reduce experiment matrix
 # ============================================================================
+# NOTE: For initial testing, use just Llama 3.2 3B (best SLM).
+# Expand to other models after validating best RAG strategies.
 models: &slm_models
-  - hf:google/gemma-2b-it           # Gemma 2B - fast baseline
-  - hf:Qwen/Qwen2.5-1.5B-Instruct   # Qwen 1.5B - very fast
-  - hf:meta-llama/Llama-3.2-3B-Instruct  # Llama 3.2 3B - best SLM
+  - hf:meta-llama/Llama-3.2-3B-Instruct  # Best SLM
+
+# Uncomment for full model comparison after finding best strategies:
+# models_full: &slm_models_full
+#   - hf:google/gemma-2b-it
+#   - hf:Qwen/Qwen2.5-1.5B-Instruct
+#   - hf:meta-llama/Llama-3.2-3B-Instruct
 
 # ============================================================================
 # DirectLLM Baseline (for comparison)
@@ -41,10 +47,10 @@ direct:
   prompts:
     - concise
   quantization:
-    - none  # SLMs fit without quantization
+    - none
 
 # ============================================================================
-# RAG Experiments - Testing all new strategies
+# RAG Experiments - Systematic Ablation
 # ============================================================================
 rag:
   enabled: true
@@ -55,67 +61,44 @@ rag:
   # --------------------------------------------------------------------------
   corpus:
     source: wikimedia/wikipedia
-    version: 20231101.en  # Full English Wikipedia (~6M articles)
-    max_docs: 150000      # Larger subset for better coverage
+    version: 20231101.en
+    max_docs: 150000
 
   # --------------------------------------------------------------------------
-  # Retriever Configurations - Test all types
+  # Retriever Configurations
+  # 
+  # Strategy: Focus on BGE (SOTA), test retrieval variations
   # --------------------------------------------------------------------------
   retrievers:
-    # --- Dense Retrievers (SOTA embedding models) ---
+    # --- Core retriever: Dense BGE (baseline) ---
     - type: dense
       name: dense_bge_large
       embedding_model: BAAI/bge-large-en-v1.5
       chunk_size: 512
       chunk_overlap: 50
 
-    - type: dense
-      name: dense_e5_large
-      embedding_model: intfloat/e5-large-v2
-      chunk_size: 512
-      chunk_overlap: 50
-
-    - type: dense
-      name: dense_gte_large
-      embedding_model: thenlper/gte-large
-      chunk_size: 512
-      chunk_overlap: 50
-
-    # --- Hybrid Retriever (BM25 + Dense) ---
+    # --- Hybrid: BM25 + Dense (tests keyword matching value) ---
     - type: hybrid
       name: hybrid_bge
       embedding_model: BAAI/bge-large-en-v1.5
-      alpha: 0.5  # Equal weight BM25 and dense
+      alpha: 0.5  # Equal weight
       chunk_size: 512
       chunk_overlap: 50
 
-    - type: hybrid
-      name: hybrid_bge_dense_heavy
-      embedding_model: BAAI/bge-large-en-v1.5
-      alpha: 0.7  # More weight on dense
-      chunk_size: 512
-      chunk_overlap: 50
-
-    # --- Hierarchical Retriever (parent-child chunks) ---
-    # Using larger chunks to reduce memory usage while maintaining quality
-    - type: hierarchical
-      name: hierarchical_bge_2048_512
-      embedding_model: BAAI/bge-large-en-v1.5
-      parent_chunk_size: 2048
-      child_chunk_size: 512
-      parent_overlap: 200
-      child_overlap: 100
-
+    # --- Hierarchical: Parent-child chunks (tests context vs precision) ---
     - type: hierarchical
       name: hierarchical_bge_3072_768
       embedding_model: BAAI/bge-large-en-v1.5
-      parent_chunk_size: 3072
-      child_chunk_size: 768
+      parent_chunk_size: 3072  # Return large context
+      child_chunk_size: 768    # Search precise chunks
       parent_overlap: 300
       child_overlap: 150
 
   # --------------------------------------------------------------------------
   # Query Transformation Strategies
+  # 
+  # NOTE: These add latency (LLM call before retrieval). Test to see if
+  # the retrieval improvement justifies the cost.
   # --------------------------------------------------------------------------
   query_transform:
     - none        # Baseline: no transformation
@@ -123,54 +106,51 @@ rag:
     - multiquery  # Multi-query: LLM rewrites query 3 ways
 
   # --------------------------------------------------------------------------
-  # Reranking Configurations
+  # Reranking - Tests two-stage retrieval
   # --------------------------------------------------------------------------
   reranker:
-    # Test with and without reranking
     configs:
       - enabled: false
         name: no_rerank
       - enabled: true
         name: rerank_bge
-        model: bge  # BAAI/bge-reranker-large
+        model: bge  # BAAI/bge-reranker-large (best quality)
       - enabled: true
         name: rerank_ms_marco
-        model: ms-marco  # cross-encoder/ms-marco-MiniLM-L-6-v2
+        model: ms-marco  # cross-encoder/ms-marco-MiniLM-L-6-v2 (faster)
 
   # --------------------------------------------------------------------------
-  # Other RAG parameters
+  # Top-k Values - Key ablation parameter
+  # 
+  # More context = more info but also more noise for the LLM
   # --------------------------------------------------------------------------
   top_k_values:
-    - 3
-    - 5
+    - 3   # Minimal context (less noise)
+    - 5   # Standard
+    - 10  # More context (test if SLMs can handle it)
+    - 15
 
   prompts:
+    - default
     - concise
+    - fewshot_3
 
   quantization:
-    - none  # SLMs don't need quantization
+    - none
 
 # ============================================================================
 # Metrics
 # ============================================================================
 metrics:
-  # Core metrics (fast)
   - f1
   - exact_match
-  
-  # Semantic metrics
   - bertscore
-
-  # LLM-based evaluation
   - llm_judge
-
-  # Skip slow metrics for fast iteration
-  # - bleurt
 
 # LLM Judge configuration
 llm_judge:
   model: openai:gpt-4o-mini
-  judgment_type: binary  # binary or ternary
+  judgment_type: binary
 
 # ============================================================================
 # Output
@@ -180,13 +160,11 @@ output_dir: outputs/rag_strategies_test
 # ============================================================================
 # Execution options
 # ============================================================================
-batch_size: 16    # Smaller batch for SLMs
+batch_size: 16
 min_batch_size: 1
 
 options:
   save_intermediate: true
   skip_existing: true
-  
-  # RAG-specific options
-  build_index_if_missing: true  # Auto-build retriever indices
-  cache_embeddings: true        # Cache document embeddings
+  build_index_if_missing: true
+  cache_embeddings: true

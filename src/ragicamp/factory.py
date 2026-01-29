@@ -545,3 +545,88 @@ class ComponentFactory:
                 f"Unknown retriever type: {retriever_type}. "
                 f"Available: dense, sparse, hybrid, hierarchical"
             )
+
+
+# =============================================================================
+# Convenience functions for loading pre-built components
+# =============================================================================
+
+
+def load_retriever(retriever_name: str) -> Retriever:
+    """Load a retriever by name, automatically detecting the type.
+
+    Args:
+        retriever_name: Name of the retriever to load
+
+    Returns:
+        Loaded retriever instance
+    """
+    from ragicamp.utils.artifacts import get_artifact_manager
+
+    manager = get_artifact_manager()
+    retriever_path = manager.get_retriever_path(retriever_name)
+    config_path = retriever_path / "config.json"
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Retriever config not found: {config_path}")
+
+    config = manager.load_json(config_path)
+    retriever_type = config.get("type", "dense")
+
+    if retriever_type == "hierarchical":
+        return HierarchicalRetriever.load(retriever_name)
+    elif retriever_type == "hybrid":
+        return HybridRetriever.load(retriever_name)
+    else:
+        return DenseRetriever.load(retriever_name)
+
+
+def create_query_transformer(transform_type: str, model: LanguageModel):
+    """Create a query transformer.
+
+    Args:
+        transform_type: Type of transformer (hyde, multiquery)
+        model: Language model to use for transformation
+
+    Returns:
+        QueryTransformer instance or None
+    """
+    if not transform_type or transform_type == "none":
+        return None
+
+    if transform_type == "hyde":
+        from ragicamp.rag.query_transform.hyde import HyDETransformer
+
+        return HyDETransformer(model)
+    elif transform_type == "multiquery":
+        from ragicamp.rag.query_transform.multiquery import MultiQueryTransformer
+
+        return MultiQueryTransformer(model, num_queries=3)
+    else:
+        logger.warning("Unknown query transform type: %s", transform_type)
+        return None
+
+
+def create_reranker(reranker_model: str):
+    """Create a reranker.
+
+    Args:
+        reranker_model: Reranker model name (bge, ms-marco)
+
+    Returns:
+        Reranker instance or None
+    """
+    if not reranker_model:
+        return None
+
+    from ragicamp.rag.rerankers.cross_encoder import CrossEncoderReranker
+
+    # Map short names to full model names
+    model_map = {
+        "bge": "BAAI/bge-reranker-large",
+        "ms-marco": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "ms-marco-large": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+    }
+
+    full_model_name = model_map.get(reranker_model, reranker_model)
+    return CrossEncoderReranker(model_name=full_model_name)
