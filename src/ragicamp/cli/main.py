@@ -8,6 +8,18 @@ Commands:
     evaluate  Compute metrics on predictions
 """
 
+# ============================================================================
+# CRITICAL: Configure TensorFlow BEFORE any library imports!
+# TensorFlow is transitively imported by transformers/sentence-transformers.
+# By default, TF allocates ALL GPU memory on import, causing OOM.
+# ============================================================================
+import os
+
+if "TF_FORCE_GPU_ALLOW_GROWTH" not in os.environ:
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 import argparse
 import json
 import sys
@@ -136,18 +148,6 @@ def cmd_compare(args: argparse.Namespace) -> int:
     for i, r in enumerate(best_by(results, metric=args.metric, n=args.top), 1):
         val = getattr(r, args.metric, 0)
         print(f"  {i}. {r.name[:50]} = {val:.4f}")
-
-    # MLflow
-    if args.mlflow:
-        try:
-            from ragicamp.analysis import MLflowTracker
-
-            exp_name = args.mlflow_experiment or args.output_dir.name
-            tracker = MLflowTracker(exp_name)
-            logged = tracker.backfill_from_results(results, skip_existing=True)
-            print(f"\n✓ Logged {logged} experiments to MLflow ({exp_name})")
-        except ImportError:
-            print("\n⚠️  MLflow not installed")
 
     return 0
 
@@ -368,7 +368,8 @@ def create_parser() -> argparse.ArgumentParser:
         prog="ragicamp",
         description="RAGiCamp - RAG Experimentation Framework",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.3.0")
+    from ragicamp import __version__
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -412,8 +413,6 @@ def create_parser() -> argparse.ArgumentParser:
         metavar=("ROWS", "COLS"),
         help="Create pivot table",
     )
-    compare_parser.add_argument("--mlflow", action="store_true", help="Log to MLflow")
-    compare_parser.add_argument("--mlflow-experiment", help="MLflow experiment name")
     compare_parser.set_defaults(func=cmd_compare)
 
     # Evaluate command

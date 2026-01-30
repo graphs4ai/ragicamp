@@ -33,7 +33,14 @@ from ragicamp.agents.base import RAGAgent
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets.base import QADataset
 from ragicamp.execution import ResilientExecutor
-from ragicamp.experiment_state import (
+from ragicamp.execution.phases import (
+    ExecutionContext,
+    GenerationHandler,
+    InitHandler,
+    MetricsHandler,
+    PhaseHandler,
+)
+from ragicamp.state import (
     ExperimentHealth,
     ExperimentPhase,
     ExperimentState,
@@ -46,6 +53,16 @@ from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class _MinimalSpec:
+    """Minimal spec adapter for use with phase handlers.
+    
+    The Experiment class creates this to pass to handlers that
+    expect an ExperimentSpec-like object.
+    """
+    name: str
 
 
 class _MetricsIncompleteError(Exception):
@@ -167,6 +184,9 @@ class Experiment:
     _min_batch_size: int = field(default=1, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
+    
+    # Phase handlers (lazy initialized)
+    _handlers: Optional[Dict[ExperimentPhase, PhaseHandler]] = field(default=None, repr=False)
 
     # =========================================================================
     # Public API
@@ -323,6 +343,30 @@ class Experiment:
     # Phase Implementations
     # =========================================================================
 
+    def _get_handlers(self) -> Dict[ExperimentPhase, PhaseHandler]:
+        """Get or create phase handlers."""
+        if self._handlers is None:
+            self._handlers = {
+                ExperimentPhase.INIT: InitHandler(),
+                ExperimentPhase.GENERATING: GenerationHandler(),
+                ExperimentPhase.COMPUTING_METRICS: MetricsHandler(),
+            }
+        return self._handlers
+
+    def _create_context(self) -> ExecutionContext:
+        """Create execution context for phase handlers."""
+        return ExecutionContext(
+            output_path=self.output_path,
+            agent=self.agent,
+            dataset=self.dataset,
+            metrics=self.metrics,
+            callbacks=self._callbacks,
+            batch_size=self._batch_size,
+            min_batch_size=self._min_batch_size,
+            checkpoint_every=self._checkpoint_every,
+            kwargs=getattr(self, "_kwargs", {}),
+        )
+
     def _run_phase(self, phase: ExperimentPhase) -> None:
         """Execute a single phase."""
         if self._callbacks.on_phase_start:
@@ -331,14 +375,24 @@ class Experiment:
         self._state.advance_to(phase)
         self._state.save(self.state_path)
 
-        if phase == ExperimentPhase.INIT:
-            self._phase_init()
-        elif phase == ExperimentPhase.GENERATING:
-            self._phase_generate()
+        # Use handlers for supported phases
+        handlers = self._get_handlers()
+        if phase in handlers:
+            spec = _MinimalSpec(name=self.name)
+            context = self._create_context()
+            self._state = handlers[phase].execute(spec, self._state, context)
+            
+            # Post-handler validation for COMPUTING_METRICS
+            if phase == ExperimentPhase.COMPUTING_METRICS:
+                missing = set(self._state.metrics_requested) - set(self._state.metrics_computed)
+                if missing:
+                    logger.warning(
+                        "Some metrics failed to compute: %s. Experiment will not be marked complete.",
+                        list(missing),
+                    )
+                    raise _MetricsIncompleteError(list(missing))
         elif phase == ExperimentPhase.GENERATED:
             self._phase_generated()
-        elif phase == ExperimentPhase.COMPUTING_METRICS:
-            self._phase_compute_metrics()
         elif phase == ExperimentPhase.COMPLETE:
             self._phase_complete()
 
@@ -347,210 +401,10 @@ class Experiment:
         if self._callbacks.on_phase_end:
             self._callbacks.on_phase_end(phase)
 
-    def _phase_init(self) -> None:
-        """Phase 1: Initialize experiment - save metadata, export questions."""
-        logger.info("Phase: INIT - exporting questions and metadata")
-
-        # Export questions
-        examples = list(self.dataset)
-        questions_data = {
-            "experiment": self.name,
-            "dataset": self.dataset.name,
-            "count": len(examples),
-            "questions": [
-                {"idx": i, "question": ex.question, "expected": ex.answers}
-                for i, ex in enumerate(examples)
-            ],
-        }
-        with open(self.questions_path, "w") as f:
-            json.dump(questions_data, f, indent=2)
-
-        # Save metadata
-        metadata = {
-            "name": self.name,
-            "agent": self.agent.name,
-            "dataset": self.dataset.name,
-            "metrics": [m.name for m in self.metrics],
-            "started_at": self._state.started_at,
-        }
-        with open(self.metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        # Update state
-        self._state.total_questions = len(examples)
-        logger.info("Exported %d questions", len(examples))
-
-    def _phase_generate(self) -> None:
-        """Phase 2: Generate predictions using ResilientExecutor."""
-        logger.info("Phase: GENERATING - generating predictions")
-
-        # Load questions
-        with open(self.questions_path) as f:
-            q_data = json.load(f)
-        questions = q_data["questions"]
-
-        # Load existing predictions if resuming
-        predictions_data = {"experiment": self.name, "predictions": []}
-        completed_indices = set()
-
-        if self.predictions_path.exists():
-            with open(self.predictions_path) as f:
-                predictions_data = json.load(f)
-            completed_indices = {
-                p.get("idx", i) for i, p in enumerate(predictions_data["predictions"])
-            }
-            logger.info(
-                "Resuming: %d/%d predictions complete", len(completed_indices), len(questions)
-            )
-
-        # Find pending questions - format: (idx, question, expected_answers)
-        pending = [
-            (q["idx"], q["question"], q["expected"])
-            for q in questions
-            if q["idx"] not in completed_indices
-        ]
-
-        if not pending:
-            logger.info("All predictions already complete")
-            return
-
-        logger.info("Generating %d predictions...", len(pending))
-
-        # Create executor with auto batch size reduction
-        executor = ResilientExecutor(
-            agent=self.agent,
-            batch_size=self._batch_size,
-            min_batch_size=self._min_batch_size,
-        )
-
-        # Checkpoint callback
-        def on_checkpoint(results: List[Dict]) -> None:
-            # Convert executor results to predictions format
-            for r in results:
-                if r["idx"] not in completed_indices:
-                    pred_item = {
-                        "idx": r["idx"],
-                        "question": r["query"],
-                        "prediction": r["prediction"],
-                        "expected": r["expected"],
-                        "prompt": r.get("prompt"),
-                        "metrics": {},
-                    }
-                    # Include retrieved docs for RAG experiments
-                    if "retrieved_docs" in r:
-                        pred_item["retrieved_docs"] = r["retrieved_docs"]
-                    predictions_data["predictions"].append(pred_item)
-                    completed_indices.add(r["idx"])
-            self._state.predictions_complete = len(predictions_data["predictions"])
-            self._save_predictions(predictions_data)
-            self._state.save(self.state_path)
-
-        # Execute with resilient batching
-        kwargs = getattr(self, "_kwargs", {})
-        results = executor.execute(
-            queries=pending,
-            progress=True,
-            checkpoint_every=self._checkpoint_every,
-            checkpoint_callback=on_checkpoint if self._checkpoint_every else None,
-            **kwargs,
-        )
-
-        # Add results to predictions (if not already added via checkpoint)
-        for r in results:
-            if r["idx"] not in completed_indices:
-                pred_item = {
-                    "idx": r["idx"],
-                    "question": r["query"],
-                    "prediction": r["prediction"],
-                    "expected": r["expected"],
-                    "prompt": r.get("prompt"),
-                    "metrics": {},
-                }
-                # Include retrieved context for RAG experiments
-                if "retrieved_context" in r:
-                    pred_item["retrieved_context"] = r["retrieved_context"]
-                predictions_data["predictions"].append(pred_item)
-
-        # Final save
-        self._state.predictions_complete = len(predictions_data["predictions"])
-        self._save_predictions(predictions_data)
-        logger.info("Generated %d predictions", len(predictions_data["predictions"]))
-
     def _phase_generated(self) -> None:
         """Phase 3: Mark generation as complete, unload model."""
         logger.info("Phase: GENERATED - cleaning up model")
         self._unload_model()
-
-    def _phase_compute_metrics(self) -> None:
-        """Phase 4: Compute all metrics on predictions."""
-        logger.info("Phase: COMPUTING_METRICS")
-
-        # Load predictions
-        with open(self.predictions_path) as f:
-            data = json.load(f)
-
-        preds = data["predictions"]
-        predictions = [p["prediction"] for p in preds]
-        references = [p["expected"] for p in preds]
-        questions = [p["question"] for p in preds]
-
-        # Compute metrics
-        aggregate_results = {}
-        per_item_metrics: Dict[str, List[float]] = {}
-
-        for metric in self.metrics:
-            if metric.name in self._state.metrics_computed:
-                logger.info("Skipping %s (already computed)", metric.name)
-                continue
-
-            try:
-                logger.info("Computing %s...", metric.name)
-                if metric.name in ("llm_judge", "llm_judge_qa"):
-                    scores = metric.compute(
-                        predictions=predictions, references=references, questions=questions
-                    )
-                else:
-                    scores = metric.compute(predictions=predictions, references=references)
-                aggregate_results.update(scores)
-
-                # Get per-item scores
-                if hasattr(metric, "get_per_item_scores"):
-                    per_item = metric.get_per_item_scores()
-                    if per_item:
-                        per_item_metrics[metric.name] = per_item
-
-                self._state.metrics_computed.append(metric.name)
-                self._state.save(self.state_path)
-
-            except Exception as e:
-                logger.warning("%s failed: %s", metric.name, e)
-
-        # Update predictions with per-item metrics
-        for i, pred in enumerate(preds):
-            if "metrics" not in pred:
-                pred["metrics"] = {}
-            for metric_name, scores in per_item_metrics.items():
-                if i < len(scores):
-                    pred["metrics"][metric_name] = scores[i]
-
-        # Merge with existing aggregate metrics
-        existing_agg = data.get("aggregate_metrics", {})
-        existing_agg.update(aggregate_results)
-        data["aggregate_metrics"] = existing_agg
-        data["predictions"] = preds
-
-        self._save_predictions(data)
-        logger.info("Computed metrics: %s", list(aggregate_results.keys()))
-
-        # Check if all requested metrics were computed
-        missing = set(self._state.metrics_requested) - set(self._state.metrics_computed)
-        if missing:
-            logger.warning(
-                "Some metrics failed to compute: %s. Experiment will not be marked complete.",
-                list(missing),
-            )
-            # Stay in COMPUTING_METRICS phase - don't proceed to COMPLETE
-            raise _MetricsIncompleteError(list(missing))
 
     def _phase_complete(self) -> None:
         """Phase 5: Create final summary and results."""

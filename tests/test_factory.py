@@ -14,7 +14,7 @@ from ragicamp.models.base import LanguageModel
 class TestModelFactory:
     """Test model creation via factory."""
 
-    @patch("ragicamp.factory.HuggingFaceModel")
+    @patch("ragicamp.factory.models.HuggingFaceModel")
     def test_create_huggingface_model(self, mock_hf_model):
         """Test creating HuggingFace model."""
         config = {
@@ -33,7 +33,7 @@ class TestModelFactory:
         assert call_kwargs["device"] == "cuda"
         assert call_kwargs["load_in_8bit"] is True
 
-    @patch("ragicamp.factory.OpenAIModel")
+    @patch("ragicamp.factory.models.OpenAIModel")
     def test_create_openai_model(self, mock_openai_model):
         """Test creating OpenAI model."""
         config = {"type": "openai", "model_name": "gpt-4o"}
@@ -63,7 +63,7 @@ class TestModelFactory:
             "device": "cuda",  # Should be kept
         }
 
-        with patch("ragicamp.factory.HuggingFaceModel") as mock_hf:
+        with patch("ragicamp.factory.models.HuggingFaceModel") as mock_hf:
             ComponentFactory.create_model(config)
 
             call_kwargs = mock_hf.call_args[1]
@@ -123,7 +123,7 @@ class TestAgentFactory:
 class TestDatasetFactory:
     """Test dataset creation via factory."""
 
-    @patch("ragicamp.factory.NaturalQuestionsDataset")
+    @patch("ragicamp.factory.datasets.NaturalQuestionsDataset")
     def test_create_natural_questions_dataset(self, mock_nq):
         """Test creating Natural Questions dataset."""
         # Create a MagicMock that supports len()
@@ -220,7 +220,7 @@ class TestMetricsFactory:
 class TestRetrieverFactory:
     """Test retriever creation via factory."""
 
-    @patch("ragicamp.factory.DenseRetriever")
+    @patch("ragicamp.factory.retrievers.DenseRetriever")
     def test_create_dense_retriever(self, mock_dense):
         """Test creating dense retriever."""
         config = {"type": "dense", "embedding_model": "all-MiniLM-L6-v2", "index_type": "flat"}
@@ -249,7 +249,7 @@ class TestFactoryConfigHandling:
         """Test that factory removes 'type' field before passing to constructor."""
         config = {"type": "huggingface", "model_name": "test-model", "device": "cpu"}
 
-        with patch("ragicamp.factory.HuggingFaceModel") as mock_hf:
+        with patch("ragicamp.factory.models.HuggingFaceModel") as mock_hf:
             ComponentFactory.create_model(config)
 
             call_kwargs = mock_hf.call_args[1]

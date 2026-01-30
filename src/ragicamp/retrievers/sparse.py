@@ -57,3 +57,50 @@ class SparseRetriever(Retriever):
             results.append(doc)
 
         return results
+
+    def batch_retrieve(
+        self, queries: List[str], top_k: int = 5, **kwargs: Any
+    ) -> List[List[Document]]:
+        """Retrieve documents for multiple queries using batched TF-IDF.
+
+        Vectorizes all queries at once for efficiency.
+
+        Args:
+            queries: List of query strings
+            top_k: Number of documents to retrieve per query
+
+        Returns:
+            List of document lists, one per query
+        """
+        import numpy as np
+
+        if len(self.documents) == 0 or self.doc_vectors is None:
+            return [[] for _ in queries]
+
+        # Batch vectorize all queries at once
+        query_vectors = self.vectorizer.transform(queries)
+
+        # Compute all similarities at once (queries x documents matrix)
+        all_similarities = cosine_similarity(query_vectors, self.doc_vectors)
+
+        # Get top-k for each query
+        all_results = []
+        for i, similarities in enumerate(all_similarities):
+            top_indices = np.argsort(similarities)[-top_k:][::-1]
+
+            results = []
+            for idx in top_indices:
+                # Create a copy of the document to avoid modifying the original
+                doc = Document(
+                    id=self.documents[idx].id,
+                    text=self.documents[idx].text,
+                    metadata=self.documents[idx].metadata.copy()
+                    if self.documents[idx].metadata
+                    else {},
+                )
+                doc.score = float(similarities[idx])
+                results.append(doc)
+
+            all_results.append(results)
+
+        return all_results

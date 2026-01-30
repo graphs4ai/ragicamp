@@ -149,10 +149,9 @@ class HybridRetriever(Retriever):
     def batch_retrieve(
         self, queries: List[str], top_k: int = 5, **kwargs: Any
     ) -> List[List[Document]]:
-        """Retrieve documents for multiple queries using batched dense encoding.
+        """Retrieve documents for multiple queries using fully batched operations.
 
-        The dense encoding is batched for speed, while BM25 is still sequential
-        (but fast since it's CPU-bound).
+        Both dense and sparse retrieval are batched for maximum speed.
 
         Args:
             queries: List of query strings
@@ -172,7 +171,10 @@ class HybridRetriever(Retriever):
         # Batch search for dense results
         all_dense_hits = self.index.batch_search(query_embeddings, top_k=candidates)
 
-        # Process each query
+        # Batch sparse search (also batched now!)
+        all_sparse_results = self.sparse.batch_retrieve(queries, top_k=candidates)
+
+        # Process each query - combine dense and sparse results
         all_results = []
         for i, query in enumerate(queries):
             # Convert dense hits to documents
@@ -185,8 +187,7 @@ class HybridRetriever(Retriever):
                     )
                     dense_results.append(result)
 
-            # Sparse search (sequential, but fast)
-            sparse_results = self.sparse.retrieve(query, top_k=candidates)
+            sparse_results = all_sparse_results[i]
 
             # Compute RRF scores
             rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)

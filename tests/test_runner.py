@@ -2,7 +2,10 @@
 
 import pytest
 
-from ragicamp.execution.runner import ExpSpec, build_specs, _name_direct, _name_rag
+from ragicamp.spec import ExperimentSpec, build_specs, name_direct, name_rag
+
+# Backward compatibility alias for tests
+ExpSpec = ExperimentSpec
 
 
 class TestExpSpec:
@@ -10,7 +13,7 @@ class TestExpSpec:
 
     def test_exp_spec_defaults(self):
         """Test ExpSpec default values."""
-        spec = ExpSpec(
+        spec = ExperimentSpec(
             name="test_exp",
             exp_type="direct",
             model="hf:test/model",
@@ -29,7 +32,7 @@ class TestExpSpec:
 
     def test_exp_spec_with_rag_params(self):
         """Test ExpSpec with RAG parameters."""
-        spec = ExpSpec(
+        spec = ExperimentSpec(
             name="rag_exp",
             exp_type="rag",
             model="hf:test/model",
@@ -205,7 +208,7 @@ class TestNamingFunctions:
 
     def test_name_direct(self):
         """Test direct experiment naming."""
-        name = _name_direct("hf:meta-llama/Llama-3.2", "default", "nq", "4bit")
+        name = name_direct("hf:meta-llama/Llama-3.2", "default", "nq", "4bit")
 
         assert "direct" in name
         assert "nq" in name
@@ -215,15 +218,15 @@ class TestNamingFunctions:
 
     def test_name_direct_non_4bit_suffix(self):
         """Test direct naming includes quantization suffix for non-4bit."""
-        name_4bit = _name_direct("hf:test", "default", "nq", "4bit")
-        name_8bit = _name_direct("hf:test", "default", "nq", "8bit")
+        name_4bit = name_direct("hf:test", "default", "nq", "4bit")
+        name_8bit = name_direct("hf:test", "default", "nq", "8bit")
 
         assert "_8bit" not in name_4bit
         assert "_8bit" in name_8bit
 
     def test_name_rag(self):
         """Test RAG experiment naming."""
-        name = _name_rag("hf:test", "default", "nq", "4bit", "dense_bge", 5)
+        name = name_rag("hf:test", "default", "nq", "4bit", "dense_bge", 5)
 
         assert "rag" in name
         assert "dense_bge" in name
@@ -231,13 +234,13 @@ class TestNamingFunctions:
 
     def test_name_rag_with_query_transform(self):
         """Test RAG naming with query transform."""
-        name = _name_rag("hf:test", "default", "nq", "4bit", "dense", 5, qt="hyde")
+        name = name_rag("hf:test", "default", "nq", "4bit", "dense", 5, query_transform="hyde")
 
         assert "hyde" in name
 
     def test_name_rag_with_reranker(self):
         """Test RAG naming with reranker."""
-        name = _name_rag("hf:test", "default", "nq", "4bit", "dense", 5, rr="bge")
+        name = name_rag("hf:test", "default", "nq", "4bit", "dense", 5, reranker="bge")
 
         assert "bge" in name
 

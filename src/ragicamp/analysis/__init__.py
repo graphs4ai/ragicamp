@@ -12,11 +12,6 @@ Example:
     # Compare by different dimensions
     compare_results(results, group_by="model", metric="f1")
     compare_results(results, group_by="retriever", metric="exact_match")
-
-    # Log to MLflow
-    from ragicamp.analysis import MLflowTracker
-    tracker = MLflowTracker("my_study")
-    tracker.backfill_from_results(results)
 """
 
 from ragicamp.analysis.comparison import (
@@ -27,16 +22,6 @@ from ragicamp.analysis.comparison import (
     summarize_results,
 )
 from ragicamp.analysis.loader import ExperimentResult, ResultsLoader
-
-# MLflow is optional
-try:
-    from ragicamp.analysis.mlflow_tracker import MLflowTracker, log_to_mlflow
-
-    MLFLOW_AVAILABLE = True
-except ImportError:
-    MLflowTracker = None  # type: ignore
-    log_to_mlflow = None  # type: ignore
-    MLFLOW_AVAILABLE = False
 
 # Visualization is optional (requires matplotlib)
 try:
@@ -71,10 +56,6 @@ __all__ = [
     "pivot_results",
     "summarize_results",
     "format_comparison_table",
-    # MLflow
-    "MLflowTracker",
-    "log_to_mlflow",
-    "MLFLOW_AVAILABLE",
     # Visualization
     "plot_comparison",
     "plot_heatmap",

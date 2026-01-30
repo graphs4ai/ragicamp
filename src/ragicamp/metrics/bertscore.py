@@ -68,13 +68,15 @@ class BERTScoreMetric(Metric):
     def compute(
         self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute BERTScore.
+        """Compute BERTScore with automatic batching for memory efficiency.
 
-        Loads model, computes scores, then unloads to free GPU memory.
+        Loads model, computes scores in batches, then unloads to free GPU memory.
 
         Returns:
             Dict with precision, recall, and F1 scores
         """
+        import torch
+        
         # Handle multiple references - take first one for now
         refs = []
         for ref in references:
@@ -87,8 +89,29 @@ class BERTScoreMetric(Metric):
             # Load model (lazy)
             self._load_scorer()
 
-            # Compute BERTScore
-            P, R, F1 = self._scorer.score(predictions, refs)
+            # Compute BERTScore in batches to avoid OOM
+            # Start with batch_size based on available GPU memory
+            batch_size = self._estimate_batch_size(predictions)
+            
+            all_P, all_R, all_F1 = [], [], []
+            
+            for i in range(0, len(predictions), batch_size):
+                batch_preds = predictions[i:i + batch_size]
+                batch_refs = refs[i:i + batch_size]
+                
+                # Clear cache before each batch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                P, R, F1 = self._scorer.score(batch_preds, batch_refs)
+                all_P.append(P)
+                all_R.append(R)
+                all_F1.append(F1)
+            
+            # Concatenate results
+            P = torch.cat(all_P)
+            R = torch.cat(all_R)
+            F1 = torch.cat(all_F1)
 
             # Store per-item scores for detailed analysis
             self._last_scores = F1.tolist()
@@ -101,6 +124,42 @@ class BERTScoreMetric(Metric):
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
+    
+    def _estimate_batch_size(self, predictions: List[str]) -> int:
+        """Estimate safe batch size based on text lengths and GPU memory.
+        
+        BERTScore memory scales with sequence length squared.
+        For deberta-xlarge-mnli:
+        - Model base: ~2.5 GB
+        - Each batch item with long text can use 0.5-1 GB
+        """
+        import torch
+        
+        if not predictions:
+            return 1
+        
+        # Calculate average and max text lengths
+        avg_len = sum(len(p) for p in predictions) / len(predictions)
+        max_len = max(len(p) for p in predictions)
+        
+        # Very conservative batch sizing based on text length
+        # Long texts (like RAG predictions with context) need very small batches
+        if max_len > 3000 or avg_len > 1000:
+            batch_size = 2  # Very long texts - minimal batch
+        elif max_len > 1500 or avg_len > 500:
+            batch_size = 4  # Long texts
+        elif max_len > 500 or avg_len > 200:
+            batch_size = 8  # Medium texts
+        else:
+            batch_size = 16  # Short texts
+        
+        # Cap at total predictions
+        batch_size = min(batch_size, len(predictions))
+        
+        if len(predictions) > batch_size:
+            print(f"    Processing {len(predictions)} items in batches of {batch_size}")
+        
+        return batch_size
 
     def get_per_item_scores(self) -> List[float]:
         """Get per-item F1 scores from last compute() call."""

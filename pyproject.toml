@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragicamp"
-version = "0.3.0"
+version = "0.4.0"
 description = "A modular framework for experimenting with RAG approaches"
 readme = "README.md"
 requires-python = ">=3.9"

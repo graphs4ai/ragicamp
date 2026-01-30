@@ -128,11 +128,12 @@ class RAGPipeline:
         return reranked_docs
 
     def batch_retrieve(self, queries: List[str]) -> List[List["Document"]]:
-        """Retrieve documents for multiple queries.
+        """Retrieve documents for multiple queries with batched operations.
 
-        Optimized for speed when no query transformation is used.
-        Falls back to sequential processing when query transformation
-        is needed (as each query may generate multiple sub-queries).
+        Optimizations:
+        - Batch query transformation (e.g., HyDE generates all hypotheticals in one LLM call)
+        - Batch retrieval for all transformed queries
+        - Sequential reranking (cross-encoders can't easily batch multiple queries)
 
         Args:
             queries: List of user queries
@@ -140,29 +141,76 @@ class RAGPipeline:
         Returns:
             List of document lists, one per query
         """
-        # If no query transformation, use batch retrieval for speed
-        if isinstance(self.query_transformer, PassthroughTransformer):
-            # Direct batch retrieval if supported
-            if hasattr(self.retriever, "batch_retrieve"):
-                all_docs = self.retriever.batch_retrieve(queries, top_k=self.top_k_retrieve)
+        if not queries:
+            return []
 
-                # Apply reranking if present
-                if self.reranker is not None:
-                    reranked = []
-                    for query, docs in zip(queries, all_docs):
-                        reranked_docs = self.reranker.rerank(
-                            query=query,
-                            documents=docs,
-                            top_k=self.top_k_final,
-                        )
-                        reranked.append(reranked_docs)
-                    return reranked
-                else:
-                    # Just trim to final top_k
-                    return [docs[: self.top_k_final] for docs in all_docs]
+        # Stage 1: Batch query transformation
+        # This uses batch_transform() which is much faster for HyDE
+        transformed_query_lists = self.query_transformer.batch_transform(queries)
 
-        # Fall back to sequential for query transformation cases
-        return [self.retrieve(q) for q in queries]
+        # Stage 2: Collect all transformed queries for batch retrieval
+        # We need to track which original query each transformed query belongs to
+        all_transformed = []
+        query_indices = []  # Maps each transformed query to its original index
+        
+        for orig_idx, transformed in enumerate(transformed_query_lists):
+            for t_query in transformed:
+                all_transformed.append(t_query)
+                query_indices.append(orig_idx)
+
+        # Stage 3: Batch retrieve for all transformed queries at once
+        if hasattr(self.retriever, "batch_retrieve") and all_transformed:
+            all_retrieved = self.retriever.batch_retrieve(
+                all_transformed, top_k=self.top_k_retrieve
+            )
+        else:
+            # Fallback to sequential
+            all_retrieved = [
+                self.retriever.retrieve(q, top_k=self.top_k_retrieve)
+                for q in all_transformed
+            ]
+
+        # Stage 4: Aggregate and deduplicate per original query
+        results_per_query: List[List["Document"]] = [[] for _ in queries]
+        seen_per_query: List[Set[str]] = [set() for _ in queries]
+
+        for docs, orig_idx in zip(all_retrieved, query_indices):
+            for doc in docs:
+                if doc.id not in seen_per_query[orig_idx]:
+                    results_per_query[orig_idx].append(doc)
+                    seen_per_query[orig_idx].add(doc.id)
+
+        # Stage 5: Rerank (batch if supported, else sequential)
+        if self.reranker is not None:
+            if hasattr(self.reranker, "batch_rerank"):
+                # Use batch reranking for efficiency
+                return self.reranker.batch_rerank(
+                    queries=queries,
+                    documents_list=results_per_query,
+                    top_k=self.top_k_final,
+                )
+            else:
+                # Fallback to sequential reranking
+                reranked = []
+                for orig_query, docs in zip(queries, results_per_query):
+                    reranked_docs = self.reranker.rerank(
+                        query=orig_query,
+                        documents=docs,
+                        top_k=self.top_k_final,
+                    )
+                    reranked.append(reranked_docs)
+                return reranked
+        else:
+            # Sort by score and trim
+            final_results = []
+            for docs in results_per_query:
+                sorted_docs = sorted(
+                    docs,
+                    key=lambda d: getattr(d, "score", 0),
+                    reverse=True,
+                )
+                final_results.append(sorted_docs[: self.top_k_final])
+            return final_results
 
     def get_config(self) -> Dict:
         """Get pipeline configuration for logging/debugging."""
