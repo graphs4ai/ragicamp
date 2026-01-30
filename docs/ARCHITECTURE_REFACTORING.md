@@ -1,27 +1,8 @@
 # RAGiCamp Architecture Refactoring Specification
 
-**Version**: 1.2  
+**Version**: 1.0  
 **Date**: January 2026  
-**Status**: Complete
-
----
-
-## Progress Summary
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| Phase 1: Cleanup | ✅ Complete | Removed ~1,200 lines of dead code |
-| Phase 2: Extract Specifications | ✅ Complete | Created `spec/` and `state/` packages |
-| Phase 3: Split Factory | ✅ Complete | Created `factory/` package with specialized factories |
-| Phase 4: Extract Phase Handlers | ✅ Complete | Created `execution/phases/` package; integrated with Experiment |
-| Phase 5: Split Index Builders | ✅ Complete | Created `indexes/builders/` package |
-
-### All Tasks Complete
-All refactoring tasks have been implemented. The codebase now follows the target architecture with:
-- Clear separation between specification, state, and execution
-- Modular factory classes for component creation
-- Pluggable phase handlers for experiment execution
-- Split index builders for better maintainability
+**Status**: Draft
 
 ---
 
@@ -210,26 +191,26 @@ ragicamp/
 
 ## 3. Refactoring Tasks
 
-### 3.1 Phase 1: Cleanup (Low Risk) ✅ COMPLETE
+### 3.1 Phase 1: Cleanup (Low Risk)
 
 **Task 1.1: Remove dead code**
-- [x] Delete `core/protocols.py` (281 lines)
-- [x] Delete `rag/chunking/semantic.py` (~200 lines)
-- [x] Delete `utils/prediction_writer.py` (238 lines)
-- [x] Delete `metrics/ragas_adapter.py` (~150 lines) - Optional metrics, not in use
-- [x] Delete `analysis/mlflow_tracker.py` (304 lines) - MLflow not in active use
+- [ ] Delete `core/protocols.py` (281 lines)
+- [ ] Delete `rag/chunking/semantic.py` (~200 lines)
+- [ ] Delete `utils/prediction_writer.py` (238 lines)
+- [ ] Delete `metrics/ragas_adapter.py` (~150 lines) - Optional metrics, not in use
+- [ ] Delete `analysis/mlflow_tracker.py` (304 lines) - MLflow not in active use
 
 **Task 1.2: Fix imports and exports**
-- [x] Update `__init__.py` files to remove deleted exports
-- [x] Run tests to ensure nothing breaks
+- [ ] Update `__init__.py` files to remove deleted exports
+- [ ] Run tests to ensure nothing breaks
 
 **Estimated impact**: ~1,200 lines removed
 
 ---
 
-### 3.2 Phase 2: Extract Specifications (Medium Risk) ✅ COMPLETE
+### 3.2 Phase 2: Extract Specifications (Medium Risk)
 
-**Task 2.1: Create `spec/` package** ✅
+**Task 2.1: Create `spec/` package**
 ```python
 # spec/experiment.py
 @dataclass(frozen=True)
@@ -250,7 +231,7 @@ class ExperimentSpec:
     metrics: List[str] = field(default_factory=list)
 ```
 
-**Task 2.2: Extract spec building from runner.py** ✅
+**Task 2.2: Extract spec building from runner.py**
 ```python
 # spec/builder.py
 def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
@@ -262,15 +243,15 @@ def name_direct(model: str, prompt: str, dataset: str, quant: str) -> str: ...
 def name_rag(...) -> str: ...
 ```
 
-**Task 2.3: Move state to `state/` package** ✅
-- [x] Move `experiment_state.py` → `state/experiment_state.py`
-- [x] Extract `ExperimentHealth` and `check_health` → `state/health.py`
+**Task 2.3: Move state to `state/` package**
+- Move `experiment_state.py` → `state/experiment_state.py`
+- Extract `ExperimentHealth` and `check_health` → `state/health.py`
 
 ---
 
-### 3.3 Phase 3: Split Factory (Medium Risk) ✅ COMPLETE
+### 3.3 Phase 3: Split Factory (Medium Risk)
 
-**Task 3.1: Create `factory/` package** ✅
+**Task 3.1: Create `factory/` package**
 ```python
 # factory/models.py
 class ModelFactory:
@@ -297,7 +278,7 @@ class RetrieverFactory:
     def create_reranker(model: str) -> Optional[Reranker]: ...
 ```
 
-**Task 3.2: Update all imports** ✅
+**Task 3.2: Update all imports**
 ```python
 # factory/__init__.py
 from .models import ModelFactory
@@ -315,13 +296,13 @@ __all__ = [
 ]
 ```
 
-**Task 3.3: Delete old factory.py and update all imports across codebase** ✅
+**Task 3.3: Delete old factory.py and update all imports across codebase**
 
 ---
 
-### 3.4 Phase 4: Extract Phase Handlers (Higher Risk) ✅ COMPLETE
+### 3.4 Phase 4: Extract Phase Handlers (Higher Risk)
 
-**Task 4.1: Create phase handler abstraction** ✅
+**Task 4.1: Create phase handler abstraction**
 ```python
 # execution/phases/base.py
 from abc import ABC, abstractmethod
@@ -354,9 +335,9 @@ class ExecutionContext:
     callbacks: Optional[ExperimentCallbacks] = None
 ```
 
-**Task 4.2: Implement concrete handlers** ✅
+**Task 4.2: Implement concrete handlers**
 ```python
-# execution/phases/init_phase.py
+# execution/phases/init.py
 class InitHandler(PhaseHandler):
     """Export questions and metadata."""
     
@@ -382,7 +363,7 @@ class GenerationHandler(PhaseHandler):
         # Return updated state
         ...
 
-# execution/phases/metrics_phase.py
+# execution/phases/metrics.py
 class MetricsHandler(PhaseHandler):
     """Compute all requested metrics."""
     
@@ -392,9 +373,7 @@ class MetricsHandler(PhaseHandler):
         ...
 ```
 
-**Task 4.3: Slim down ExperimentRunner** ✅
-- [x] Refactor `experiment.py` to delegate to phase handlers
-- [x] `Experiment._run_phase()` now uses `InitHandler`, `GenerationHandler`, `MetricsHandler`
+**Task 4.3: Slim down ExperimentRunner**
 ```python
 # execution/runner.py
 class ExperimentRunner:
@@ -428,9 +407,9 @@ class ExperimentRunner:
 
 ---
 
-### 3.5 Phase 5: Split Index Builders (Medium Risk) ✅ COMPLETE
+### 3.5 Phase 5: Split Index Builders (Medium Risk)
 
-**Task 5.1: Extract builder functions** ✅
+**Task 5.1: Extract builder functions**
 ```python
 # indexes/builders/embedding_builder.py
 def build_embedding_index(
@@ -454,7 +433,7 @@ def build_hierarchical_index(
     ...
 ```
 
-**Task 5.2: Keep orchestration in builder.py** ✅
+**Task 5.2: Keep orchestration in builder.py**
 ```python
 # indexes/builder.py (slimmed)
 from .builders.embedding_builder import build_embedding_index
@@ -562,54 +541,43 @@ src/ragicamp/metrics/ragas_adapter.py
 src/ragicamp/analysis/mlflow_tracker.py
 ```
 
-### Files Created ✅
+### Files to Create
 ```
-src/ragicamp/spec/__init__.py              ✅
-src/ragicamp/spec/experiment.py            ✅
-src/ragicamp/spec/builder.py               ✅
-src/ragicamp/spec/naming.py                ✅
+src/ragicamp/spec/__init__.py
+src/ragicamp/spec/experiment.py
+src/ragicamp/spec/builder.py
+src/ragicamp/spec/naming.py
 
-src/ragicamp/factory/__init__.py           ✅
-src/ragicamp/factory/models.py             ✅
-src/ragicamp/factory/datasets.py           ✅
-src/ragicamp/factory/metrics.py            ✅
-src/ragicamp/factory/retrievers.py         ✅
-src/ragicamp/factory/agents.py             ✅
+src/ragicamp/state/__init__.py
+src/ragicamp/state/experiment_state.py  (moved)
+src/ragicamp/state/health.py
 
-src/ragicamp/execution/phases/__init__.py  ✅
-src/ragicamp/execution/phases/base.py      ✅
-src/ragicamp/execution/phases/init_phase.py ✅
-src/ragicamp/execution/phases/generation.py ✅
-src/ragicamp/execution/phases/metrics_phase.py ✅
+src/ragicamp/factory/__init__.py
+src/ragicamp/factory/models.py
+src/ragicamp/factory/datasets.py
+src/ragicamp/factory/metrics.py
+src/ragicamp/factory/retrievers.py
+src/ragicamp/factory/agents.py
 
-src/ragicamp/indexes/builders/__init__.py           ✅
-src/ragicamp/indexes/builders/embedding_builder.py  ✅
-src/ragicamp/indexes/builders/hierarchical_builder.py ✅
-```
+src/ragicamp/execution/phases/__init__.py
+src/ragicamp/execution/phases/base.py
+src/ragicamp/execution/phases/init.py
+src/ragicamp/execution/phases/generation.py
+src/ragicamp/execution/phases/metrics.py
+src/ragicamp/execution/subprocess.py
 
-### Files Created (Additional)
-```
-src/ragicamp/state/__init__.py              ✅
-src/ragicamp/state/experiment_state.py      ✅
-src/ragicamp/state/health.py                ✅
+src/ragicamp/indexes/builders/__init__.py
+src/ragicamp/indexes/builders/embedding_builder.py
+src/ragicamp/indexes/builders/hierarchical_builder.py
 ```
 
-### Files Optional (Not Yet Created)
+### Files to Modify
 ```
-src/ragicamp/execution/subprocess.py        ❌ (optional: extract subprocess logic)
-```
-
-### Files Modified
-```
-src/ragicamp/execution/runner.py    → Removed spec building (now imports from spec/)  ✅
-src/ragicamp/factory.py             → Deleted and replaced with factory/ package      ✅
-src/ragicamp/indexes/builder.py     → Slimmed, keeps orchestration only               ✅
-```
-
-### Files Modified (Additional)
-```
-src/ragicamp/experiment.py          → Now uses phase handlers (InitHandler, GenerationHandler, MetricsHandler) ✅
-src/ragicamp/experiment_state.py    → Now a backward-compat shim, re-exports from state/ ✅
+src/ragicamp/experiment.py          → Slim down to facade
+src/ragicamp/execution/runner.py    → Remove spec building, use handlers
+src/ragicamp/factory.py             → Deprecate, re-export from factory/
+src/ragicamp/indexes/builder.py     → Keep orchestration only
+src/ragicamp/experiment_state.py    → Move to state/
 ```
 
 ---
