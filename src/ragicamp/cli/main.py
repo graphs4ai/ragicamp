@@ -306,7 +306,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 
 def cmd_backup(args: argparse.Namespace) -> int:
-    """Backup artifacts to Backblaze B2."""
+    """Backup artifacts and outputs to Backblaze B2."""
     import os
     from datetime import datetime
 
@@ -314,7 +314,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
         import boto3
         from botocore.config import Config
     except ImportError:
-        print("Error: boto3 not installed. Install with: uv pip install boto3")
+        print("Error: boto3 not installed. Install with: uv add boto3")
         return 1
 
     # Check credentials
@@ -330,11 +330,22 @@ def cmd_backup(args: argparse.Namespace) -> int:
         print("  export B2_ENDPOINT='https://s3.us-west-004.backblazeb2.com'  # optional")
         return 1
 
-    # Find artifacts directory
-    artifacts_dir = args.path
-    if not artifacts_dir.exists():
-        print(f"Path not found: {artifacts_dir}")
-        return 1
+    # Determine directories to backup
+    if args.path:
+        # Explicit path provided
+        dirs_to_backup = [args.path]
+    else:
+        # Default: backup both artifacts and outputs
+        dirs_to_backup = []
+        for default_dir in ["artifacts", "outputs"]:
+            p = Path(default_dir)
+            if p.exists():
+                dirs_to_backup.append(p)
+        
+        if not dirs_to_backup:
+            print("No artifacts/ or outputs/ directories found.")
+            print("Specify a path explicitly: ragicamp backup <path>")
+            return 1
 
     # Create S3 client for B2
     s3 = boto3.client(
@@ -349,20 +360,22 @@ def cmd_backup(args: argparse.Namespace) -> int:
     prefix = args.prefix or f"ragicamp-backup/{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     print(f"Backing up to: s3://{bucket}/{prefix}/")
-    print(f"Source: {artifacts_dir}")
+    print(f"Source directories: {', '.join(str(d) for d in dirs_to_backup)}")
 
-    # Collect files to upload
+    # Collect files to upload from all directories
     files_to_upload = []
-    for root, dirs, files in os.walk(artifacts_dir):
-        # Skip __pycache__ and hidden dirs
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
-        for file in files:
-            if file.startswith("."):
-                continue
-            local_path = Path(root) / file
-            relative_path = local_path.relative_to(artifacts_dir)
-            s3_key = f"{prefix}/{relative_path}"
-            files_to_upload.append((local_path, s3_key))
+    for backup_dir in dirs_to_backup:
+        for root, dirs, files in os.walk(backup_dir):
+            # Skip __pycache__ and hidden dirs
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            for file in files:
+                if file.startswith("."):
+                    continue
+                local_path = Path(root) / file
+                # Keep the top-level directory name in the S3 key
+                relative_path = local_path.relative_to(backup_dir.parent)
+                s3_key = f"{prefix}/{relative_path}"
+                files_to_upload.append((local_path, s3_key))
 
     if not files_to_upload:
         print("No files to upload.")
@@ -580,13 +593,16 @@ def create_parser() -> argparse.ArgumentParser:
     metrics_parser.set_defaults(func=cmd_metrics)
 
     # Backup command
-    backup_parser = subparsers.add_parser("backup", help="Backup artifacts to Backblaze B2")
+    backup_parser = subparsers.add_parser(
+        "backup", 
+        help="Backup artifacts and outputs to Backblaze B2"
+    )
     backup_parser.add_argument(
         "path",
         type=Path,
         nargs="?",
-        default=Path("outputs"),
-        help="Directory to backup (default: outputs)",
+        default=None,
+        help="Directory to backup (default: artifacts/ and outputs/)",
     )
     backup_parser.add_argument(
         "--bucket",
