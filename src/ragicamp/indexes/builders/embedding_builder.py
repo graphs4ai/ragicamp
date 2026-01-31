@@ -26,6 +26,7 @@ def build_embedding_index(
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 64,
     chunk_workers: int = None,
+    parallel_chunking: bool = False,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -42,6 +43,8 @@ def build_embedding_index(
         doc_batch_size: Documents to process per batch (default 5000)
         embedding_batch_size: Texts to embed per GPU batch (default 64, increase for more VRAM)
         chunk_workers: Number of parallel workers for chunking (default: CPU count)
+        parallel_chunking: Use parallel chunking (default False - sequential is faster
+            when large datasets are in memory due to fork overhead)
 
     Returns:
         Path to the saved index
@@ -58,7 +61,7 @@ def build_embedding_index(
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
-    print(f"  Chunking strategy: {chunking_strategy}")
+    print(f"  Chunking: {chunking_strategy} ({'parallel' if parallel_chunking else 'sequential'})")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"{'='*60}")
 
@@ -121,12 +124,29 @@ def build_embedding_index(
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
                 
-                # Chunking phase - use sequential for better performance when
-                # large datasets are in memory (fork overhead > parallel gains)
+                # Chunking phase
                 t_chunk = time.time()
-                batch_chunks = list(chunker.chunk_documents(doc_batch, show_progress=False))
+                if parallel_chunking:
+                    print(f"    Chunking (parallel, {chunk_workers or 'auto'} workers)...")
+                    batch_chunks = chunker.chunk_documents_parallel(
+                        doc_batch,
+                        num_workers=chunk_workers,
+                        show_progress=True
+                    )
+                else:
+                    # Sequential is faster when large datasets are in memory (fork overhead)
+                    from tqdm import tqdm
+                    batch_chunks = []
+                    for chunk in tqdm(
+                        chunker.chunk_documents(doc_batch, show_progress=False),
+                        desc="    Chunking",
+                        total=batch_size,  # Approximate (1 chunk per doc minimum)
+                        leave=False,
+                        ncols=80,
+                    ):
+                        batch_chunks.append(chunk)
                 chunk_elapsed = time.time() - t_chunk
-                print(f"    Chunked → {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
+                print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
                 
                 total_docs += batch_size
                 total_chunks += len(batch_chunks)
@@ -159,11 +179,28 @@ def build_embedding_index(
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
             
-            # Chunking phase - sequential (see comment above)
+            # Chunking phase
             t_chunk = time.time()
-            batch_chunks = list(chunker.chunk_documents(doc_batch, show_progress=False))
+            if parallel_chunking:
+                print(f"    Chunking (parallel, {chunk_workers or 'auto'} workers)...")
+                batch_chunks = chunker.chunk_documents_parallel(
+                    doc_batch,
+                    num_workers=chunk_workers,
+                    show_progress=True
+                )
+            else:
+                from tqdm import tqdm
+                batch_chunks = []
+                for chunk in tqdm(
+                    chunker.chunk_documents(doc_batch, show_progress=False),
+                    desc="    Chunking",
+                    total=batch_size,
+                    leave=False,
+                    ncols=80,
+                ):
+                    batch_chunks.append(chunk)
             chunk_elapsed = time.time() - t_chunk
-            print(f"    Chunked → {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
+            print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
             
             total_docs += batch_size
             total_chunks += len(batch_chunks)
