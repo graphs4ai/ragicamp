@@ -334,29 +334,22 @@ class RecursiveChunker(ChunkingStrategy):
     """
     
     # Safety limits to prevent pathological cases
-    MAX_RECURSION_DEPTH = 8
-    MAX_CHUNKS_PER_DOC = 1000
-    # Use recursive splitting up to the truncation limit (100K)
-    # Hard split is only a fallback when recursive fails or for very large texts
-    MAX_TEXT_FOR_SPLIT = 100_000
+    MAX_RECURSION_DEPTH = 10  # Increased to allow deeper recursion
+    MAX_CHUNKS_PER_DOC = 2000  # Increased for larger docs
     
     # Debug mode - set to True to see step-by-step chunking
     DEBUG = False
 
     def chunk(self, text: str) -> List[str]:
-        """Recursively split text into chunks."""
+        """Recursively split text into chunks.
+        
+        Always tries recursive splitting first. Hard split is only used as
+        a last resort when no separators work or recursion depth is exceeded.
+        """
         if self.DEBUG:
             print(f"        [chunk] input: {len(text):,} chars", flush=True)
         
-        # For very large texts, skip recursive splitting entirely
-        if len(text) > self.MAX_TEXT_FOR_SPLIT:
-            if self.DEBUG:
-                print(f"        [chunk] text > {self.MAX_TEXT_FOR_SPLIT:,}, using hard_split", flush=True)
-            result = self._hard_split(text)
-            if self.DEBUG:
-                print(f"        [chunk] hard_split → {len(result)} chunks", flush=True)
-            return result
-        
+        # Always try recursive first - hard_split is only a fallback
         if self.DEBUG:
             print(f"        [chunk] using recursive_split", flush=True)
         result = self._recursive_split(text, self.config.separators, depth=0)
@@ -375,17 +368,17 @@ class RecursiveChunker(ChunkingStrategy):
         if len(text) <= self.config.chunk_size:
             return [text]
         
-        # Safety: bail out if recursion is too deep or text too large
-        if depth >= self.MAX_RECURSION_DEPTH or len(text) > self.MAX_TEXT_FOR_SPLIT:
+        # Safety: bail out if recursion is too deep
+        if depth >= self.MAX_RECURSION_DEPTH:
             return self._hard_split(text)
 
         # Try each separator in order
         for i, sep in enumerate(separators):
             if sep in text:
-                # Avoid creating huge lists - limit split count
-                # If separator is too frequent, skip to next separator
+                # Avoid creating huge lists - if separator is extremely frequent,
+                # skip to the next one (but still try most separators)
                 sep_count = text.count(sep)
-                if sep_count > 10_000:
+                if sep_count > 50_000:
                     continue  # Skip this separator, try next one
                 
                 splits = text.split(sep)
