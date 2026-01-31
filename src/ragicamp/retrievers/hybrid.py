@@ -245,7 +245,7 @@ class HybridRetriever(Retriever):
         return None
 
     def save(self, artifact_name: str) -> str:
-        """Save retriever config (index should be saved separately).
+        """Save retriever config and sparse index if built.
 
         Args:
             artifact_name: Name for this retriever artifact
@@ -253,8 +253,13 @@ class HybridRetriever(Retriever):
         Returns:
             Path where saved
         """
+        import pickle
+
         manager = get_artifact_manager()
         artifact_path = manager.get_retriever_path(artifact_name)
+
+        # Check if sparse index is built
+        has_sparse = self._sparse is not None and self._sparse.doc_vectors is not None
 
         config = {
             "name": self.name,
@@ -264,7 +269,17 @@ class HybridRetriever(Retriever):
             "alpha": self.alpha,
             "rrf_k": self.rrf_k,
             "num_documents": len(self.index) if self.index else 0,
+            "has_sparse": has_sparse,
         }
+
+        # Save sparse index components if built
+        if has_sparse:
+            logger.info("Saving sparse index components for: %s", artifact_name)
+            with open(artifact_path / "sparse_vectorizer.pkl", "wb") as f:
+                pickle.dump(self._sparse.vectorizer, f)
+            with open(artifact_path / "sparse_matrix.pkl", "wb") as f:
+                pickle.dump(self._sparse.doc_vectors, f)
+
         manager.save_json(config, artifact_path / "config.json")
 
         logger.info("Saved hybrid retriever config to: %s", artifact_path)
@@ -318,6 +333,34 @@ class HybridRetriever(Retriever):
             alpha=config.get("alpha", 0.5),
             rrf_k=config.get("rrf_k", 60),
         )
+
+        # Load pre-built sparse index if available
+        if config.get("has_sparse"):
+            sparse_vectorizer_path = artifact_path / "sparse_vectorizer.pkl"
+            sparse_matrix_path = artifact_path / "sparse_matrix.pkl"
+            
+            if sparse_vectorizer_path.exists() and sparse_matrix_path.exists():
+                import pickle
+                
+                logger.info("Loading pre-built sparse index for: %s", artifact_name)
+                sparse = SparseRetriever(name=f"{artifact_name}_sparse")
+                
+                with open(sparse_vectorizer_path, "rb") as f:
+                    sparse.vectorizer = pickle.load(f)
+                with open(sparse_matrix_path, "rb") as f:
+                    sparse.doc_vectors = pickle.load(f)
+                
+                # Link documents from the dense index
+                if index:
+                    sparse.documents = index.documents
+                
+                retriever._sparse = sparse
+                logger.info("Loaded sparse index: %d documents", len(sparse.documents))
+            else:
+                logger.warning(
+                    "Sparse index files not found for %s, will rebuild on first query",
+                    artifact_name,
+                )
 
         logger.info("Loaded hybrid retriever: %s (%d docs)", artifact_name, len(index) if index else 0)
         return retriever

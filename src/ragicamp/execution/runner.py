@@ -182,7 +182,8 @@ def run_generation(
 
     start = time.time()
 
-    ResourceManager.clear_gpu_memory()
+    # Note: GPU memory is cleared by parent before subprocess spawn (line ~302)
+    # No need to clear again here - subprocess starts with clean GPU state
 
     # Create dataset
     config = ComponentFactory.parse_dataset_spec(spec.dataset, limit=limit)
@@ -455,8 +456,7 @@ def run_spec(
     print(f"{'='*60}")
 
     try:
-        ResourceManager.clear_gpu_memory()
-
+        # Note: GPU memory cleared by parent before subprocess spawn
         # Phase-aware dispatch: metrics-only vs full generation
         if (
             health.can_resume

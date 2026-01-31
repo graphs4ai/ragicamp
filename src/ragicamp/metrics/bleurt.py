@@ -3,7 +3,7 @@
 import gc
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 # Fix matplotlib backend BEFORE any imports that might use it
 if "MPLBACKEND" not in os.environ:
@@ -165,29 +165,25 @@ class BLEURTMetric(Metric):
         return str(extract_path)
 
     def compute(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute BLEURT scores.
+        """Compute BLEURT scores (1-to-1).
 
         Loads model, computes scores, then unloads to free GPU memory.
+
+        Args:
+            predictions: List of predicted answers
+            references: List of reference answers (one per prediction)
 
         Returns:
             Dict with average BLEURT score (for overall metrics)
         """
-        # Handle multiple references - take first one for now
-        refs = []
-        for ref in references:
-            if isinstance(ref, list):
-                refs.append(ref[0] if ref else "")
-            else:
-                refs.append(ref)
-
         try:
             # Load model (lazy)
             self._load_scorer()
 
             # Compute BLEURT scores
-            scores = self._scorer.score(references=refs, candidates=predictions)
+            scores = self._scorer.score(references=references, candidates=predictions)
 
             # Store per-item scores for detailed analysis
             self._last_scores = list(scores)

@@ -22,7 +22,7 @@ Example:
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from tqdm.asyncio import tqdm as atqdm
 
@@ -33,8 +33,10 @@ class AsyncAPIMetric(Metric):
     """Base class for metrics that call external APIs asynchronously.
 
     Subclasses should implement `acompute_single()` which handles a single
-    prediction-reference pair. The base class handles parallelization,
+    prediction-reference pair (1-to-1). The base class handles parallelization,
     rate limiting, and progress tracking.
+    
+    Multi-reference aggregation is handled externally by compute_metrics_batched().
 
     Attributes:
         max_concurrent: Maximum number of concurrent API calls
@@ -64,17 +66,17 @@ class AsyncAPIMetric(Metric):
     async def acompute_single(
         self,
         prediction: str,
-        reference: Union[str, List[str]],
+        reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
-        """Compute metric for a single prediction-reference pair (async).
+        """Compute metric for a single prediction-reference pair (async, 1-to-1).
 
         Subclasses must implement this method.
 
         Args:
             prediction: Predicted answer
-            reference: Reference answer(s)
+            reference: Single reference answer
             question: Optional question for context
             **kwargs: Additional parameters
 
@@ -86,7 +88,7 @@ class AsyncAPIMetric(Metric):
     async def acompute(
         self,
         predictions: List[str],
-        references: Union[List[str], List[List[str]]],
+        references: List[str],
         questions: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
@@ -94,7 +96,7 @@ class AsyncAPIMetric(Metric):
 
         Args:
             predictions: List of predicted answers
-            references: List of reference answers
+            references: List of reference answers (one per prediction)
             questions: Optional list of questions for context
             **kwargs: Additional parameters
 
@@ -106,7 +108,7 @@ class AsyncAPIMetric(Metric):
         async def rate_limited_compute(
             idx: int,
             pred: str,
-            ref: Union[str, List[str]],
+            ref: str,
             q: Optional[str],
         ) -> Dict[str, float]:
             """Compute with rate limiting."""
@@ -178,7 +180,7 @@ class AsyncAPIMetric(Metric):
     def compute(
         self,
         predictions: List[str],
-        references: Union[List[str], List[List[str]]],
+        references: List[str],
         questions: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
@@ -188,7 +190,7 @@ class AsyncAPIMetric(Metric):
 
         Args:
             predictions: List of predicted answers
-            references: List of reference answers
+            references: List of reference answers (one per prediction)
             questions: Optional list of questions
             **kwargs: Additional parameters
 
@@ -214,7 +216,7 @@ class AsyncAPIMetric(Metric):
     def compute_single(
         self,
         prediction: str,
-        reference: Union[str, List[str]],
+        reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
@@ -222,7 +224,7 @@ class AsyncAPIMetric(Metric):
 
         Args:
             prediction: Predicted answer
-            reference: Reference answer(s)
+            reference: Single reference answer
             question: Optional question for context
             **kwargs: Additional parameters
 

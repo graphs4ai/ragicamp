@@ -1,9 +1,86 @@
 """Evaluation metrics for RAG systems."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.metrics.base import Metric
+
+
+def _expand_for_multi_reference(
+    predictions: List[str],
+    references: List[Union[str, List[str]]],
+    questions: Optional[List[str]] = None,
+) -> Tuple[List[str], List[str], Optional[List[str]], List[int], List[int]]:
+    """Expand predictions and references for multi-reference evaluation.
+    
+    For each prediction with multiple references, creates one (pred, ref) pair
+    per reference. Returns mapping indices to aggregate results later.
+    
+    Args:
+        predictions: List of model predictions
+        references: List of references (can be str or List[str] per item)
+        questions: Optional list of questions
+        
+    Returns:
+        Tuple of:
+        - expanded_predictions: Flattened predictions (repeated for each ref)
+        - expanded_references: Flattened references (one per prediction)
+        - expanded_questions: Flattened questions (or None)
+        - pred_indices: Original prediction index for each expanded item
+        - ref_indices: Reference index within original list for each expanded item
+    """
+    expanded_preds = []
+    expanded_refs = []
+    expanded_questions = [] if questions else None
+    pred_indices = []
+    ref_indices = []
+    
+    for i, (pred, ref) in enumerate(zip(predictions, references)):
+        # Normalize to list of references
+        refs_list = ref if isinstance(ref, list) else [ref]
+        
+        for j, single_ref in enumerate(refs_list):
+            expanded_preds.append(pred)
+            expanded_refs.append(single_ref)
+            pred_indices.append(i)
+            ref_indices.append(j)
+            if questions:
+                expanded_questions.append(questions[i])
+    
+    return expanded_preds, expanded_refs, expanded_questions, pred_indices, ref_indices
+
+
+def _aggregate_multi_reference_scores(
+    scores: List[float],
+    pred_indices: List[int],
+    num_predictions: int,
+) -> List[float]:
+    """Aggregate expanded scores back to original predictions using max.
+    
+    For each original prediction, takes the maximum score across all its
+    reference comparisons.
+    
+    Args:
+        scores: Per-item scores from expanded computation
+        pred_indices: Original prediction index for each score
+        num_predictions: Number of original predictions
+        
+    Returns:
+        Aggregated scores (one per original prediction)
+    """
+    # Initialize with -inf so any score will be higher
+    best_scores = [float('-inf')] * num_predictions
+    
+    for score, idx in zip(scores, pred_indices):
+        if score > best_scores[idx]:
+            best_scores[idx] = score
+    
+    return best_scores
+
+
+def _has_multi_references(references: List[Any]) -> bool:
+    """Check if references contain multi-reference items."""
+    return any(isinstance(ref, list) for ref in references)
 
 
 def compute_metrics_batched(
@@ -14,15 +91,20 @@ def compute_metrics_batched(
     already_computed: Optional[List[str]] = None,
     on_metric_complete: Optional[callable] = None,
 ) -> Tuple[Dict[str, float], Dict[str, List[float]], List[str], List[str]]:
-    """Compute metrics with proper GPU memory management.
+    """Compute metrics with proper GPU memory management and multi-reference support.
     
     This is the shared implementation used by both Experiment._phase_compute_metrics()
     and run_metrics_only() to avoid code duplication.
     
+    Multi-reference handling:
+        When references contain lists (multiple correct answers), this function
+        expands the computation to evaluate against all references and aggregates
+        using max strategy (best score across all references per prediction).
+    
     Args:
         metrics: List of Metric objects to compute
         predictions: List of model predictions
-        references: List of reference answers
+        references: List of reference answers (can be str or List[str] per item)
         questions: Optional list of questions (needed for llm_judge)
         already_computed: List of metric names already computed (to skip)
         on_metric_complete: Callback(metric_name) called after each metric
@@ -42,6 +124,21 @@ def compute_metrics_batched(
     computed: List[str] = []
     failed: List[str] = []
     
+    # Check if we need multi-reference handling
+    has_multi = _has_multi_references(references)
+    
+    if has_multi:
+        # Expand for multi-reference evaluation
+        expanded_preds, expanded_refs, expanded_questions, pred_indices, _ = \
+            _expand_for_multi_reference(predictions, references, questions)
+        print(f"  Multi-reference detected: {len(predictions)} predictions → {len(expanded_preds)} pairs")
+    else:
+        # Simple case: 1-to-1
+        expanded_preds = predictions
+        expanded_refs = references
+        expanded_questions = questions
+        pred_indices = list(range(len(predictions)))
+    
     for metric in metrics:
         if metric.name in already_computed:
             print(f"  ✓ {metric.name} (already computed)")
@@ -51,28 +148,44 @@ def compute_metrics_batched(
             print(f"  Computing {metric.name}...")
             ResourceManager.clear_gpu_memory()
             
-            # Call metric with appropriate arguments
+            # Call metric with expanded inputs
             if metric.name in ("llm_judge", "llm_judge_qa"):
-                if questions is None:
+                if expanded_questions is None:
                     print(f"  ⚠ {metric.name} requires questions, skipping")
                     failed.append(metric.name)
                     continue
                 scores = metric.compute(
-                    predictions=predictions,
-                    references=references,
-                    questions=questions,
+                    predictions=expanded_preds,
+                    references=expanded_refs,
+                    questions=expanded_questions,
                 )
             else:
-                scores = metric.compute(predictions=predictions, references=references)
+                scores = metric.compute(predictions=expanded_preds, references=expanded_refs)
+            
+            # Get per-item scores
+            if hasattr(metric, "get_per_item_scores"):
+                expanded_per_item = metric.get_per_item_scores()
+            else:
+                expanded_per_item = []
+            
+            # Aggregate if multi-reference
+            if has_multi and expanded_per_item:
+                aggregated_per_item = _aggregate_multi_reference_scores(
+                    expanded_per_item, pred_indices, len(predictions)
+                )
+                per_item_metrics[metric.name] = aggregated_per_item
+                
+                # Recompute aggregate from aggregated per-item scores
+                avg_score = sum(aggregated_per_item) / len(aggregated_per_item)
+                # Update the main metric score with aggregated value
+                for key in scores:
+                    if metric.name in key:
+                        scores[key] = avg_score
+                        break
+            elif expanded_per_item:
+                per_item_metrics[metric.name] = expanded_per_item
             
             aggregate_results.update(scores)
-            
-            # Get per-item scores if available
-            if hasattr(metric, "get_per_item_scores"):
-                per_item = metric.get_per_item_scores()
-                if per_item:
-                    per_item_metrics[metric.name] = per_item
-            
             computed.append(metric.name)
             
             if on_metric_complete:

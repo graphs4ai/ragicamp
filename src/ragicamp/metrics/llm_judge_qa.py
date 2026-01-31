@@ -18,7 +18,7 @@ Example:
 """
 
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.models.base import LanguageModel
@@ -70,29 +70,26 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
     async def acompute_single(
         self,
         prediction: str,
-        reference: Union[str, List[str]],
+        reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, float]:
-        """Compute judgment for a single prediction-reference pair (async).
+        """Compute judgment for a single prediction-reference pair (async, 1-to-1).
 
         Args:
             prediction: Predicted answer
-            reference: Reference answer(s)
+            reference: Single reference answer
             question: Question for context (highly recommended)
             **kwargs: Additional parameters
 
         Returns:
             Dict with score and category info
         """
-        # Handle multiple references
-        refs = [reference] if isinstance(reference, str) else reference
-
-        # Create judgment prompt
+        # Create judgment prompt with single reference
         prompt = self._create_judgment_prompt(
             question=question,
             prediction=prediction,
-            references=refs,
+            reference=reference,
         )
 
         # Call LLM asynchronously
@@ -156,9 +153,14 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
         return aggregated
 
-    def _create_judgment_prompt(self, question: str, prediction: str, references: List[str]) -> str:
-        """Create a clear prompt for categorical QA judgment."""
+    def _create_judgment_prompt(self, question: str, prediction: str, reference: str) -> str:
+        """Create a clear prompt for categorical QA judgment (1-to-1).
 
+        Args:
+            question: The question being answered
+            prediction: The predicted answer
+            reference: Single reference answer
+        """
         if self.judgment_type == "binary":
             categories_desc = """
 - CORRECT: The prediction accurately answers the question with the same information as the reference
@@ -173,19 +175,15 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 """
             output_format = "First line: JUDGMENT: [CORRECT/PARTIALLY_CORRECT/INCORRECT]"
 
-        # Build reference answers section
-        ref_section = "\n".join([f"  - {ref}" for ref in references])
-
-        prompt = f"""You are an expert evaluator for question-answering systems. Evaluate if the predicted answer is correct compared to the reference answer(s).
+        prompt = f"""You are an expert evaluator for question-answering systems. Evaluate if the predicted answer is correct compared to the reference answer.
 
 Question: {question}
 
-Reference Answer(s):
-{ref_section}
+Reference Answer: {reference}
 
 Predicted Answer: {prediction}
 
-Task: Determine if the predicted answer is semantically correct compared to the reference answer(s).
+Task: Determine if the predicted answer is semantically correct compared to the reference answer.
 
 Categories:
 {categories_desc}

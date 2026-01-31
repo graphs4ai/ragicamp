@@ -11,7 +11,7 @@ Follows best practices from SQuAD and other QA benchmarks:
 import re
 import string
 from collections import Counter
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from ragicamp.metrics.base import Metric
 
@@ -104,9 +104,13 @@ class ExactMatchMetric(Metric):
                 self.use_stemming = False
 
     def compute(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute exact match score.
+        """Compute exact match score (1-to-1 comparison).
+
+        Args:
+            predictions: List of predicted answers
+            references: List of reference answers (one per prediction)
 
         Returns:
             Dict with exact_match score
@@ -114,23 +118,19 @@ class ExactMatchMetric(Metric):
         scores = []
 
         for pred, ref in zip(predictions, references):
-            # Handle multiple references
-            refs = [ref] if isinstance(ref, str) else ref
-
             if self.normalize:
                 pred_norm = normalize_answer(
                     pred, stemmer=self.stemmer if self.use_stemming else None
                 )
-                refs_norm = [
-                    normalize_answer(r, stemmer=self.stemmer if self.use_stemming else None)
-                    for r in refs
-                ]
+                ref_norm = normalize_answer(
+                    ref, stemmer=self.stemmer if self.use_stemming else None
+                )
             else:
                 pred_norm = pred
-                refs_norm = refs
+                ref_norm = ref
 
-            # Check if prediction matches any reference
-            score = 1.0 if any(pred_norm == r for r in refs_norm) else 0.0
+            # Simple 1-to-1 comparison
+            score = 1.0 if pred_norm == ref_norm else 0.0
             scores.append(score)
 
         # Store per-item scores for retrieval
@@ -179,9 +179,13 @@ class F1Metric(Metric):
                 self.use_stemming = False
 
     def compute(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute F1 score.
+        """Compute F1 score (1-to-1 comparison).
+
+        Args:
+            predictions: List of predicted answers
+            references: List of reference answers (one per prediction)
 
         Returns:
             Dict with f1 score
@@ -189,11 +193,9 @@ class F1Metric(Metric):
         scores = []
 
         for pred, ref in zip(predictions, references):
-            # Handle multiple references - take max F1
-            refs = [ref] if isinstance(ref, str) else ref
-
-            f1_scores = [self._compute_f1(pred, r) for r in refs]
-            scores.append(max(f1_scores))
+            # Simple 1-to-1 F1 computation
+            score = self._compute_f1(pred, ref)
+            scores.append(score)
 
         # Store per-item scores for retrieval
         self._last_per_item = scores

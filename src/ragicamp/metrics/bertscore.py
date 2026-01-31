@@ -2,7 +2,7 @@
 
 import gc
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 # Fix matplotlib backend BEFORE any imports that might use it
 # This prevents errors when running in non-interactive environments (scripts vs notebooks)
@@ -66,38 +66,33 @@ class BERTScoreMetric(Metric):
         print(f"  🗑️  BERTScore model unloaded")
 
     def compute(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute BERTScore with automatic batching for memory efficiency.
+        """Compute BERTScore with automatic batching for memory efficiency (1-to-1).
 
         Loads model, computes scores in batches, then unloads to free GPU memory.
+
+        Args:
+            predictions: List of predicted answers
+            references: List of reference answers (one per prediction)
 
         Returns:
             Dict with precision, recall, and F1 scores
         """
         import torch
-        
-        # Handle multiple references - take first one for now
-        refs = []
-        for ref in references:
-            if isinstance(ref, list):
-                refs.append(ref[0] if ref else "")
-            else:
-                refs.append(ref)
 
         try:
             # Load model (lazy)
             self._load_scorer()
 
             # Compute BERTScore in batches to avoid OOM
-            # Start with batch_size based on available GPU memory
             batch_size = self._estimate_batch_size(predictions)
             
             all_P, all_R, all_F1 = [], [], []
             
             for i in range(0, len(predictions), batch_size):
                 batch_preds = predictions[i:i + batch_size]
-                batch_refs = refs[i:i + batch_size]
+                batch_refs = references[i:i + batch_size]
                 
                 # Clear cache before each batch
                 if torch.cuda.is_available():

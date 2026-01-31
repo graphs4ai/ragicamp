@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -35,7 +35,11 @@ class Metric(ABC):
     """Base class for all evaluation metrics.
 
     Metrics evaluate the quality of generated answers against
-    reference answers. All metrics return both aggregate and per-item scores.
+    reference answers. Each metric computes a 1-to-1 comparison between
+    a prediction and a single reference.
+    
+    Multi-reference aggregation (e.g., taking max score across multiple
+    correct answers) is handled externally by compute_metrics_batched().
     """
 
     def __init__(self, name: str, **kwargs: Any):
@@ -51,13 +55,13 @@ class Metric(ABC):
 
     @abstractmethod
     def compute(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> Dict[str, float]:
-        """Compute the metric.
+        """Compute the metric (1-to-1 prediction vs reference).
 
         Args:
             predictions: List of predicted answers
-            references: List of reference answers (can be list of lists for multiple refs)
+            references: List of reference answers (one per prediction)
             **kwargs: Additional computation parameters
 
         Returns:
@@ -69,13 +73,13 @@ class Metric(ABC):
         pass
 
     def compute_with_details(
-        self, predictions: List[str], references: Union[List[str], List[List[str]]], **kwargs: Any
+        self, predictions: List[str], references: List[str], **kwargs: Any
     ) -> MetricResult:
         """Compute the metric and return detailed results.
 
         Args:
             predictions: List of predicted answers
-            references: List of reference answers
+            references: List of reference answers (one per prediction)
             **kwargs: Additional computation parameters
 
         Returns:
@@ -98,21 +102,19 @@ class Metric(ABC):
         return self._last_per_item.copy()
 
     def compute_single(
-        self, prediction: str, reference: Union[str, List[str]], **kwargs: Any
+        self, prediction: str, reference: str, **kwargs: Any
     ) -> Dict[str, float]:
         """Compute metric for a single prediction-reference pair.
 
         Args:
             prediction: Predicted answer
-            reference: Reference answer(s)
+            reference: Single reference answer
             **kwargs: Additional parameters
 
         Returns:
             Dict of metric scores
         """
-        predictions = [prediction]
-        references = [reference] if isinstance(reference, str) else [reference]
-        return self.compute(predictions, references, **kwargs)
+        return self.compute([prediction], [reference], **kwargs)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}')"

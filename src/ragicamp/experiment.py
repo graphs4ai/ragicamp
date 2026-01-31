@@ -286,7 +286,7 @@ class Experiment:
         else:
             self._state = ExperimentState.new(metrics=metric_names)
 
-        ResourceManager.clear_gpu_memory()
+        # Note: GPU memory cleared by caller before experiment starts
         logger.info("Running: %s", self.name)
 
         try:
