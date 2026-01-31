@@ -146,7 +146,7 @@ class ChunkingStrategy(ABC):
         pass
 
     # Debug mode for verbose output (set True to diagnose chunking issues)
-    DEBUG = True
+    DEBUG = False
     
     def chunk_document(self, document: Document) -> Iterator[Document]:
         """Chunk a document, preserving metadata.
@@ -340,7 +340,7 @@ class RecursiveChunker(ChunkingStrategy):
     MAX_TEXT_FOR_SPLIT = 50_000
     
     # Debug mode - set to True to see step-by-step chunking
-    DEBUG = True
+    DEBUG = False
 
     def chunk(self, text: str) -> List[str]:
         """Recursively split text into chunks."""
@@ -469,22 +469,22 @@ class RecursiveChunker(ChunkingStrategy):
         chunks = []
         start = 0
         iteration = 0
-        while start < len(text):
+        text_len = len(text)
+        
+        while start < text_len:
             iteration += 1
             if self.DEBUG and iteration <= 5:
                 print(f"        [hard_split] iter {iteration}: start={start}", flush=True)
             if self.DEBUG and iteration == 100:
-                print(f"        [hard_split] ... (continuing, {len(text) - start:,} chars remaining)", flush=True)
+                print(f"        [hard_split] ... (continuing, {text_len - start:,} chars remaining)", flush=True)
             
-            end = min(start + self.config.chunk_size, len(text))
+            end = min(start + self.config.chunk_size, text_len)
             chunks.append(text[start:end])
-            start = end - self.config.chunk_overlap if self.config.chunk_overlap > 0 else end
             
-            # Safety: prevent infinite loops
-            if iteration > 100000:
-                if self.DEBUG:
-                    print(f"        [hard_split] ABORT: too many iterations!", flush=True)
+            # CRITICAL: Don't apply overlap on final chunk (prevents infinite loop)
+            if end >= text_len:
                 break
+            start = end - self.config.chunk_overlap if self.config.chunk_overlap > 0 else end
         
         if self.DEBUG:
             print(f"        [hard_split] → {len(chunks)} chunks in {iteration} iterations", flush=True)
