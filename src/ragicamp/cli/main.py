@@ -320,7 +320,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
     # Check credentials
     key_id = os.environ.get("B2_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
     app_key = os.environ.get("B2_APP_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
-    endpoint = os.environ.get("B2_ENDPOINT", "https://s3.us-west-004.backblazeb2.com")
+    endpoint = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
 
     if not key_id or not app_key:
         print("Error: Backblaze credentials not set.")
