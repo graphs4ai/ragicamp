@@ -483,20 +483,17 @@ class DocumentChunker:
         if show_progress:
             print(f"      [Prep: {time.time() - t0:.1f}s]")
 
-        # Use multiprocessing.Pool with imap_unordered for best parallelism
+        # Use multiprocessing.Pool with large chunksize to minimize IPC overhead
+        # Each worker gets doc_count/num_workers docs in one chunk
         t1 = time.time()
+        chunksize = max(1, doc_count // num_workers)
+        if show_progress:
+            print(f"      [chunksize={chunksize}]")
+        
         all_chunk_dicts = []
         with mp.Pool(processes=num_workers) as pool:
-            # imap_unordered processes results as they complete (no ordering overhead)
-            if show_progress:
-                results = list(tqdm(
-                    pool.imap_unordered(_chunk_single_document, args, chunksize=50),
-                    total=doc_count,
-                    desc="    Chunking",
-                    unit="docs"
-                ))
-            else:
-                results = list(pool.imap_unordered(_chunk_single_document, args, chunksize=50))
+            # Use map (not imap) with large chunksize - sends all work upfront
+            results = pool.map(_chunk_single_document, args, chunksize=chunksize)
             
             for chunk_dicts in results:
                 all_chunk_dicts.extend(chunk_dicts)
