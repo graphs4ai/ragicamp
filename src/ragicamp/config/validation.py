@@ -96,11 +96,18 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
 
     # Validate RAG experiments
     rag = config.get("rag", {})
+    singleton_experiments = config.get("experiments", [])
+    
     if rag.get("enabled"):
         if not rag.get("models"):
-            warnings.append("RAG experiments enabled but no models specified")
+            # Only warn if no singleton experiments defined either
+            if not singleton_experiments:
+                warnings.append(
+                    "RAG enabled but no models specified and no singleton experiments defined"
+                )
+            # If singleton experiments exist, this is intentional (grid search disabled)
         if not rag.get("retrievers"):
-            warnings.append("RAG experiments enabled but no retrievers specified")
+            warnings.append("RAG enabled but no retrievers specified")
         for model in rag.get("models", []):
             validate_model_spec(model)
         for q in rag.get("quantization", []):
