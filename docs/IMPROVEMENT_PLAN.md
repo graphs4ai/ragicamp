@@ -1,754 +1,510 @@
 # RAGiCamp Improvement Plan
 
-Based on analysis session on 2026-01-31.
+> **Purpose**: Track framework improvements needed to run the experiments defined in [EXPERIMENT_CONFIGURATIONS.md](./EXPERIMENT_CONFIGURATIONS.md).
+>
+> **Last updated**: 2026-01-31
 
 ---
 
-## Part 1: Architecture & Design Patterns
+## Status Overview
 
-Before implementing changes, understand the existing patterns to maintain consistency.
+| Capability | Implementation | Config Exposure | Blocking Experiments |
+|------------|----------------|-----------------|---------------------|
+| Grid Search | ✅ Complete | ✅ Working | - |
+| Singleton Experiments | ❌ Missing | ❌ Missing | Phase H (agent comparison) |
+| Agent Types | ⚠️ Only 2 types | ⚠️ Hardcoded | Phase H (advanced agents) |
+| Chunking Strategy | ✅ **Implemented** | ❌ Not wired | Phase C (chunk strategies) |
+| Fetch-K (rerank pool) | ✅ **Implemented** | ❌ Not wired | Phase E, G (reranking) |
+| Query Transform | ✅ Complete | ✅ Working | - |
+| Reranking | ✅ Complete | ✅ Working | - |
+| Hybrid/Hierarchical | ✅ Complete | ✅ Working | Phase D |
 
-### Current Architecture Layers
+**Key Insight**: Several capabilities are already implemented but not exposed in config. These are quick wins.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  CLI Layer (cli/)                                                        │
-│  Entry points: run, health, resume, metrics, compare                     │
-│  Responsibility: Parse args, load config, delegate to execution          │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴────────────────────────────────────┐
-│  Specification Layer (spec/)                                             │
-│  ExperimentSpec, build_specs(), naming conventions                       │
-│  Responsibility: Transform YAML config → immutable experiment specs      │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴────────────────────────────────────┐
-│  Execution Layer (execution/)                                            │
-│  runner.py, executor.py, phases/                                         │
-│  Responsibility: Orchestrate experiment lifecycle, handle failures       │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴────────────────────────────────────┐
-│  Agent Layer (agents/)                                                   │
-│  RAGAgent base, DirectLLMAgent, FixedRAGAgent                           │
-│  Responsibility: Answer questions using model + optional retrieval       │
-└───────────────┬─────────────────────────────────┬───────────────────────┘
-                │                                 │
-┌───────────────┴───────────────┐ ┌───────────────┴───────────────────────┐
-│  Model Layer (models/)         │ │  RAG Pipeline Layer (rag/)            │
-│  LanguageModel base            │ │  pipeline.py, query_transform/,       │
-│  HuggingFace, OpenAI, vLLM     │ │  rerankers/                           │
-│  Responsibility: Text gen      │ │  Responsibility: Retrieval pipeline   │
-└────────────────────────────────┘ └───────────────┬───────────────────────┘
-                                                   │
-                                   ┌───────────────┴───────────────────────┐
-                                   │  Retriever Layer (retrievers/)         │
-                                   │  Retriever base, Dense, Sparse,        │
-                                   │  Hybrid, Hierarchical                  │
-                                   │  Responsibility: Document search       │
-                                   └───────────────┬───────────────────────┘
-                                                   │
-                                   ┌───────────────┴───────────────────────┐
-                                   │  Index Layer (indexes/)                │
-                                   │  EmbeddingIndex, HierarchicalIndex     │
-                                   │  Responsibility: Vector storage/search │
-                                   └───────────────────────────────────────┘
-```
+---
 
-### Design Patterns in Use
+## Part 1: Existing Patterns to Follow
 
-#### 1. Abstract Base Class + Factory Pattern
+Before implementing anything, understand the patterns already in use.
+
+### 1.1 Factory Pattern with Registry
+
 ```python
-# Base class defines interface
-class Retriever(ABC):
-    @abstractmethod
-    def retrieve(self, query: str, top_k: int) -> List[Document]: ...
+# factory/agents.py - existing pattern
+class AgentFactory:
+    _custom_agents: Dict[str, type] = {}
 
-# Concrete implementations
-class DenseRetriever(Retriever): ...
-class HybridRetriever(Retriever): ...
+    @classmethod
+    def register(cls, name: str):
+        """Decorator to register custom agents."""
+        def decorator(agent_class: type) -> type:
+            cls._custom_agents[name] = agent_class
+            return agent_class
+        return decorator
 
-# Factory creates from config
-retriever = ComponentFactory.create_retriever(config)
+    @classmethod
+    def create(cls, config: Dict, model: LanguageModel, retriever: Optional[Retriever] = None):
+        ...
 ```
 
-**When to use**: Adding new retrievers, agents, models, metrics.
+**Use this pattern** for new agents. Don't create a separate registry module.
 
-#### 2. Strategy Pattern (in RAG Pipeline)
+### 1.2 Pydantic Config Schemas
+
 ```python
-# Strategies are interchangeable
-class QueryTransformer(ABC):
-    @abstractmethod
-    def transform(self, query: str) -> List[str]: ...
+# config/schemas.py - ChunkingConfig already exists!
+class ChunkingConfig(BaseModel):
+    strategy: str = Field(default="recursive", ...)
+    chunk_size: int = Field(default=512, ...)
+    chunk_overlap: int = Field(default=50, ...)
 
-# Pipeline uses strategies
+class RetrieverConfig(BaseModel):
+    chunking: Optional[ChunkingConfig] = Field(default=None, ...)
+```
+
+**Use existing schemas**. Extend, don't duplicate.
+
+### 1.3 Core Data Schemas
+
+```python
+# core/schemas.py - AgentType enum
+class AgentType(str, Enum):
+    DIRECT_LLM = "direct_llm"
+    FIXED_RAG = "fixed_rag"
+    # Add new agent types here
+```
+
+**Extend the enum** when adding new agent types.
+
+### 1.4 RAGPipeline Already Has Fetch-K
+
+```python
+# rag/pipeline.py - already implemented!
 class RAGPipeline:
-    def __init__(self, retriever, query_transformer=None, reranker=None): ...
+    def __init__(
+        self,
+        retriever: "Retriever",
+        top_k_retrieve: int = 20,  # ← This is fetch_k!
+        top_k_final: int = 5,      # ← This is top_k after reranking
+        ...
+    ):
 ```
 
-**When to use**: Query transformers, rerankers, chunking strategies.
+**Just wire to config**. No new implementation needed.
 
-#### 3. Phased Execution Pattern
+### 1.5 Chunking Already Implemented
+
 ```python
-# Each phase is a handler
-class PhaseHandler(ABC):
-    @abstractmethod
-    def execute(self, context: ExecutionContext) -> ExecutionContext: ...
-
-# Phases: INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
+# corpus/chunking.py - all strategies exist!
+def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
+    strategies = {
+        "fixed": FixedSizeChunker,
+        "sentence": SentenceChunker,
+        "paragraph": ParagraphChunker,
+        "recursive": RecursiveChunker,
+    }
+    return strategies[config.strategy](config)
 ```
 
-**When to use**: Adding new experiment phases, modifying execution flow.
-
-#### 4. Immutable Specification Pattern
-```python
-@dataclass(frozen=True)
-class ExperimentSpec:
-    """Immutable - configuration doesn't change during execution."""
-    name: str
-    model: str
-    ...
-```
-
-**When to use**: Any configuration object passed through the pipeline.
-
-### Design Principles to Follow
-
-#### DO:
-1. **Single Responsibility**: Each class does one thing well
-   - `DenseRetriever` retrieves, doesn't build indexes
-   - `IndexBuilder` builds, doesn't retrieve
-   
-2. **Dependency Injection**: Pass dependencies, don't create them
-   ```python
-   # Good: accept model as parameter
-   class FixedRAGAgent:
-       def __init__(self, model: LanguageModel, retriever: Retriever): ...
-   
-   # Bad: create model internally
-   class FixedRAGAgent:
-       def __init__(self):
-           self.model = HuggingFaceModel(...)  # Tight coupling
-   ```
-
-3. **Interface Segregation**: Small, focused interfaces
-   ```python
-   # Good: focused interface
-   class Retriever(ABC):
-       def retrieve(self, query, top_k) -> List[Document]: ...
-   
-   # Bad: bloated interface
-   class Retriever(ABC):
-       def retrieve(...): ...
-       def index(...): ...
-       def save(...): ...
-       def load(...): ...
-       def visualize(...): ...  # Doesn't belong here
-   ```
-
-4. **Composition over Inheritance**: Combine simple components
-   ```python
-   # Good: compose behaviors
-   class RAGPipeline:
-       def __init__(self, retriever, transformer=None, reranker=None):
-           self.retriever = retriever
-           self.transformer = transformer  # Optional strategy
-           self.reranker = reranker        # Optional strategy
-   ```
-
-#### DON'T:
-1. **Don't add optional parameters indefinitely**
-   ```python
-   # Bad: parameter explosion
-   def retrieve(self, query, top_k, use_rerank=False, rerank_model=None,
-                summarize=False, max_tokens=None, iterative=False, ...):
-   ```
-   
-   Instead, use composition or configuration objects.
-
-2. **Don't mix concerns across layers**
-   - Retrievers shouldn't know about prompts
-   - Agents shouldn't know about experiment phases
-   - Indexes shouldn't know about metrics
-
-3. **Don't over-abstract prematurely**
-   - If there's only one implementation, a simple class is fine
-   - Add abstraction when you need the second implementation
+**Just wire to index builder**. The chunking code is complete.
 
 ---
 
-## Part 2: Summary of Identified Gaps
+## Part 2: Implementation Tasks
 
-### Already Fixed (This Session)
-- [x] `HybridRetriever.load()` now loads pre-built sparse index
-- [x] `HybridRetriever.save()` now persists sparse components
-- [x] Removed redundant GPU clearing calls
+### Phase 1: Configuration Wiring (Quick Wins)
 
-### Remaining Gaps
-1. **Configuration**: Grid search only, no singleton experiments
-2. **Chunking**: Strategy not exposed in config
-3. **Pipeline**: No fetch_k, no context summarization
-4. **Strategies**: No iterative retrieval, no Self-RAG
+These tasks expose existing functionality in config. Minimal new code.
 
----
+#### Task 1.1: Wire chunking_strategy to index builder ⭐ QUICK WIN
 
-## Part 3: Task Plan
+**Current state**: 
+- `ChunkingConfig` exists in `config/schemas.py`
+- `get_chunker()` factory exists in `corpus/chunking.py`
+- Index builder uses hardcoded `RecursiveChunker`
 
-### Phase 1: Singleton Experiment Support
+**Goal**: Parse `chunking_strategy` from retriever config and pass to index builder.
 
-**Goal**: Allow targeted hypothesis-driven experiments.
+**Files to modify**:
+- `indexes/builders/embedding_builder.py` - accept `ChunkConfig`
+- `indexes/builder.py` - parse chunking from retriever config
+- `cli/study.py` - pass chunking config through
 
-**Architecture fit**: Extends `spec/builder.py` without changing other layers.
-
-#### Task 1.1: Add singleton experiment parsing
-
-**File**: `src/ragicamp/spec/builder.py`
-
-```python
-def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
-    specs = []
-    
-    # Existing: grid search specs
-    if config.get("direct", {}).get("enabled"):
-        specs.extend(_build_direct_specs(...))
-    if config.get("rag", {}).get("enabled"):
-        specs.extend(_build_rag_specs(...))
-    
-    # NEW: singleton experiments
-    if "experiments" in config.get("rag", {}):
-        specs.extend(_build_singleton_specs(config["rag"]["experiments"], ...))
-    
-    return specs
-
-def _build_singleton_specs(experiments: List[Dict], ...) -> List[ExperimentSpec]:
-    """Build specs from explicit experiment definitions."""
-    specs = []
-    for exp in experiments:
-        # Each experiment defines its own config
-        specs.append(ExperimentSpec(
-            name=exp["name"],
-            exp_type="rag",
-            model=exp.get("model") or default_model,
-            retriever=_resolve_retriever(exp["retriever"]),  # Handle inline
-            top_k=exp.get("top_k", 5),
-            fetch_k=exp.get("fetch_k"),  # NEW field
-            query_transform=exp.get("query_transform"),
-            reranker=exp.get("reranker"),
-            prompt=exp.get("prompt", "concise"),
-            dataset=exp.get("dataset") or default_dataset,
-            hypothesis=exp.get("hypothesis"),  # NEW: for documentation
-            ...
-        ))
-    return specs
+**Config format** (already supported by `RetrieverConfig`):
+```yaml
+retrievers:
+  - type: dense
+    name: dense_paragraph
+    embedding_model: BAAI/bge-large-en-v1.5
+    chunk_size: 1024
+    chunking_strategy: paragraph  # NEW - now wired!
 ```
-
-**Changes**:
-1. Add `_build_singleton_specs()` function
-2. Add `hypothesis` field to `ExperimentSpec` (optional metadata)
-3. Add `fetch_k` field to `ExperimentSpec`
 
 **Acceptance criteria**:
-- [ ] Can define experiments in `rag.experiments` list
-- [ ] Each experiment specifies its own complete config
-- [ ] Coexists with grid search definitions
+- [ ] `chunking_strategy` parsed from retriever config
+- [ ] `ChunkConfig` created and passed to `get_chunker()`
+- [ ] Index builder uses configured strategy instead of hardcoded recursive
+- [ ] Backwards compatible (default = recursive)
 
 ---
 
-#### Task 1.2: Handle inline retriever definitions
+#### Task 1.2: Wire fetch_k to ExperimentSpec and agents ⭐ QUICK WIN
 
-**Files**: `spec/builder.py`, `indexes/builder.py`
+**Current state**:
+- `RAGPipeline` has `top_k_retrieve` (fetch_k) and `top_k_final` (top_k)
+- `FixedRAGAgent` calculates `top_k_retrieve = top_k * 4` if reranker present
+- Not configurable from YAML
 
-When singleton defines retriever inline, generate name and ensure index exists:
+**Goal**: Allow explicit `fetch_k` in config.
 
-```python
-def _resolve_retriever(retriever_config: Union[str, Dict]) -> str:
-    """Resolve retriever config to a retriever name."""
-    if isinstance(retriever_config, str):
-        return retriever_config  # Already a name
-    
-    # Generate deterministic name from config
-    name = _generate_retriever_name(retriever_config)
-    
-    # Register for building if not exists
-    _pending_retrievers[name] = retriever_config
-    
-    return name
-```
-
----
-
-### Phase 2: Chunking Strategy Support
-
-**Goal**: Expose chunking strategy in retriever config.
-
-**Architecture fit**: Extends index builders, no agent changes.
-
-#### Task 2.1: Add chunking_strategy parameter
-
-**File**: `src/ragicamp/indexes/builders/embedding_builder.py`
-
-```python
-def build_embedding_index(
-    corpus: List[Document],
-    embedding_model: str,
-    chunk_size: int = 512,
-    chunk_overlap: int = 50,
-    chunking_strategy: str = "recursive",  # NEW
-    ...
-) -> EmbeddingIndex:
-    # Select chunking strategy
-    chunker = _get_chunker(chunking_strategy, chunk_size, chunk_overlap)
-    ...
-```
+**Files to modify**:
+- `spec/experiment.py` - add `fetch_k: Optional[int]` field
+- `spec/builder.py` - parse `fetch_k` from config
+- `cli/study.py` - pass `fetch_k` to agent creation
+- `agents/fixed_rag.py` - use explicit `top_k_retrieve` when provided
 
 **Config format**:
 ```yaml
-retriever:
-  type: dense
-  chunk_size: 1024
-  chunking_strategy: paragraph  # NEW: fixed, sentence, paragraph, recursive
+# Grid search
+rag:
+  top_k_values: [3, 5]
+  fetch_k_multiplier: 4  # Optional: fetch_k = top_k * multiplier
+
+# Singleton (future)
+experiments:
+  - name: rerank_test
+    top_k: 3
+    fetch_k: 20  # Explicit: retrieve 20, rerank to 3
+```
+
+**Acceptance criteria**:
+- [ ] `fetch_k` field in `ExperimentSpec`
+- [ ] Grid search can specify `fetch_k_multiplier` or explicit `fetch_k_values`
+- [ ] `FixedRAGAgent` uses explicit `top_k_retrieve` when provided
+- [ ] Backwards compatible (default = `top_k * 4` when reranker present)
+
+---
+
+### Phase 2: Singleton Experiments
+
+Enables hypothesis-driven research instead of just grid search.
+
+#### Task 2.1: Add singleton experiment parsing
+
+**Current state**:
+- `build_specs()` only handles `direct` and `rag` grid search blocks
+- No way to define individual experiments
+
+**Goal**: Support `experiments` list for individual experiment definitions.
+
+**Files to modify**:
+- `spec/experiment.py` - add optional fields: `agent_type`, `hypothesis`, `agent_params`
+- `spec/builder.py` - add `_build_singleton_specs()` function
+
+**Config format**:
+```yaml
+# Grid search (existing, still works)
+rag:
+  enabled: true
+  models: [...]
+  retrievers: [...]
+
+# Singleton experiments (NEW)
+experiments:
+  - name: baseline_vanilla
+    agent_type: vanilla_rag  # or fixed_rag, iterative_rag, etc.
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_c512
+    dataset: nq
+    top_k: 5
+    prompt: concise
+    hypothesis: "Simple RAG baseline without enhancements"
+```
+
+**Changes to ExperimentSpec**:
+```python
+@dataclass(frozen=True)
+class ExperimentSpec:
+    # Existing fields...
+    
+    # NEW fields
+    agent_type: Optional[str] = None      # explicit agent type
+    fetch_k: Optional[int] = None         # from Task 1.2
+    hypothesis: Optional[str] = None      # documentation
+    agent_params: Dict[str, Any] = field(default_factory=dict)  # agent-specific config
+```
+
+**Acceptance criteria**:
+- [ ] `experiments` list parsed if present
+- [ ] Each experiment creates one `ExperimentSpec`
+- [ ] Can coexist with grid search blocks
+- [ ] `hypothesis` field is optional (for documentation)
+
+---
+
+### Phase 3: Agent Hierarchy
+
+Build on existing factory pattern. Start simple, add complexity incrementally.
+
+#### Task 3.1: Extend AgentType enum
+
+**Files**: `core/schemas.py`
+
+```python
+class AgentType(str, Enum):
+    DIRECT_LLM = "direct_llm"
+    FIXED_RAG = "fixed_rag"
+    # NEW
+    VANILLA_RAG = "vanilla_rag"
+    PIPELINE_RAG = "pipeline_rag"  # alias for fixed_rag
+    ITERATIVE_RAG = "iterative_rag"
+    SELF_RAG = "self_rag"
 ```
 
 ---
 
-### Phase 3: Fetch-K Support
+#### Task 3.2: Create VanillaRAGAgent (minimal RAG baseline)
 
-**Goal**: Retrieve N documents, rerank to K.
+**Purpose**: Simplest possible RAG - retrieve and generate. No query transform, no reranking.
 
-**Architecture fit**: Extends `RAGPipeline`, adds field to `ExperimentSpec`.
+**Why it matters**: Clean baseline for ablation studies. Current `FixedRAGAgent` has optional pipeline complexity.
 
-#### Task 3.1: Add fetch_k to pipeline
+**Files**: NEW `agents/vanilla_rag.py`
 
-**File**: `src/ragicamp/rag/pipeline.py`
-
+**Implementation**:
 ```python
-class RAGPipeline:
-    def __init__(
-        self,
-        retriever: Retriever,
-        query_transformer: Optional[QueryTransformer] = None,
-        reranker: Optional[Reranker] = None,
-        fetch_k: Optional[int] = None,  # NEW
-    ):
-        self.fetch_k = fetch_k
+from ragicamp.factory.agents import AgentFactory
 
-    def batch_retrieve(self, queries: List[str], top_k: int) -> List[List[Document]]:
-        # Use fetch_k if specified, otherwise use top_k
-        retrieve_k = self.fetch_k or top_k
-        
-        # Retrieve more documents
-        results = self.retriever.batch_retrieve(queries, retrieve_k)
-        
-        # Rerank and trim to top_k
-        if self.reranker:
-            results = self.reranker.batch_rerank(queries, results)
-            results = [docs[:top_k] for docs in results]
-        
-        return results
-```
-
----
-
-### Phase 4: New RAG Strategies
-
-**Architecture fit**: New agent classes following existing patterns.
-
-#### Task 4.1: Iterative Retrieval Agent
-
-**File**: NEW `src/ragicamp/agents/iterative_rag.py`
-
-**Pattern**: New agent type, follows `RAGAgent` interface.
-
-```python
-class IterativeRAGAgent(RAGAgent):
-    """Agent that iteratively refines retrieval.
+@AgentFactory.register("vanilla_rag")  # Use existing decorator!
+class VanillaRAGAgent(RAGAgent):
+    """Simplest RAG: retrieve → generate."""
     
-    Flow:
-    1. Initial retrieval
-    2. LLM evaluates: "Is this context sufficient?"
-    3. If not: Generate refined query → Retrieve again
-    4. Repeat until max_iterations or sufficient context
-    5. Generate final answer
-    """
-    
-    def __init__(
-        self,
-        model: LanguageModel,
-        retriever: Retriever,
-        prompt_builder: PromptBuilder,
-        max_iterations: int = 2,
-        evaluation_prompt: Optional[str] = None,
-    ):
+    def __init__(self, name, model, retriever, top_k=5, prompt_builder=None, **kwargs):
+        super().__init__(name, **kwargs)
         self.model = model
         self.retriever = retriever
-        self.prompt_builder = prompt_builder
-        self.max_iterations = max_iterations
-        self.evaluation_prompt = evaluation_prompt or DEFAULT_EVAL_PROMPT
+        self.top_k = top_k
+        self.prompt_builder = prompt_builder or PromptBuilder()
     
-    def answer(self, query: str, top_k: int = 5) -> RAGResponse:
-        context_docs = []
-        queries_used = [query]
-        
-        for iteration in range(self.max_iterations):
-            # Retrieve with current query
-            new_docs = self.retriever.retrieve(queries_used[-1], top_k)
-            context_docs = self._merge_docs(context_docs, new_docs)
-            
-            # Evaluate context quality (skip on last iteration)
-            if iteration < self.max_iterations - 1:
-                is_sufficient, refined_query = self._evaluate_context(
-                    query, context_docs
-                )
-                if is_sufficient:
-                    break
-                queries_used.append(refined_query)
-        
-        # Generate final answer
-        context_text = self._format_context(context_docs)
-        prompt = self.prompt_builder.build_rag(query, context_text)
-        answer = self.model.generate(prompt)
-        
-        return RAGResponse(
-            answer=answer,
-            prompt=prompt,
-            context=context_docs,
-            metadata={"iterations": len(queries_used), "queries": queries_used}
-        )
+    def answer(self, query: str, **kwargs) -> RAGResponse:
+        docs = self.retriever.retrieve(query, top_k=self.top_k)
+        context = ContextFormatter.format_numbered(docs)
+        prompt = self.prompt_builder.build_rag(query, context)
+        answer = self.model.generate(prompt, **kwargs)
+        return RAGResponse(answer=answer, context=RAGContext(query=query, retrieved_docs=docs), prompt=prompt)
+    
+    def batch_answer(self, queries: List[str], **kwargs) -> List[RAGResponse]:
+        # Use batch retrieval and batch generation
+        all_docs = self.retriever.batch_retrieve(queries, top_k=self.top_k)
+        prompts = [self.prompt_builder.build_rag(q, ContextFormatter.format_numbered(d)) 
+                   for q, d in zip(queries, all_docs)]
+        answers = self.model.generate(prompts, **kwargs)
+        return [RAGResponse(...) for ...]
 ```
 
-**Registration**:
-```python
-@ComponentFactory.register_agent("iterative_rag")
-class IterativeRAGAgent(RAGAgent): ...
-```
+**Acceptance criteria**:
+- [ ] Uses `@AgentFactory.register("vanilla_rag")` decorator
+- [ ] No pipeline, no query transform, no reranking
+- [ ] Supports batch processing
+- [ ] Works in singleton experiments with `agent_type: vanilla_rag`
 
 ---
 
-#### Task 4.2: Self-RAG Agent
+#### Task 3.3: Add pipeline_rag alias for fixed_rag
 
-**File**: NEW `src/ragicamp/agents/self_rag.py`
+**Purpose**: Clearer naming. "Fixed" is misleading since it supports dynamic pipeline features.
 
-**Concept**: Model decides whether retrieval helps, inspired by Self-RAG paper.
+**Files**: `factory/agents.py`
 
 ```python
-class SelfRAGAgent(RAGAgent):
-    """Agent that decides whether to use retrieval based on query.
+@classmethod
+def create(cls, config, model, retriever=None):
+    agent_type = config["type"]
     
-    Flow:
-    1. Classify query: "Does this need retrieval?"
-    2. If yes: Retrieve → Generate with context
-    3. If no: Generate directly from knowledge
-    4. Optionally: Verify answer against retrieved context
+    # Resolve aliases
+    ALIASES = {"pipeline_rag": "fixed_rag"}
+    agent_type = ALIASES.get(agent_type, agent_type)
     
-    This helps when:
-    - Model's knowledge is sufficient (no retrieval needed)
-    - Retrieved context is misleading (ignore it)
-    - Query is better answered from reasoning (not facts)
-    """
-    
-    def __init__(
-        self,
-        model: LanguageModel,
-        retriever: Retriever,
-        prompt_builder: PromptBuilder,
-        retrieval_threshold: float = 0.5,  # Confidence to skip retrieval
-        verify_answer: bool = False,       # Check answer against context
-    ):
-        self.model = model
-        self.retriever = retriever
-        self.prompt_builder = prompt_builder
-        self.retrieval_threshold = retrieval_threshold
-        self.verify_answer = verify_answer
-    
-    def answer(self, query: str, top_k: int = 5) -> RAGResponse:
-        # Step 1: Decide if retrieval is needed
-        needs_retrieval, confidence = self._assess_retrieval_need(query)
-        
-        if needs_retrieval:
-            # Step 2a: Standard RAG path
-            docs = self.retriever.retrieve(query, top_k)
-            context_text = self._format_context(docs)
-            prompt = self.prompt_builder.build_rag(query, context_text)
-            answer = self.model.generate(prompt)
-            
-            # Optional: Verify answer is supported
-            if self.verify_answer:
-                is_supported = self._verify_answer_support(answer, docs)
-                if not is_supported:
-                    # Fall back to direct answer
-                    return self._generate_direct(query)
-            
-            return RAGResponse(
-                answer=answer,
-                prompt=prompt,
-                context=docs,
-                metadata={"used_retrieval": True, "confidence": confidence}
-            )
-        else:
-            # Step 2b: Direct answer path
-            return self._generate_direct(query)
-    
-    def _assess_retrieval_need(self, query: str) -> Tuple[bool, float]:
-        """Ask model if retrieval would help."""
-        assessment_prompt = f"""Given this question, decide if you need external information to answer it accurately.
-
-Question: {query}
-
-Consider:
-- Is this asking for factual information you might not know?
-- Is this asking about recent events or specific data?
-- Could you answer this from general reasoning?
-
-Respond with: RETRIEVE or DIRECT, followed by confidence 0-1.
-Example: RETRIEVE 0.8"""
-        
-        response = self.model.generate(assessment_prompt)
-        needs_retrieval, confidence = self._parse_assessment(response)
-        return needs_retrieval, confidence
-    
-    def _generate_direct(self, query: str) -> RAGResponse:
-        """Generate answer without retrieval."""
-        prompt = self.prompt_builder.build_direct(query)
-        answer = self.model.generate(prompt)
-        return RAGResponse(
-            answer=answer,
-            prompt=prompt,
-            context=[],
-            metadata={"used_retrieval": False}
-        )
+    # ... rest of existing logic
 ```
+
+**Acceptance criteria**:
+- [ ] `agent_type: pipeline_rag` works in config
+- [ ] `agent_type: fixed_rag` still works (backwards compat)
+- [ ] Both create the same `FixedRAGAgent` class
+
+---
+
+#### Task 3.4: IterativeRAGAgent (multi-turn refinement)
+
+**Purpose**: Refine query based on initial retrieval results.
+
+**Flow**:
+1. Retrieve with original query
+2. LLM evaluates: "Is context sufficient to answer?"
+3. If not sufficient: LLM generates refined query → retrieve again
+4. Merge documents (deduplicate by ID)
+5. Repeat until max_iterations or sufficient
+6. Generate final answer with accumulated context
+
+**Files**: NEW `agents/iterative_rag.py`
 
 **Config format**:
 ```yaml
 experiments:
-  - name: self_rag_test
-    agent_type: self_rag  # NEW: agent type selection
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+  - name: iterative_test
+    agent_type: iterative_rag
     retriever: dense_bge
-    self_rag:
-      retrieval_threshold: 0.6
-      verify_answer: true
+    top_k: 5
+    agent_params:
+      max_iterations: 2
+      stop_on_sufficient: true
 ```
 
----
-
-#### Task 4.3: Context Summarization (as pipeline component)
-
-**File**: NEW `src/ragicamp/rag/context_processor.py`
-
-**Pattern**: Strategy pattern, composable with pipeline.
-
-```python
-class ContextProcessor(ABC):
-    """Process retrieved context before passing to LLM."""
-    
-    @abstractmethod
-    def process(
-        self, 
-        query: str, 
-        documents: List[Document],
-        model: LanguageModel,
-    ) -> str:
-        """Process documents into context string."""
-        pass
-
-
-class SummarizingProcessor(ContextProcessor):
-    """Summarize context if too long."""
-    
-    def __init__(self, max_tokens: int = 1024):
-        self.max_tokens = max_tokens
-    
-    def process(self, query, documents, model) -> str:
-        context = ContextFormatter.format_numbered(documents)
-        
-        if model.count_tokens(context) <= self.max_tokens:
-            return context
-        
-        # Summarize
-        summary_prompt = f"""Summarize the following context, keeping information relevant to the question.
-
-Question: {query}
-
-Context:
-{context}
-
-Provide a concise summary with key facts:"""
-        
-        return model.generate(summary_prompt)
-
-
-class PassthroughProcessor(ContextProcessor):
-    """No processing, just format."""
-    
-    def process(self, query, documents, model) -> str:
-        return ContextFormatter.format_numbered(documents)
-```
+**Acceptance criteria**:
+- [ ] Uses `@AgentFactory.register("iterative_rag")` decorator
+- [ ] Configurable `max_iterations` (default: 2)
+- [ ] Tracks iterations in response metadata
+- [ ] Works in singleton experiments
 
 ---
 
-### Phase 5: Efficiency Improvements
+#### Task 3.5: SelfRAGAgent (retrieval decision)
 
-#### Task 5.1: Cache predictions.json
+**Purpose**: Model decides whether to use retrieval based on query.
 
-**File**: `src/ragicamp/execution/phases/`
+**Flow**:
+1. Assess query: "Do I need external information?"
+2. If confident (above threshold): generate directly (no retrieval)
+3. If unsure: use RAG path
+4. Optionally verify answer is supported by context
 
-Load once, share across phases via `ExecutionContext`.
+**Files**: NEW `agents/self_rag.py`
 
----
-
-#### Task 5.2: Parallelize CPU metrics
-
-**File**: `src/ragicamp/metrics/__init__.py`
-
-Use `ThreadPoolExecutor` for CPU-only metrics (exact_match, f1) while GPU metrics run.
-
----
-
-## Part 4: Implementation Order
-
-| Order | Phase | Task | Effort | Impact | Dependencies |
-|-------|-------|------|--------|--------|--------------|
-| 1 | 1.1 | Singleton experiments | Medium | HIGH | None |
-| 2 | 1.2 | Inline retriever handling | Medium | HIGH | 1.1 |
-| 3 | 2.1 | Chunking strategy | Low | HIGH | None |
-| 4 | 3.1 | Fetch-K support | Low | MEDIUM | None |
-| 5 | 4.1 | Iterative RAG agent | Medium | MEDIUM | None |
-| 6 | 4.2 | Self-RAG agent | Medium | HIGH | None |
-| 7 | 4.3 | Context summarization | Low | MEDIUM | None |
-| 8 | 5.1 | Cache predictions | Low | LOW | None |
-| 9 | 5.2 | Parallel metrics | Low | LOW | None |
-
----
-
-## Part 5: Maintaining Code Quality
-
-### Before Adding a Feature
-
-1. **Identify the layer**: Where does this belong?
-   - New experiment type → Agent layer
-   - New retrieval strategy → RAG pipeline layer
-   - New config option → Spec layer
-   
-2. **Check existing patterns**: Is there a similar feature?
-   - Copy the pattern, don't invent new ones
-   
-3. **Define the interface first**: What's the minimal contract?
-   ```python
-   class NewAgent(RAGAgent):
-       def answer(self, query: str, top_k: int = 5) -> RAGResponse: ...
-   ```
-
-4. **Keep it simple**: Start with the minimal implementation
-   - Add complexity only when needed
-   - Prefer configuration over code changes
-
-### Code Review Checklist
-
-- [ ] Follows existing patterns in the codebase
-- [ ] No new dependencies on unrelated layers
-- [ ] Has docstrings explaining purpose and usage
-- [ ] Configuration is validated in spec layer
-- [ ] Errors are handled gracefully with helpful messages
-- [ ] GPU memory is cleaned up after use
-- [ ] Can be tested in isolation
-
----
-
-## Part 6: Example Config After Implementation
-
+**Config format**:
 ```yaml
-# rag_hypotheses.yaml
-
-name: rag_hypotheses
-description: "Hypothesis-driven RAG experiments"
-
-num_questions: 100
-datasets: [nq]
-
-models: &model
-  - hf:meta-llama/Llama-3.2-3B-Instruct
-
-direct:
-  enabled: true
-  models: *model
-  prompts: [concise]
-
-rag:
-  enabled: true
-  
-  corpus:
-    source: wikimedia/wikipedia
-    version: 20231101.en
-    max_docs: 150000
-
-  # Singleton experiments - each tests one hypothesis
-  experiments:
-    # Baseline
-    - name: baseline
-      hypothesis: "Standard dense retrieval"
-      model: *model
-      retriever: dense_bge_c512
-      top_k: 5
-      prompt: concise
-      dataset: nq
-
-    # Hypothesis: Larger chunks help
-    - name: h1_large_chunks
-      hypothesis: "Larger chunks provide better context"
-      model: *model
-      retriever:
-        type: dense
-        embedding_model: BAAI/bge-large-en-v1.5
-        chunk_size: 1024
-        chunking_strategy: paragraph
-      top_k: 3
-      prompt: concise
-      dataset: nq
-
-    # Hypothesis: Fetch more, rerank to fewer
-    - name: h2_fetch_rerank
-      hypothesis: "Overfetch and rerank reduces noise"
-      model: *model
-      retriever: dense_bge_c512
-      top_k: 3
-      fetch_k: 15
-      reranker: bge
-      prompt: concise
-      dataset: nq
-
-    # Hypothesis: Self-RAG avoids bad retrieval
-    - name: h3_self_rag
-      hypothesis: "Let model decide when to use retrieval"
-      model: *model
-      agent_type: self_rag
-      retriever: dense_bge_c512
-      top_k: 5
-      self_rag:
-        retrieval_threshold: 0.6
-      prompt: concise
-      dataset: nq
-
-    # Hypothesis: Iterative refinement finds better docs
-    - name: h4_iterative
-      hypothesis: "Refine query after initial retrieval"
-      model: *model
-      agent_type: iterative_rag
-      retriever: dense_bge_c512
-      top_k: 5
-      iterative:
-        max_iterations: 2
-      prompt: concise
-      dataset: nq
-
-metrics:
-  - exact_match
-  - f1
-  - llm_judge_qa
-
-llm_judge:
-  model: openai:gpt-4o-mini
-
-output_dir: outputs/rag_hypotheses
+experiments:
+  - name: selfrag_test
+    agent_type: self_rag
+    retriever: dense_bge
+    top_k: 5
+    agent_params:
+      retrieval_threshold: 0.5
+      verify_answer: true
+      fallback_to_direct: true
 ```
+
+**Acceptance criteria**:
+- [ ] Uses `@AgentFactory.register("self_rag")` decorator
+- [ ] Tracks retrieval decision in response metadata
+- [ ] Configurable threshold and verification
+- [ ] Works in singleton experiments
+
+---
+
+### Phase 4: Optimizations (Low Priority)
+
+#### Task 4.1: Cache predictions across execution phases
+
+**Current**: Predictions written to JSON, then re-read by metrics phase.
+**Goal**: Keep predictions in `ExecutionContext` to avoid redundant I/O.
+
+#### Task 4.2: Parallelize CPU-only metrics
+
+**Current**: Metrics run sequentially.
+**Goal**: Run CPU-only metrics (exact_match, f1) in ThreadPoolExecutor while GPU metrics run.
+
+---
+
+## Part 3: Implementation Order
+
+```
+Phase 1: Configuration Wiring (Quick Wins) ← START HERE
+  1.1 Wire chunking_strategy ──┐
+  1.2 Wire fetch_k ────────────┴──→ Unlocks: Phase C, E, G experiments
+
+Phase 2: Singleton Experiments
+  2.1 Add experiments list parsing ──→ Unlocks: hypothesis-driven research
+
+Phase 3: Agent Hierarchy (depends on Phase 2)
+  3.1 Extend AgentType enum ──┐
+  3.2 VanillaRAGAgent ────────┤
+  3.3 pipeline_rag alias ─────┴──→ 3.4 IterativeRAGAgent ──→ 3.5 SelfRAGAgent
+                                   └──→ Unlocks: Phase H experiments
+
+Phase 4: Optimizations (independent, low priority)
+  4.1 Cache predictions
+  4.2 Parallel metrics
+```
+
+**Recommended order**: 1.1 → 1.2 → 2.1 → 3.1 → 3.2 → 3.3 → 3.4 → 3.5
+
+**Rationale**:
+1. **Phase 1 first**: Quick wins that unblock experiments with minimal code
+2. **Phase 2 second**: Singleton experiments enable testing new agents
+3. **Phase 3 third**: Build agents incrementally (vanilla → advanced)
+4. **Phase 4 last**: Performance optimization is lower priority than features
+
+---
+
+## Part 4: Mapping to Experiments
+
+| Experiment Phase | Required Tasks | Status |
+|-----------------|----------------|--------|
+| A: Baselines | None | ✅ Ready |
+| B: Embedding Models | None | ✅ Ready |
+| C: Chunk Size & Strategy | **1.1** | ⏳ Wire chunking_strategy |
+| D: Retrieval Strategies | None | ✅ Ready |
+| E: Top-K and Reranking | **1.2** | ⏳ Wire fetch_k |
+| F: Query Transformation | None | ✅ Ready |
+| G: Reranker Comparison | **1.2** | ⏳ Wire fetch_k |
+| H: Agent Architectures | **2.1, 3.1-3.5** | ⏳ Full agent hierarchy |
+| I: Prompt Engineering | None | ✅ Ready |
+
+---
+
+## Part 5: Design Checklist
+
+Before implementing, verify each task:
+
+### Compatibility
+
+- [ ] Uses existing factory pattern (`@AgentFactory.register` or `@RetrieverFactory.register`)
+- [ ] Extends existing Pydantic schemas (don't create parallel schemas)
+- [ ] Follows `to_dict()`/`from_dict()` pattern for serialization
+- [ ] Extends `AgentType` enum for new agent types
+
+### Maintainability
+
+- [ ] Single responsibility (each class does one thing)
+- [ ] Dependency injection (pass components, don't create internally)
+- [ ] Configuration validated in spec layer, not in agent
+- [ ] Errors have helpful messages
+
+### Performance
+
+- [ ] Supports batch operations (`batch_answer`, `batch_retrieve`)
+- [ ] GPU memory cleaned up after use (`ResourceManager.clear_gpu_memory()`)
+- [ ] Avoids redundant I/O (use in-memory caching where appropriate)
+
+### Backwards Compatibility
+
+- [ ] Old config formats still work
+- [ ] Aliases for renamed components
+- [ ] Default values match current behavior
+
+---
+
+## Appendix: File Reference
+
+| File | Purpose | Patterns |
+|------|---------|----------|
+| `factory/agents.py` | Agent factory with registry | `@register` decorator, `create()` method |
+| `factory/retrievers.py` | Retriever factory | Same pattern as agents |
+| `config/schemas.py` | Pydantic validation schemas | `ChunkingConfig`, `RetrieverConfig`, etc. |
+| `core/schemas.py` | Core data structures | `AgentType` enum, `RAGResponseMeta` |
+| `spec/experiment.py` | Immutable experiment spec | Frozen dataclass with `to_dict()` |
+| `spec/builder.py` | Build specs from YAML | `build_specs()`, `_build_rag_specs()` |
+| `corpus/chunking.py` | Chunking strategies | `get_chunker()` factory |
+| `rag/pipeline.py` | RAG pipeline orchestration | `top_k_retrieve`, `top_k_final` |
+| `indexes/builder.py` | Index building orchestration | `ensure_indexes_exist()` |
