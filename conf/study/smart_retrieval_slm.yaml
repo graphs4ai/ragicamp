@@ -83,10 +83,10 @@ rag:
     max_docs: 200000
     wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
     streaming: false           # Load full dataset into RAM (faster, requires ~20GB)
-    # Index building batch sizes (adjust based on available RAM/VRAM)
-    doc_batch_size: 5000       # Documents to chunk per batch
-    embedding_batch_size: 128  # Texts to embed per GPU batch (increase for more VRAM)
-    chunk_workers: 32          # Parallel workers for chunking (default: CPU count)
+    # Index building batch sizes (tuned for high-RAM/VRAM machines)
+    doc_batch_size: 50000      # Documents to chunk per batch
+    embedding_batch_size: 4096 # Texts to embed per GPU batch
+    chunk_workers: 32          # Parallel workers for chunking
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)
