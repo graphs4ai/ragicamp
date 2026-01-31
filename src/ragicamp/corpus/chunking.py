@@ -432,6 +432,8 @@ class DocumentChunker:
         """
         import multiprocessing as mp
 
+        from tqdm import tqdm
+
         if num_workers is None:
             num_workers = mp.cpu_count()
 
@@ -442,10 +444,20 @@ class DocumentChunker:
         # Prepare args for worker function
         args = [(doc, self.config) for doc in documents]
 
-        # Process in parallel
+        # Process in parallel with progress bar
         all_chunks = []
         with mp.Pool(num_workers) as pool:
-            results = pool.map(_chunk_single_document, args)
+            # Use imap for progress tracking instead of map
+            if show_progress:
+                results = list(tqdm(
+                    pool.imap(_chunk_single_document, args, chunksize=100),
+                    total=doc_count,
+                    desc="    Chunking",
+                    unit="docs"
+                ))
+            else:
+                results = pool.map(_chunk_single_document, args)
+            
             for doc_chunks in results:
                 all_chunks.extend(doc_chunks)
 
