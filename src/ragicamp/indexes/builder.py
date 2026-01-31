@@ -201,8 +201,6 @@ def ensure_indexes_exist(
                     chunking_strategy=first_retriever.get("chunking_strategy", "recursive"),
                     doc_batch_size=corpus_config.get("doc_batch_size", 5000),
                     embedding_batch_size=corpus_config.get("embedding_batch_size", 64),
-                    chunk_workers=corpus_config.get("chunk_workers"),
-                    parallel_chunking=corpus_config.get("parallel_chunking", False),
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()

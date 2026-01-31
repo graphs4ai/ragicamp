@@ -87,10 +87,6 @@ rag:
     # Index building batch sizes (tuned for high-RAM/VRAM machines)
     doc_batch_size: 50000      # Documents to chunk per batch
     embedding_batch_size: 4096 # Texts to embed per GPU batch
-    # Chunking mode: sequential (default) is faster when large datasets are in memory
-    # Set to true to test parallel chunking (may be slower due to fork overhead)
-    parallel_chunking: false
-    # chunk_workers: number of workers for parallel chunking (only used if parallel_chunking: true)
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)

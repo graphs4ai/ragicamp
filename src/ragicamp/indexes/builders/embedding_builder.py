@@ -15,6 +15,9 @@ from ragicamp.utils.artifacts import get_artifact_manager
 
 logger = get_logger(__name__)
 
+# Maximum document size in characters (larger docs are truncated)
+MAX_DOC_CHARS = 100_000
+
 
 def build_embedding_index(
     index_name: str,
@@ -25,8 +28,7 @@ def build_embedding_index(
     chunking_strategy: str = "recursive",
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 64,
-    chunk_workers: int = None,
-    parallel_chunking: bool = False,
+    chunk_workers: int = None,  # Kept for API compatibility, not used
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -42,9 +44,7 @@ def build_embedding_index(
         chunking_strategy: Chunking strategy ('recursive', 'fixed', 'sentence', 'paragraph')
         doc_batch_size: Documents to process per batch (default 5000)
         embedding_batch_size: Texts to embed per GPU batch (default 64, increase for more VRAM)
-        chunk_workers: Number of parallel workers for chunking (default: CPU count)
-        parallel_chunking: Use parallel chunking (default False - sequential is faster
-            when large datasets are in memory due to fork overhead)
+        chunk_workers: Deprecated, kept for API compatibility
 
     Returns:
         Path to the saved index
@@ -52,8 +52,10 @@ def build_embedding_index(
     import faiss
     import numpy as np
     from sentence_transformers import SentenceTransformer
+    from tqdm import tqdm
 
     from ragicamp.corpus import ChunkConfig, CorpusConfig, DocumentChunker, WikipediaCorpus
+    from ragicamp.retrievers.base import Document
 
     manager = get_artifact_manager()
 
@@ -61,12 +63,11 @@ def build_embedding_index(
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
-    print(f"  Chunking: {chunking_strategy} ({'parallel' if parallel_chunking else 'sequential'})")
+    print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"{'='*60}")
 
     # Initialize corpus
-    # Build metadata dict for WikiRank filter and other options
     corpus_metadata = {}
     if corpus_config.get("wikirank_top_k"):
         corpus_metadata["wikirank_top_k"] = corpus_config["wikirank_top_k"]
@@ -123,76 +124,40 @@ def build_embedding_index(
                 batch_num += 1
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
-                
-                # Chunking phase
+
+                # Chunking phase (sequential with progress bar)
                 t_chunk = time.time()
-                if parallel_chunking:
-                    print(f"    Chunking (parallel, {chunk_workers or 'auto'} workers)...")
-                    batch_chunks = chunker.chunk_documents_parallel(
-                        doc_batch,
-                        num_workers=chunk_workers,
-                        show_progress=True
-                    )
-                else:
-                    # Sequential chunking - process docs one by one with progress
-                    from tqdm import tqdm
-                    from ragicamp.retrievers.base import Document
-                    MAX_DOC_CHARS = 100_000  # Truncate large docs to prevent slow chunking
-                    batch_chunks = []
-                    truncated = 0
-                    slow_docs = 0
-                    
-                    # Profile first few docs to diagnose issues
-                    PROFILE_FIRST_N = 5
-                    
-                    for i, doc in enumerate(tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80)):
-                        doc_start = time.time()
-                        
-                        # Truncate oversized docs
-                        text = doc.text
-                        orig_len = len(text)
-                        if orig_len > MAX_DOC_CHARS:
-                            text = text[:MAX_DOC_CHARS]
-                            truncated += 1
-                            doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-                        
-                        # Profile chunking
-                        chunk_start = time.time()
-                        doc_chunks = list(chunker.strategy.chunk_document(doc))
-                        chunk_time = time.time() - chunk_start
-                        
-                        batch_chunks.extend(doc_chunks)
-                        
-                        doc_time = time.time() - doc_start
-                        
-                        # Print profile for first N docs
-                        if i < PROFILE_FIRST_N:
-                            tqdm.write(f"      [Doc {i}] {orig_len:,} chars → {len(doc_chunks)} chunks in {chunk_time:.3f}s")
-                        
-                        # Track slow docs (> 1 second)
-                        if doc_time > 1.0:
-                            slow_docs += 1
-                            if slow_docs <= 3:  # Only print first 3 slow docs
-                                tqdm.write(f"      [SLOW Doc {i}] {orig_len:,} chars took {doc_time:.1f}s")
-                    
-                    if truncated > 0:
-                        print(f"    (truncated {truncated} oversized docs)")
-                    if slow_docs > 0:
-                        print(f"    (found {slow_docs} slow docs > 1s)")
-                chunk_elapsed = time.time() - t_chunk
-                print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
+                batch_chunks = []
+                truncated = 0
                 
+                for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                    # Truncate oversized docs to prevent slow chunking
+                    text = doc.text
+                    if len(text) > MAX_DOC_CHARS:
+                        text = text[:MAX_DOC_CHARS]
+                        truncated += 1
+                        doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+                    
+                    doc_chunks = list(chunker.strategy.chunk_document(doc))
+                    batch_chunks.extend(doc_chunks)
+                
+                chunk_elapsed = time.time() - t_chunk
+                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)"
+                if truncated > 0:
+                    msg += f" (truncated {truncated})"
+                print(msg)
+
                 total_docs += batch_size
                 total_chunks += len(batch_chunks)
 
                 if batch_chunks:
                     texts = [c.text for c in batch_chunks]
-                    
+
                     # Embedding phase with progress
                     print(f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})...")
                     embeddings = encoder.encode(
-                        texts, 
-                        show_progress_bar=True,  # Show progress for large batches
+                        texts,
+                        show_progress_bar=True,
                         batch_size=embedding_batch_size
                     )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -212,36 +177,26 @@ def build_embedding_index(
             batch_num += 1
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
-            
-            # Chunking phase
+
             t_chunk = time.time()
-            if parallel_chunking:
-                print(f"    Chunking (parallel, {chunk_workers or 'auto'} workers)...")
-                batch_chunks = chunker.chunk_documents_parallel(
-                    doc_batch,
-                    num_workers=chunk_workers,
-                    show_progress=True
-                )
-            else:
-                # Sequential chunking - process docs one by one with progress
-                from tqdm import tqdm
-                from ragicamp.retrievers.base import Document
-                MAX_DOC_CHARS = 100_000
-                batch_chunks = []
-                truncated = 0
-                for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
-                    text = doc.text
-                    if len(text) > MAX_DOC_CHARS:
-                        text = text[:MAX_DOC_CHARS]
-                        truncated += 1
-                        doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-                    doc_chunks = list(chunker.strategy.chunk_document(doc))
-                    batch_chunks.extend(doc_chunks)
-                if truncated > 0:
-                    print(f"    (truncated {truncated} oversized docs)")
-            chunk_elapsed = time.time() - t_chunk
-            print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
+            batch_chunks = []
+            truncated = 0
             
+            for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                text = doc.text
+                if len(text) > MAX_DOC_CHARS:
+                    text = text[:MAX_DOC_CHARS]
+                    truncated += 1
+                    doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+                doc_chunks = list(chunker.strategy.chunk_document(doc))
+                batch_chunks.extend(doc_chunks)
+            
+            chunk_elapsed = time.time() - t_chunk
+            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)"
+            if truncated > 0:
+                msg += f" (truncated {truncated})"
+            print(msg)
+
             total_docs += batch_size
             total_chunks += len(batch_chunks)
 
@@ -249,7 +204,7 @@ def build_embedding_index(
                 texts = [c.text for c in batch_chunks]
                 print(f"    Embedding {len(texts)} chunks...")
                 embeddings = encoder.encode(
-                    texts, 
+                    texts,
                     show_progress_bar=True,
                     batch_size=embedding_batch_size
                 )
@@ -271,7 +226,7 @@ def build_embedding_index(
 
     faiss.write_index(index, str(artifact_path / "index.faiss"))
 
-    # Combine all batches into single pickle file (for compatibility with load method)
+    # Combine all batches into single pickle file
     print("Combining batches for final save...")
     all_documents = []
     with open(temp_docs_file.name, 'rb') as f:
@@ -282,7 +237,6 @@ def build_embedding_index(
             except EOFError:
                 break
 
-    # Save combined documents
     with open(artifact_path / "documents.pkl", "wb") as f:
         pickle.dump(all_documents, f)
 
