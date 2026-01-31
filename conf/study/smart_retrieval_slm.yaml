@@ -82,6 +82,9 @@ rag:
     version: 20231101.en
     max_docs: 200000
     wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
+    # Index building batch sizes (adjust based on available RAM/VRAM)
+    doc_batch_size: 5000       # Documents to chunk per batch
+    embedding_batch_size: 128  # Texts to embed per GPU batch (increase for more VRAM)
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)
@@ -108,6 +111,21 @@ rag:
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
+    
+    # Small chunk retrievers (more precise matching, retrieve more)
+    - type: dense
+      name: dense_bge_large_256
+      embedding_model: BAAI/bge-large-en-v1.5
+      chunk_size: 256
+      chunk_overlap: 25
+      chunking_strategy: recursive
+    
+    - type: hybrid
+      name: hybrid_bge_large_256
+      embedding_model: BAAI/bge-large-en-v1.5
+      alpha: 0.5
+      chunk_size: 256
+      chunk_overlap: 25
     
     # Hybrid retrievers (dense + BM25)
     - type: hybrid
@@ -171,6 +189,34 @@ experiments:
     model: hf:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_nomic_512
     top_k: 5
+    prompt: concise
+  
+  # ========================================================================
+  # GROUP A2: Small Chunks with More Retrieval
+  # ========================================================================
+  # Hypothesis: Smaller chunks = more precise matching, retrieve more to compensate
+  
+  - name: a4_small_chunks_dense
+    hypothesis: "256-char chunks with top_k=10 for precise matching"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_256
+    top_k: 10
+    prompt: concise
+  
+  - name: a5_small_chunks_hybrid
+    hypothesis: "Small chunks + hybrid catches more relevant snippets"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_256
+    top_k: 10
+    prompt: concise
+  
+  - name: a6_small_chunks_rerank
+    hypothesis: "Small chunks + rerank for precision at scale"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_256
+    top_k: 8
+    fetch_k: 30
+    reranker: bge
     prompt: concise
 
   # ========================================================================

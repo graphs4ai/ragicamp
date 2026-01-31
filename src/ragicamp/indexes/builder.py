@@ -177,7 +177,12 @@ def ensure_indexes_exist(
                 ready_indexes.append(index_name)
             elif build_if_missing:
                 print(f"   📦 Building {index_name} (hierarchical)...")
-                build_hierarchical_index(first_retriever, corpus_config)
+                build_hierarchical_index(
+                    first_retriever,
+                    corpus_config,
+                    doc_batch_size=corpus_config.get("doc_batch_size", 1000),
+                    embedding_batch_size=corpus_config.get("embedding_batch_size", 64),
+                )
                 ready_indexes.append(index_name)
             else:
                 raise FileNotFoundError(f"Missing hierarchical index: {index_name}")
@@ -194,6 +199,8 @@ def ensure_indexes_exist(
                     chunk_overlap=first_retriever.get("chunk_overlap", 50),
                     corpus_config=corpus_config,
                     chunking_strategy=first_retriever.get("chunking_strategy", "recursive"),
+                    doc_batch_size=corpus_config.get("doc_batch_size", 5000),
+                    embedding_batch_size=corpus_config.get("embedding_batch_size", 64),
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()

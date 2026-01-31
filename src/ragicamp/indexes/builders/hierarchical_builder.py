@@ -19,6 +19,7 @@ def build_hierarchical_index(
     retriever_config: Dict[str, Any],
     corpus_config: Dict[str, Any],
     doc_batch_size: int = 1000,
+    embedding_batch_size: int = 64,
 ) -> str:
     """Build a hierarchical index with batched processing.
 
@@ -28,7 +29,8 @@ def build_hierarchical_index(
     Args:
         retriever_config: Retriever configuration with chunk sizes
         corpus_config: Corpus configuration
-        doc_batch_size: Documents to process per batch
+        doc_batch_size: Documents to process per batch (default 1000)
+        embedding_batch_size: Texts to embed per GPU batch (default 64)
 
     Returns:
         Retriever name
@@ -54,7 +56,7 @@ def build_hierarchical_index(
     print(f"Building hierarchical index: {retriever_name}")
     print(f"  Parent chunks: {parent_chunk_size}")
     print(f"  Child chunks: {child_chunk_size}")
-    print(f"  Batch size: {doc_batch_size} docs")
+    print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"{'='*60}")
 
     # Build metadata dict for WikiRank filter and other options
@@ -134,7 +136,7 @@ def build_hierarchical_index(
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=64)
+                    embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=embedding_batch_size)
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
 
@@ -169,7 +171,7 @@ def build_hierarchical_index(
 
             if child_chunks:
                 child_texts = [c.text for c in child_chunks]
-                embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=64)
+                embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=embedding_batch_size)
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
                 pickle.dump(child_chunks, child_file)

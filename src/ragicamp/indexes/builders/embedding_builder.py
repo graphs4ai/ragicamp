@@ -23,6 +23,7 @@ def build_embedding_index(
     corpus_config: Dict[str, Any],
     chunking_strategy: str = "recursive",
     doc_batch_size: int = 5000,
+    embedding_batch_size: int = 64,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -36,7 +37,8 @@ def build_embedding_index(
         chunk_overlap: Chunk overlap in characters
         corpus_config: Corpus configuration
         chunking_strategy: Chunking strategy ('recursive', 'fixed', 'sentence', 'paragraph')
-        doc_batch_size: Documents to process per batch
+        doc_batch_size: Documents to process per batch (default 5000)
+        embedding_batch_size: Texts to embed per GPU batch (default 64, increase for more VRAM)
 
     Returns:
         Path to the saved index
@@ -54,7 +56,7 @@ def build_embedding_index(
     print(f"  Embedding model: {embedding_model}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
     print(f"  Chunking strategy: {chunking_strategy}")
-    print(f"  Batch size: {doc_batch_size} docs")
+    print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"{'='*60}")
 
     # Initialize corpus (streaming mode)
@@ -113,7 +115,7 @@ def build_embedding_index(
 
                 if batch_chunks:
                     texts = [c.text for c in batch_chunks]
-                    embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=64)
+                    embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=embedding_batch_size)
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
 
@@ -134,7 +136,7 @@ def build_embedding_index(
 
             if batch_chunks:
                 texts = [c.text for c in batch_chunks]
-                embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=64)
+                embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=embedding_batch_size)
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
                 pickle.dump(batch_chunks, docs_file)
