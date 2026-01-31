@@ -38,6 +38,41 @@ PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.v
 log "Python version: $PYTHON_VERSION"
 
 # ============================================================================
+# Step 1b: CUDA toolkit for Flash Attention (optional but recommended)
+# ============================================================================
+if command -v nvidia-smi &> /dev/null; then
+    log "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
+    
+    if ! command -v nvcc &> /dev/null; then
+        log "CUDA toolkit (nvcc) not found. Installing for Flash Attention support..."
+        if command -v apt &> /dev/null; then
+            sudo apt update -qq && sudo apt install -y nvidia-cuda-toolkit
+            if command -v nvcc &> /dev/null; then
+                log "CUDA toolkit installed: $(nvcc --version | grep release)"
+            else
+                warn "CUDA toolkit installation failed. Flash Attention will be disabled."
+            fi
+        else
+            warn "apt not available. Install CUDA toolkit manually for Flash Attention support."
+        fi
+    else
+        log "CUDA toolkit found: $(nvcc --version | grep release | head -1)"
+    fi
+    
+    # Set CUDA_HOME if not set
+    if [ -z "$CUDA_HOME" ]; then
+        if [ -d "/usr/local/cuda" ]; then
+            export CUDA_HOME="/usr/local/cuda"
+        elif [ -d "/usr/lib/cuda" ]; then
+            export CUDA_HOME="/usr/lib/cuda"
+        fi
+        [ -n "$CUDA_HOME" ] && log "CUDA_HOME set to: $CUDA_HOME"
+    fi
+else
+    log "No GPU detected, skipping CUDA toolkit installation"
+fi
+
+# ============================================================================
 # Step 2: Install uv (fast Python package manager)
 # ============================================================================
 if ! command -v uv &> /dev/null; then
@@ -80,9 +115,25 @@ if [ ! -d ".venv" ]; then
     uv venv --python python3
 fi
 
-# Sync dependencies
-log "Installing dependencies..."
-uv sync
+# Determine which extras to install based on available hardware
+EXTRAS="rag"
+
+if command -v nvidia-smi &> /dev/null; then
+    EXTRAS="$EXTRAS,vllm"
+    log "GPU detected, including vLLM for optimized inference"
+    
+    # Only try flash-attn if nvcc is available
+    if command -v nvcc &> /dev/null; then
+        EXTRAS="$EXTRAS,flash"
+        log "CUDA toolkit available, including Flash Attention"
+    else
+        warn "nvcc not found, skipping Flash Attention (embeddings will still work)"
+    fi
+fi
+
+# Install dependencies with appropriate extras
+log "Installing dependencies with extras: [$EXTRAS]..."
+uv pip install -e ".[$EXTRAS]" --preview-features extra-build-dependencies
 
 # ============================================================================
 # Step 5: Show system info
@@ -91,7 +142,37 @@ log "System information:"
 echo "  - Python: $(uv run python --version)"
 echo "  - Available CPUs: $(python3 -c 'import os; print(len(os.sched_getaffinity(0)))' 2>/dev/null || nproc)"
 echo "  - Total memory: $(free -h 2>/dev/null | awk '/^Mem:/{print $2}' || echo 'unknown')"
-echo "  - GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo 'none detected')"
+
+if command -v nvidia-smi &> /dev/null; then
+    echo "  - GPU: $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1)"
+    echo "  - CUDA: $(nvcc --version 2>/dev/null | grep release | sed 's/.*release //' | sed 's/,.*//' || echo 'toolkit not installed')"
+else
+    echo "  - GPU: none detected"
+fi
+
+# Check installed optimizations
+echo ""
+log "Installed optimizations:"
+uv run python -c "
+try:
+    import vllm; print('  - vLLM: ✓ installed')
+except ImportError:
+    print('  - vLLM: ✗ not installed')
+
+try:
+    import flash_attn; print('  - Flash Attention: ✓ installed')
+except ImportError:
+    print('  - Flash Attention: ✗ not installed (optional)')
+
+import torch
+if torch.cuda.is_available():
+    print(f'  - PyTorch CUDA: ✓ {torch.version.cuda}')
+else:
+    print('  - PyTorch CUDA: ✗ CPU only')
+
+if hasattr(torch, 'compile'):
+    print('  - torch.compile: ✓ available')
+"
 
 # ============================================================================
 # Step 6: Run experiment
