@@ -145,6 +145,9 @@ class ChunkingStrategy(ABC):
         """
         pass
 
+    # Debug mode for verbose output (set True to diagnose chunking issues)
+    DEBUG = True
+    
     def chunk_document(self, document: Document) -> Iterator[Document]:
         """Chunk a document, preserving metadata.
 
@@ -154,7 +157,14 @@ class ChunkingStrategy(ABC):
         Yields:
             Document objects for each chunk, with updated metadata
         """
+        if self.DEBUG:
+            title = document.metadata.get("title", document.id)[:50]
+            print(f"      [chunk_document] '{title}' ({len(document.text):,} chars)", flush=True)
+        
         chunks = self.chunk(document.text)
+        
+        if self.DEBUG:
+            print(f"      [chunk_document] → {len(chunks)} chunks", flush=True)
 
         for i, chunk_text in enumerate(chunks):
             # Skip chunks that are too small
@@ -328,13 +338,30 @@ class RecursiveChunker(ChunkingStrategy):
     MAX_CHUNKS_PER_DOC = 1000
     # If text is too large for separator-based splitting, just hard split
     MAX_TEXT_FOR_SPLIT = 50_000
+    
+    # Debug mode - set to True to see step-by-step chunking
+    DEBUG = True
 
     def chunk(self, text: str) -> List[str]:
         """Recursively split text into chunks."""
+        if self.DEBUG:
+            print(f"        [chunk] input: {len(text):,} chars", flush=True)
+        
         # For very large texts, skip recursive splitting entirely
         if len(text) > self.MAX_TEXT_FOR_SPLIT:
-            return self._hard_split(text)
-        return self._recursive_split(text, self.config.separators, depth=0)
+            if self.DEBUG:
+                print(f"        [chunk] text > {self.MAX_TEXT_FOR_SPLIT:,}, using hard_split", flush=True)
+            result = self._hard_split(text)
+            if self.DEBUG:
+                print(f"        [chunk] hard_split → {len(result)} chunks", flush=True)
+            return result
+        
+        if self.DEBUG:
+            print(f"        [chunk] using recursive_split", flush=True)
+        result = self._recursive_split(text, self.config.separators, depth=0)
+        if self.DEBUG:
+            print(f"        [chunk] recursive_split → {len(result)} chunks", flush=True)
+        return result
 
     def _recursive_split(
         self, text: str, separators: List[str], depth: int = 0
