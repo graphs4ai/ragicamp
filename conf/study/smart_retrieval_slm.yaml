@@ -86,6 +86,7 @@ rag:
     # Index building batch sizes (adjust based on available RAM/VRAM)
     doc_batch_size: 5000       # Documents to chunk per batch
     embedding_batch_size: 128  # Texts to embed per GPU batch (increase for more VRAM)
+    chunk_workers: 32          # Parallel workers for chunking (default: CPU count)
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)

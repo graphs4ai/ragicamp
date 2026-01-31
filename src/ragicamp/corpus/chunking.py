@@ -356,6 +356,13 @@ def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
     return strategies[config.strategy](config)
 
 
+def _chunk_single_document(args: tuple) -> List[Document]:
+    """Worker function for parallel chunking."""
+    doc, config = args
+    strategy = get_chunker(config)
+    return list(strategy.chunk_document(doc))
+
+
 class DocumentChunker:
     """High-level interface for chunking documents.
 
@@ -380,7 +387,7 @@ class DocumentChunker:
         documents: Iterator[Document],
         show_progress: bool = True,
     ) -> Iterator[Document]:
-        """Chunk multiple documents.
+        """Chunk multiple documents (sequential).
 
         Args:
             documents: Input documents to chunk
@@ -406,6 +413,47 @@ class DocumentChunker:
         if show_progress:
             print(f"✓ Chunking complete: {doc_count} docs → {total_chunks} chunks")
             print(f"  Avg chunks per doc: {total_chunks / max(doc_count, 1):.1f}")
+
+    def chunk_documents_parallel(
+        self,
+        documents: List[Document],
+        num_workers: Optional[int] = None,
+        show_progress: bool = True,
+    ) -> List[Document]:
+        """Chunk multiple documents in parallel using multiprocessing.
+
+        Args:
+            documents: List of documents to chunk (must be a list, not iterator)
+            num_workers: Number of worker processes (default: CPU count)
+            show_progress: Whether to show progress
+
+        Returns:
+            List of chunked Document objects
+        """
+        import multiprocessing as mp
+
+        if num_workers is None:
+            num_workers = mp.cpu_count()
+
+        doc_count = len(documents)
+        if show_progress:
+            print(f"    Chunking {doc_count} docs with {num_workers} workers...")
+
+        # Prepare args for worker function
+        args = [(doc, self.config) for doc in documents]
+
+        # Process in parallel
+        all_chunks = []
+        with mp.Pool(num_workers) as pool:
+            results = pool.map(_chunk_single_document, args)
+            for doc_chunks in results:
+                all_chunks.extend(doc_chunks)
+
+        if show_progress:
+            avg = len(all_chunks) / max(doc_count, 1)
+            print(f"    ✓ {doc_count} docs → {len(all_chunks)} chunks (avg: {avg:.1f})")
+
+        return all_chunks
 
     def get_info(self) -> Dict[str, Any]:
         """Get chunking configuration info."""

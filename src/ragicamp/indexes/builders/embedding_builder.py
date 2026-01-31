@@ -24,6 +24,7 @@ def build_embedding_index(
     chunking_strategy: str = "recursive",
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 64,
+    chunk_workers: int = None,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -39,6 +40,7 @@ def build_embedding_index(
         chunking_strategy: Chunking strategy ('recursive', 'fixed', 'sentence', 'paragraph')
         doc_batch_size: Documents to process per batch (default 5000)
         embedding_batch_size: Texts to embed per GPU batch (default 64, increase for more VRAM)
+        chunk_workers: Number of parallel workers for chunking (default: CPU count)
 
     Returns:
         Path to the saved index
@@ -116,10 +118,12 @@ def build_embedding_index(
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
                 
-                # Chunking phase
-                print(f"    Chunking...", end=" ", flush=True)
-                batch_chunks = list(chunker.chunk_documents(iter(doc_batch), show_progress=False))
-                print(f"→ {len(batch_chunks)} chunks")
+                # Chunking phase (parallel)
+                batch_chunks = chunker.chunk_documents_parallel(
+                    doc_batch, 
+                    num_workers=chunk_workers,
+                    show_progress=True
+                )
                 
                 total_docs += batch_size
                 total_chunks += len(batch_chunks)
@@ -152,9 +156,12 @@ def build_embedding_index(
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
             
-            print(f"    Chunking...", end=" ", flush=True)
-            batch_chunks = list(chunker.chunk_documents(iter(doc_batch), show_progress=False))
-            print(f"→ {len(batch_chunks)} chunks")
+            # Chunking phase (parallel)
+            batch_chunks = chunker.chunk_documents_parallel(
+                doc_batch,
+                num_workers=chunk_workers,
+                show_progress=True
+            )
             
             total_docs += batch_size
             total_chunks += len(batch_chunks)
