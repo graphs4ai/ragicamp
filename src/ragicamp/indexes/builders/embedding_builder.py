@@ -7,6 +7,7 @@ import gc
 import os
 import pickle
 import tempfile
+import time
 from typing import Any, Dict
 
 from ragicamp.core.logging import get_logger
@@ -120,18 +121,17 @@ def build_embedding_index(
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
                 
-                # Chunking phase (parallel)
-                batch_chunks = chunker.chunk_documents_parallel(
-                    doc_batch, 
-                    num_workers=chunk_workers,
-                    show_progress=True
-                )
+                # Chunking phase - use sequential for better performance when
+                # large datasets are in memory (fork overhead > parallel gains)
+                t_chunk = time.time()
+                batch_chunks = list(chunker.chunk_documents(doc_batch, show_progress=False))
+                chunk_elapsed = time.time() - t_chunk
+                print(f"    Chunked → {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
                 
                 total_docs += batch_size
                 total_chunks += len(batch_chunks)
 
                 if batch_chunks:
-                    print(f"    Preparing {len(batch_chunks)} chunks for embedding...")
                     texts = [c.text for c in batch_chunks]
                     
                     # Embedding phase with progress
@@ -159,19 +159,18 @@ def build_embedding_index(
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
             
-            # Chunking phase (parallel)
-            batch_chunks = chunker.chunk_documents_parallel(
-                doc_batch,
-                num_workers=chunk_workers,
-                show_progress=True
-            )
+            # Chunking phase - sequential (see comment above)
+            t_chunk = time.time()
+            batch_chunks = list(chunker.chunk_documents(doc_batch, show_progress=False))
+            chunk_elapsed = time.time() - t_chunk
+            print(f"    Chunked → {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
             
             total_docs += batch_size
             total_chunks += len(batch_chunks)
 
             if batch_chunks:
                 texts = [c.text for c in batch_chunks]
-                print(f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})...")
+                print(f"    Embedding {len(texts)} chunks...")
                 embeddings = encoder.encode(
                     texts, 
                     show_progress_bar=True,
