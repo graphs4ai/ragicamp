@@ -488,11 +488,12 @@ class DocumentChunker:
         t1 = time.time()
         chunksize = max(1, doc_count // num_workers)
         if show_progress:
-            print(f"      [chunksize={chunksize}]")
+            print(f"      [chunksize={chunksize}, processing...]", flush=True)
         
         all_chunk_dicts = []
         with mp.Pool(processes=num_workers) as pool:
             # Use map (not imap) with large chunksize - sends all work upfront
+            # This blocks until all workers finish - watch CPU usage for progress
             results = pool.map(_chunk_single_document, args, chunksize=chunksize)
             
             for chunk_dicts in results:
