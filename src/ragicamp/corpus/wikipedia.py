@@ -235,11 +235,12 @@ class WikipediaCorpus(DocumentCorpus):
         desc = f"Loading {self.config.name}"
         
         # Determine total for progress bar
+        # Use leave=False so bar clears when we pause for batch processing
         if not use_streaming and hasattr(dataset_to_iterate, '__len__'):
             total = min(len(dataset_to_iterate), limit) if limit else len(dataset_to_iterate)
-            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc, total=total)
+            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc, total=total, leave=False)
         else:
-            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc)
+            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc, leave=False)
 
         for i, article in pbar:
             title = article.get("title", "")

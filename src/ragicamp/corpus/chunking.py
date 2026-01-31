@@ -586,19 +586,11 @@ class DocumentChunker:
             shared_docs.append({"id": doc.id, "text": text, "metadata": doc.metadata})
         _SHARED_DOCS = shared_docs
         
-        if show_progress:
-            prep_msg = f"      [Prep: {time.time() - t0:.1f}s]"
-            if truncated_count > 0:
-                prep_msg += f" (truncated {truncated_count} oversized docs)"
-            print(prep_msg)
+        if show_progress and truncated_count > 0:
+            tqdm.write(f"      (truncated {truncated_count} oversized docs)")
 
         t1 = time.time()
         all_chunk_dicts = []
-        
-        # Use small ipc_chunksize for better load balancing
-        # Large chunksize causes idle workers when one doc is slow
-        if show_progress:
-            print(f"      [Parallel: {num_workers} workers, chunksize={ipc_chunksize}]", flush=True)
         
         pool = mp.Pool(processes=num_workers)
         
@@ -610,12 +602,14 @@ class DocumentChunker:
                 chunksize=ipc_chunksize
             )
             
-            # Collect results with progress bar
+            # Collect results with progress bar (leave=False to clear when done)
             for chunk_dicts in tqdm(
                 results_iter, 
                 total=doc_count, 
                 desc="      Chunking", 
-                disable=not show_progress
+                disable=not show_progress,
+                leave=False,
+                ncols=80,
             ):
                 all_chunk_dicts.extend(chunk_dicts)
             
@@ -628,20 +622,19 @@ class DocumentChunker:
         _SHARED_CONFIG = None
         
         if show_progress:
-            print(f"      [Pool: {time.time() - t1:.1f}s]")
+            elapsed = time.time() - t1
+            docs_per_sec = doc_count / elapsed if elapsed > 0 else 0
+            tqdm.write(f"      ✓ Chunked in {elapsed:.1f}s ({docs_per_sec:.0f} docs/s)")
 
         # Convert dicts back to Document objects
-        t2 = time.time()
         all_chunks = [
             Document(id=cd["id"], text=cd["text"], metadata=cd["metadata"])
             for cd in all_chunk_dicts
         ]
-        if show_progress:
-            print(f"      [Convert: {time.time() - t2:.1f}s]")
 
         if show_progress:
             avg = len(all_chunks) / max(doc_count, 1)
-            print(f"    ✓ {doc_count} docs → {len(all_chunks)} chunks (avg: {avg:.1f})")
+            tqdm.write(f"    ✓ {doc_count} docs → {len(all_chunks)} chunks (avg {avg:.1f}/doc)")
 
         return all_chunks
 
