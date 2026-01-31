@@ -454,13 +454,12 @@ class DocumentChunker:
         Returns:
             List of chunked Document objects
         """
-        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing as mp
 
         from tqdm import tqdm
 
         if num_workers is None:
-            import os
-            num_workers = os.cpu_count() or 4
+            num_workers = mp.cpu_count() or 4
 
         doc_count = len(documents)
         if show_progress:
@@ -480,27 +479,28 @@ class DocumentChunker:
             for doc in documents
         ]
 
-        # Process in parallel with progress bar
-        all_chunks = []
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        # Use multiprocessing.Pool with imap_unordered for best parallelism
+        all_chunk_dicts = []
+        with mp.Pool(processes=num_workers) as pool:
+            # imap_unordered processes results as they complete (no ordering overhead)
             if show_progress:
                 results = list(tqdm(
-                    executor.map(_chunk_single_document, args, chunksize=100),
+                    pool.imap_unordered(_chunk_single_document, args, chunksize=50),
                     total=doc_count,
                     desc="    Chunking",
                     unit="docs"
                 ))
             else:
-                results = list(executor.map(_chunk_single_document, args, chunksize=100))
+                results = list(pool.imap_unordered(_chunk_single_document, args, chunksize=50))
             
-            # Convert dicts back to Document objects
             for chunk_dicts in results:
-                for cd in chunk_dicts:
-                    all_chunks.append(Document(
-                        id=cd["id"],
-                        text=cd["text"],
-                        metadata=cd["metadata"],
-                    ))
+                all_chunk_dicts.extend(chunk_dicts)
+
+        # Convert dicts back to Document objects
+        all_chunks = [
+            Document(id=cd["id"], text=cd["text"], metadata=cd["metadata"])
+            for cd in all_chunk_dicts
+        ]
 
         if show_progress:
             avg = len(all_chunks) / max(doc_count, 1)

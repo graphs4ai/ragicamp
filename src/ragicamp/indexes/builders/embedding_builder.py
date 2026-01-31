@@ -129,6 +129,7 @@ def build_embedding_index(
                 total_chunks += len(batch_chunks)
 
                 if batch_chunks:
+                    print(f"    Preparing {len(batch_chunks)} chunks for embedding...")
                     texts = [c.text for c in batch_chunks]
                     
                     # Embedding phase with progress
