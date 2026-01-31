@@ -21,6 +21,55 @@ _SHARED_DOCS: Optional[List[Dict]] = None
 _SHARED_CONFIG: Optional[Dict] = None
 
 
+def _get_available_cpus() -> int:
+    """Get the number of CPUs available to this process.
+    
+    In containers, os.cpu_count() returns host CPUs, not container limits.
+    This function checks cgroups and CPU affinity to get the actual limit.
+    
+    Returns:
+        Number of usable CPUs (minimum 1)
+    """
+    import os
+    
+    # Method 1: CPU affinity (works on Linux, respects taskset/cgroups)
+    try:
+        cpus = len(os.sched_getaffinity(0))
+        if cpus > 0:
+            return cpus
+    except (AttributeError, OSError):
+        pass
+    
+    # Method 2: cgroups v2 (modern containers)
+    try:
+        with open("/sys/fs/cgroup/cpu.max", "r") as f:
+            content = f.read().strip()
+            if content != "max":
+                quota, period = content.split()
+                if quota != "max":
+                    cpus = int(int(quota) / int(period))
+                    if cpus > 0:
+                        return cpus
+    except (FileNotFoundError, ValueError, PermissionError):
+        pass
+    
+    # Method 3: cgroups v1 (older containers)
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "r") as f:
+            quota = int(f.read().strip())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r") as f:
+            period = int(f.read().strip())
+        if quota > 0 and period > 0:
+            cpus = quota // period
+            if cpus > 0:
+                return cpus
+    except (FileNotFoundError, ValueError, PermissionError):
+        pass
+    
+    # Fallback: os.cpu_count()
+    return os.cpu_count() or 4
+
+
 def _chunk_by_index(idx: int) -> List[Dict]:
     """Chunk a document by index from shared memory.
     
@@ -509,7 +558,7 @@ class DocumentChunker:
         from tqdm import tqdm
 
         if num_workers is None:
-            num_workers = mp.cpu_count() or 4
+            num_workers = _get_available_cpus()
 
         doc_count = len(documents)
         if show_progress:
