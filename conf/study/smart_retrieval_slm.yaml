@@ -82,6 +82,7 @@ rag:
     version: 20231101.en
     max_docs: 200000
     wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
+    streaming: false           # Load full dataset into RAM (faster, requires ~20GB)
     # Index building batch sizes (adjust based on available RAM/VRAM)
     doc_batch_size: 5000       # Documents to chunk per batch
     embedding_batch_size: 128  # Texts to embed per GPU batch (increase for more VRAM)

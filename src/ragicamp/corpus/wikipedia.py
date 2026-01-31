@@ -171,21 +171,31 @@ class WikipediaCorpus(DocumentCorpus):
 
         Note:
             First call will download the dataset if not cached.
-            Uses streaming to avoid loading everything into memory.
+            Set metadata.streaming=False to load full dataset into RAM (faster but ~20GB for en).
         """
         # Determine document limit
         limit = max_docs if max_docs is not None else self.config.max_docs
 
-        # Load dataset (streaming mode for memory efficiency)
+        # Load dataset - streaming mode by default, can disable for high-RAM machines
+        use_streaming = self.config.metadata.get("streaming", True)
+        
         if self._dataset is None:
             try:
+                if use_streaming:
+                    print("  Loading Wikipedia (streaming mode)...")
+                else:
+                    print("  Loading Wikipedia into RAM (this may take a few minutes)...")
+                
                 self._dataset = load_dataset(
                     self.config.source,
                     self.config.version,
                     split="train",
-                    streaming=True,
+                    streaming=use_streaming,
                     trust_remote_code=False,
                 )
+                
+                if not use_streaming:
+                    print(f"  ✓ Loaded {len(self._dataset):,} articles into RAM")
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load Wikipedia corpus '{self.config.version}': {e}\n"

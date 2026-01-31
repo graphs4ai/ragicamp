@@ -59,13 +59,15 @@ def build_embedding_index(
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"{'='*60}")
 
-    # Initialize corpus (streaming mode)
+    # Initialize corpus
     # Build metadata dict for WikiRank filter and other options
     corpus_metadata = {}
     if corpus_config.get("wikirank_top_k"):
         corpus_metadata["wikirank_top_k"] = corpus_config["wikirank_top_k"]
     if corpus_config.get("min_chars"):
         corpus_metadata["min_chars"] = corpus_config["min_chars"]
+    if "streaming" in corpus_config:
+        corpus_metadata["streaming"] = corpus_config["streaming"]
 
     corpus_cfg = CorpusConfig(
         name=f"wikipedia_{corpus_config.get('version', 'simple')}",
