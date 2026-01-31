@@ -140,17 +140,45 @@ def build_embedding_index(
                     MAX_DOC_CHARS = 100_000  # Truncate large docs to prevent slow chunking
                     batch_chunks = []
                     truncated = 0
-                    for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                    slow_docs = 0
+                    
+                    # Profile first few docs to diagnose issues
+                    PROFILE_FIRST_N = 5
+                    
+                    for i, doc in enumerate(tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80)):
+                        doc_start = time.time()
+                        
                         # Truncate oversized docs
                         text = doc.text
-                        if len(text) > MAX_DOC_CHARS:
+                        orig_len = len(text)
+                        if orig_len > MAX_DOC_CHARS:
                             text = text[:MAX_DOC_CHARS]
                             truncated += 1
                             doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+                        
+                        # Profile chunking
+                        chunk_start = time.time()
                         doc_chunks = list(chunker.strategy.chunk_document(doc))
+                        chunk_time = time.time() - chunk_start
+                        
                         batch_chunks.extend(doc_chunks)
+                        
+                        doc_time = time.time() - doc_start
+                        
+                        # Print profile for first N docs
+                        if i < PROFILE_FIRST_N:
+                            tqdm.write(f"      [Doc {i}] {orig_len:,} chars → {len(doc_chunks)} chunks in {chunk_time:.3f}s")
+                        
+                        # Track slow docs (> 1 second)
+                        if doc_time > 1.0:
+                            slow_docs += 1
+                            if slow_docs <= 3:  # Only print first 3 slow docs
+                                tqdm.write(f"      [SLOW Doc {i}] {orig_len:,} chars took {doc_time:.1f}s")
+                    
                     if truncated > 0:
                         print(f"    (truncated {truncated} oversized docs)")
+                    if slow_docs > 0:
+                        print(f"    (found {slow_docs} slow docs > 1s)")
                 chunk_elapsed = time.time() - t_chunk
                 print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
                 
