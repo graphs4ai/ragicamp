@@ -463,12 +463,31 @@ class RecursiveChunker(ChunkingStrategy):
 
     def _hard_split(self, text: str) -> List[str]:
         """Last resort: split at exact chunk_size boundaries."""
+        if self.DEBUG:
+            print(f"        [hard_split] input: {len(text):,} chars, chunk_size={self.config.chunk_size}, overlap={self.config.chunk_overlap}", flush=True)
+        
         chunks = []
         start = 0
+        iteration = 0
         while start < len(text):
+            iteration += 1
+            if self.DEBUG and iteration <= 5:
+                print(f"        [hard_split] iter {iteration}: start={start}", flush=True)
+            if self.DEBUG and iteration == 100:
+                print(f"        [hard_split] ... (continuing, {len(text) - start:,} chars remaining)", flush=True)
+            
             end = min(start + self.config.chunk_size, len(text))
             chunks.append(text[start:end])
             start = end - self.config.chunk_overlap if self.config.chunk_overlap > 0 else end
+            
+            # Safety: prevent infinite loops
+            if iteration > 100000:
+                if self.DEBUG:
+                    print(f"        [hard_split] ABORT: too many iterations!", flush=True)
+                break
+        
+        if self.DEBUG:
+            print(f"        [hard_split] → {len(chunks)} chunks in {iteration} iterations", flush=True)
         return chunks
 
 
