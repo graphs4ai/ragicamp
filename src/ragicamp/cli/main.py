@@ -305,6 +305,109 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backup(args: argparse.Namespace) -> int:
+    """Backup artifacts to Backblaze B2."""
+    import os
+    from datetime import datetime
+
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError:
+        print("Error: boto3 not installed. Install with: uv pip install boto3")
+        return 1
+
+    # Check credentials
+    key_id = os.environ.get("B2_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
+    app_key = os.environ.get("B2_APP_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY")
+    endpoint = os.environ.get("B2_ENDPOINT", "https://s3.us-west-004.backblazeb2.com")
+
+    if not key_id or not app_key:
+        print("Error: Backblaze credentials not set.")
+        print("Set environment variables:")
+        print("  export B2_KEY_ID='your-key-id'")
+        print("  export B2_APP_KEY='your-application-key'")
+        print("  export B2_ENDPOINT='https://s3.us-west-004.backblazeb2.com'  # optional")
+        return 1
+
+    # Find artifacts directory
+    artifacts_dir = args.path
+    if not artifacts_dir.exists():
+        print(f"Path not found: {artifacts_dir}")
+        return 1
+
+    # Create S3 client for B2
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=key_id,
+        aws_secret_access_key=app_key,
+        config=Config(signature_version="s3v4"),
+    )
+
+    bucket = args.bucket
+    prefix = args.prefix or f"ragicamp-backup/{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    print(f"Backing up to: s3://{bucket}/{prefix}/")
+    print(f"Source: {artifacts_dir}")
+
+    # Collect files to upload
+    files_to_upload = []
+    for root, dirs, files in os.walk(artifacts_dir):
+        # Skip __pycache__ and hidden dirs
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+        for file in files:
+            if file.startswith("."):
+                continue
+            local_path = Path(root) / file
+            relative_path = local_path.relative_to(artifacts_dir)
+            s3_key = f"{prefix}/{relative_path}"
+            files_to_upload.append((local_path, s3_key))
+
+    if not files_to_upload:
+        print("No files to upload.")
+        return 0
+
+    print(f"Found {len(files_to_upload)} files to upload")
+
+    if args.dry_run:
+        print("\n[DRY RUN] Would upload:")
+        for local_path, s3_key in files_to_upload[:10]:
+            size_mb = local_path.stat().st_size / (1024 * 1024)
+            print(f"  {s3_key} ({size_mb:.1f} MB)")
+        if len(files_to_upload) > 10:
+            print(f"  ... and {len(files_to_upload) - 10} more files")
+        return 0
+
+    # Upload files with progress
+    from tqdm import tqdm
+
+    total_bytes = sum(f[0].stat().st_size for f in files_to_upload)
+    print(f"Total size: {total_bytes / (1024**3):.2f} GB")
+
+    uploaded = 0
+    errors = []
+
+    for local_path, s3_key in tqdm(files_to_upload, desc="Uploading"):
+        try:
+            s3.upload_file(str(local_path), bucket, s3_key)
+            uploaded += 1
+        except Exception as e:
+            errors.append((local_path, str(e)))
+            if not args.continue_on_error:
+                print(f"\nError uploading {local_path}: {e}")
+                return 1
+
+    print(f"\n✓ Uploaded {uploaded}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
+
+    if errors:
+        print(f"\n⚠️  {len(errors)} errors:")
+        for path, err in errors[:5]:
+            print(f"  {path}: {err}")
+
+    return 0
+
+
 def cmd_metrics(args: argparse.Namespace) -> int:
     """Recompute metrics for an experiment."""
     import os
@@ -475,6 +578,39 @@ def create_parser() -> argparse.ArgumentParser:
         help="Model for LLM judge (default: gpt-4o-mini)",
     )
     metrics_parser.set_defaults(func=cmd_metrics)
+
+    # Backup command
+    backup_parser = subparsers.add_parser("backup", help="Backup artifacts to Backblaze B2")
+    backup_parser.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=Path("outputs"),
+        help="Directory to backup (default: outputs)",
+    )
+    backup_parser.add_argument(
+        "--bucket",
+        "-b",
+        default="masters-bucket",
+        help="B2 bucket name (default: masters-bucket)",
+    )
+    backup_parser.add_argument(
+        "--prefix",
+        "-p",
+        default=None,
+        help="S3 key prefix (default: ragicamp-backup/YYYYMMDD-HHMMSS)",
+    )
+    backup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview files without uploading",
+    )
+    backup_parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue uploading if some files fail",
+    )
+    backup_parser.set_defaults(func=cmd_backup)
 
     return parser
 
