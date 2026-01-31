@@ -396,37 +396,6 @@ def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
     return strategies[config.strategy](config)
 
 
-def _chunk_single_document(args: tuple) -> List[dict]:
-    """Worker function for parallel chunking.
-    
-    Returns dicts instead of Document objects to avoid pickling issues.
-    """
-    doc_dict, config_dict = args
-    
-    # Reconstruct config from dict
-    config = ChunkConfig(
-        strategy=config_dict["strategy"],
-        chunk_size=config_dict["chunk_size"],
-        chunk_overlap=config_dict["chunk_overlap"],
-        min_chunk_size=config_dict["min_chunk_size"],
-        separators=config_dict.get("separators"),
-    )
-    
-    # Reconstruct document from dict
-    from ragicamp.retrievers.base import Document
-    doc = Document(
-        id=doc_dict["id"],
-        text=doc_dict["text"],
-        metadata=doc_dict["metadata"],
-    )
-    
-    strategy = get_chunker(config)
-    chunks = list(strategy.chunk_document(doc))
-    
-    # Return as dicts to avoid pickling issues
-    return [{"id": c.id, "text": c.text, "metadata": c.metadata} for c in chunks]
-
-
 class DocumentChunker:
     """High-level interface for chunking documents.
 
@@ -483,6 +452,8 @@ class DocumentChunker:
         documents: List[Document],
         num_workers: Optional[int] = None,
         show_progress: bool = True,
+        max_doc_chars: int = 500_000,
+        ipc_chunksize: int = 32,
     ) -> List[Document]:
         """Chunk multiple documents in parallel using multiprocessing.
 
@@ -494,6 +465,9 @@ class DocumentChunker:
             documents: List of documents to chunk (must be a list, not iterator)
             num_workers: Number of worker processes (default: CPU count)
             show_progress: Whether to show progress
+            max_doc_chars: Maximum document size in chars (larger docs are truncated)
+            ipc_chunksize: Number of docs sent to each worker at once (smaller = better
+                load balancing, larger = less IPC overhead). Default 32 is a good balance.
 
         Returns:
             List of chunked Document objects
@@ -522,47 +496,51 @@ class DocumentChunker:
             "min_chunk_size": self.config.min_chunk_size,
             "separators": self.config.separators,
         }
-        _SHARED_DOCS = [
-            {"id": doc.id, "text": doc.text, "metadata": doc.metadata}
-            for doc in documents
-        ]
+        
+        # Truncate oversized documents to prevent pathological chunking times
+        truncated_count = 0
+        shared_docs = []
+        for doc in documents:
+            text = doc.text
+            if len(text) > max_doc_chars:
+                text = text[:max_doc_chars]
+                truncated_count += 1
+            shared_docs.append({"id": doc.id, "text": text, "metadata": doc.metadata})
+        _SHARED_DOCS = shared_docs
+        
         if show_progress:
-            print(f"      [Prep: {time.time() - t0:.1f}s]")
+            prep_msg = f"      [Prep: {time.time() - t0:.1f}s]"
+            if truncated_count > 0:
+                prep_msg += f" (truncated {truncated_count} oversized docs)"
+            print(prep_msg)
 
         t1 = time.time()
         all_chunk_dicts = []
         
-        # Use shared memory approach - pass only indices, not data
-        # Workers access _SHARED_DOCS directly (inherited via fork)
-        docs_per_worker = max(1, doc_count // num_workers)
+        # Use small ipc_chunksize for better load balancing
+        # Large chunksize causes idle workers when one doc is slow
         if show_progress:
-            print(f"      [Parallel: {num_workers} workers, {docs_per_worker} docs/worker]", flush=True)
+            print(f"      [Parallel: {num_workers} workers, chunksize={ipc_chunksize}]", flush=True)
         
-        # Detailed profiling to diagnose bottleneck
-        t_pool_start = time.time()
         pool = mp.Pool(processes=num_workers)
-        if show_progress:
-            print(f"      [Pool created: {time.time() - t_pool_start:.1f}s]", flush=True)
         
         try:
-            # Quick sanity check - process first doc to verify worker works
-            t_test = time.time()
-            test_result = pool.apply(_chunk_by_index, (0,))
-            if show_progress:
-                print(f"      [Worker test: {time.time() - t_test:.2f}s, got {len(test_result)} chunks]", flush=True)
+            # Use imap_unordered for progress visibility and good load balancing
+            results_iter = pool.imap_unordered(
+                _chunk_by_index, 
+                range(doc_count), 
+                chunksize=ipc_chunksize
+            )
             
-            # Use imap_unordered for progress visibility
-            t_map_start = time.time()
-            # Start from 1 since we already processed 0
-            results_iter = pool.imap_unordered(_chunk_by_index, range(1, doc_count), chunksize=docs_per_worker)
-            all_chunk_dicts.extend(test_result)  # Add the test result
-            
-            # Collect results with progress bar (doc_count - 1 since we did one test)
-            for chunk_dicts in tqdm(results_iter, total=doc_count - 1, desc="      Chunking", disable=not show_progress):
+            # Collect results with progress bar
+            for chunk_dicts in tqdm(
+                results_iter, 
+                total=doc_count, 
+                desc="      Chunking", 
+                disable=not show_progress
+            ):
                 all_chunk_dicts.extend(chunk_dicts)
             
-            if show_progress:
-                print(f"      [Map completed: {time.time() - t_map_start:.1f}s]", flush=True)
         finally:
             pool.close()
             pool.join()
