@@ -72,7 +72,20 @@ class CrossEncoderReranker(Reranker):
         self.batch_size = batch_size
 
         logger.info("Loading cross-encoder: %s on %s", self.model_id, self.device)
-        self.model = CrossEncoder(self.model_id, device=self.device)
+        self.model = CrossEncoder(
+            self.model_id,
+            device=self.device,
+            trust_remote_code=True,
+            automodel_args={"attn_implementation": "flash_attention_2"},
+        )
+
+        # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+        try:
+            if hasattr(torch, "compile") and torch.cuda.is_available():
+                self.model.model = torch.compile(self.model.model, mode="reduce-overhead")
+                logger.info("Applied torch.compile() to cross-encoder model")
+        except Exception as e:
+            logger.debug("torch.compile() not applied: %s", e)
 
     def rerank(
         self,

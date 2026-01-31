@@ -52,7 +52,7 @@ llm_judge:
 direct:
   enabled: true
   models:
-    - hf:meta-llama/Llama-3.2-3B-Instruct
+    - vllm:meta-llama/Llama-3.2-3B-Instruct
   prompts:
     - concise
   quantization:
@@ -174,21 +174,21 @@ experiments:
   
   - name: a1_bge_large_baseline
     hypothesis: "BGE-large as dense baseline"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     top_k: 5
     prompt: concise
   
   - name: a2_bge_m3_dense
     hypothesis: "BGE-M3 captures richer semantics"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_m3_512
     top_k: 5
     prompt: concise
   
   - name: a3_nomic_embed
     hypothesis: "Nomic-embed is efficient and competitive"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_nomic_512
     top_k: 5
     prompt: concise
@@ -200,21 +200,21 @@ experiments:
   
   - name: a4_small_chunks_dense
     hypothesis: "256-char chunks with top_k=10 for precise matching"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_256
     top_k: 10
     prompt: concise
   
   - name: a5_small_chunks_hybrid
     hypothesis: "Small chunks + hybrid catches more relevant snippets"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hybrid_bge_large_256
     top_k: 10
     prompt: concise
   
   - name: a6_small_chunks_rerank
     hypothesis: "Small chunks + rerank for precision at scale"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_256
     top_k: 8
     fetch_k: 30
@@ -227,14 +227,14 @@ experiments:
   
   - name: b1_hybrid_balanced
     hypothesis: "Hybrid catches keywords dense misses"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hybrid_bge_large_05
     top_k: 5
     prompt: concise
   
   - name: b2_hybrid_dense_heavy
     hypothesis: "70% dense, 30% sparse optimal balance"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hybrid_bge_large_07
     top_k: 5
     prompt: concise
@@ -245,14 +245,14 @@ experiments:
   
   - name: c1_hierarchical_standard
     hypothesis: "Search small chunks, return large context"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hierarchical_bge_2048_256
     top_k: 3
     prompt: concise
   
   - name: c2_hierarchical_wide
     hypothesis: "Wider parent chunks for more context"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hierarchical_bge_4096_512
     top_k: 2
     prompt: concise
@@ -263,7 +263,7 @@ experiments:
   
   - name: d1_rerank_bge_top3
     hypothesis: "Overfetch 20, rerank to 3 for precision"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     top_k: 3
     fetch_k: 20
@@ -272,7 +272,7 @@ experiments:
   
   - name: d2_rerank_bge_top5
     hypothesis: "Overfetch 25, rerank to 5 for balance"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     top_k: 5
     fetch_k: 25
@@ -281,7 +281,7 @@ experiments:
   
   - name: d3_hybrid_rerank
     hypothesis: "Hybrid + rerank = best of both worlds"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hybrid_bge_large_05
     top_k: 5
     fetch_k: 20
@@ -294,7 +294,7 @@ experiments:
   
   - name: e1_hyde
     hypothesis: "HyDE helps match answer vocabulary"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     query_transform: hyde
     top_k: 5
@@ -302,7 +302,7 @@ experiments:
   
   - name: e2_multiquery
     hypothesis: "Multiple query variants improve recall"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     query_transform: multiquery
     top_k: 5
@@ -310,7 +310,7 @@ experiments:
   
   - name: e3_hyde_rerank
     hypothesis: "HyDE + rerank = transform then filter"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: dense_bge_large_512
     query_transform: hyde
     top_k: 3
@@ -324,7 +324,7 @@ experiments:
   
   - name: f1_iterative_1round
     hypothesis: "One refinement round helps complex queries"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
     retriever: dense_bge_large_512
     top_k: 5
@@ -334,7 +334,7 @@ experiments:
   
   - name: f2_iterative_2rounds
     hypothesis: "Two refinement rounds for stubborn queries"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
     retriever: dense_bge_large_512
     top_k: 5
@@ -344,7 +344,7 @@ experiments:
   
   - name: f3_selfrag_balanced
     hypothesis: "Adaptive retrieval skips when unnecessary"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: self_rag
     retriever: dense_bge_large_512
     top_k: 5
@@ -354,7 +354,7 @@ experiments:
   
   - name: f4_selfrag_verified
     hypothesis: "Verification ensures grounding"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: self_rag
     retriever: dense_bge_large_512
     top_k: 5
@@ -369,7 +369,7 @@ experiments:
   
   - name: g1_premium_stack
     hypothesis: "Best-in-class: hybrid + rerank + fewshot"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     retriever: hybrid_bge_large_07
     top_k: 5
     fetch_k: 25
@@ -378,7 +378,7 @@ experiments:
   
   - name: g2_iterative_premium
     hypothesis: "Iterative + hybrid + rerank"
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
     retriever: hybrid_bge_large_07
     top_k: 5

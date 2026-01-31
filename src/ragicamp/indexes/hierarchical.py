@@ -77,10 +77,26 @@ class HierarchicalIndex(Index):
 
     @property
     def encoder(self) -> SentenceTransformer:
-        """Lazy load encoder."""
+        """Lazy load encoder with Flash Attention and torch.compile()."""
         if self._encoder is None:
-            self._encoder = SentenceTransformer(self.embedding_model_name)
+            # Enable Flash Attention 2 and trust remote code for optimized models
+            self._encoder = SentenceTransformer(
+                self.embedding_model_name,
+                trust_remote_code=True,
+                model_kwargs={"attn_implementation": "flash_attention_2"},
+            )
             self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+
+            # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+            try:
+                import torch
+
+                if hasattr(torch, "compile") and torch.cuda.is_available():
+                    self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
+                    logger.info("Applied torch.compile() to embedding model")
+            except Exception as e:
+                logger.debug("torch.compile() not applied: %s", e)
+
         return self._encoder
 
     @property

@@ -87,10 +87,24 @@ def build_embedding_index(
     )
     corpus = WikipediaCorpus(corpus_cfg)
 
-    # Initialize encoder
+    # Initialize encoder with Flash Attention and trust_remote_code
     print("Loading embedding model...")
-    encoder = SentenceTransformer(embedding_model)
+    encoder = SentenceTransformer(
+        embedding_model,
+        trust_remote_code=True,
+        model_kwargs={"attn_implementation": "flash_attention_2"},
+    )
     embedding_dim = encoder.get_sentence_embedding_dimension()
+
+    # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+    try:
+        import torch
+
+        if hasattr(torch, "compile") and torch.cuda.is_available():
+            encoder = torch.compile(encoder, mode="reduce-overhead")
+            print("  Applied torch.compile() to embedding model")
+    except Exception as e:
+        print(f"  torch.compile() not applied: {e}")
 
     # Initialize FAISS index
     index = faiss.IndexFlatIP(embedding_dim)

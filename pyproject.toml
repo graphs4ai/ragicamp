@@ -121,3 +121,7 @@ disallow_untyped_defs = false
 
 [tool.uv.sources]
 bleurt = { git = "https://github.com/google-research/bleurt.git" }
+
+# flash-attn requires torch at build time but doesn't declare it
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]
