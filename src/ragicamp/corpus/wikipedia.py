@@ -178,21 +178,27 @@ class WikipediaCorpus(DocumentCorpus):
 
         # Load dataset - streaming mode by default, can disable for high-RAM machines
         use_streaming = self.config.metadata.get("streaming", True)
+        num_proc = self.config.metadata.get("num_proc", 128)  # For parallel loading/filtering
         
         if self._dataset is None:
             try:
                 if use_streaming:
                     print("  Loading Wikipedia (streaming mode)...")
                 else:
-                    print("  Loading Wikipedia into RAM (this may take a few minutes)...")
+                    print(f"  Loading Wikipedia into RAM with {num_proc} workers...")
                 
-                self._dataset = load_dataset(
-                    self.config.source,
-                    self.config.version,
-                    split="train",
-                    streaming=use_streaming,
-                    trust_remote_code=False,
-                )
+                # num_proc only works for non-streaming (sharded loading)
+                load_kwargs = {
+                    "path": self.config.source,
+                    "name": self.config.version,
+                    "split": "train",
+                    "streaming": use_streaming,
+                    "trust_remote_code": False,
+                }
+                if not use_streaming:
+                    load_kwargs["num_proc"] = num_proc
+                
+                self._dataset = load_dataset(**load_kwargs)
                 
                 if not use_streaming:
                     print(f"  ✓ Loaded {len(self._dataset):,} articles into RAM")
@@ -202,24 +208,46 @@ class WikipediaCorpus(DocumentCorpus):
                     f"Available configs: '20231101.simple', '20231101.en', etc."
                 ) from e
 
+        # If we have WikiRank filter and non-streaming, use parallel filter
+        dataset_to_iterate = self._dataset
+        if not use_streaming and self._allowed_titles is not None:
+            print(f"  Filtering with {num_proc} workers (this parallelizes the scan)...")
+            
+            # Need to pass allowed_titles to filter function
+            allowed_titles = self._allowed_titles
+            
+            def wikirank_filter(example):
+                title = example.get("title", "")
+                return _normalize_title(title) in allowed_titles
+            
+            dataset_to_iterate = self._dataset.filter(
+                wikirank_filter,
+                num_proc=num_proc,
+                desc="WikiRank filter",
+            )
+            print(f"  ✓ {len(dataset_to_iterate):,} articles pass WikiRank filter")
+
         # Yield documents
         seen_titles = set()
         min_chars = self.config.metadata.get("min_chars", 100)
         collected = 0
 
         desc = f"Loading {self.config.name}"
-        # When filtering, we don't know total upfront, so show collected count
-        if self._allowed_titles is not None:
-            pbar = tqdm(enumerate(self._dataset), desc=desc)
+        
+        # Determine total for progress bar
+        if not use_streaming and hasattr(dataset_to_iterate, '__len__'):
+            total = min(len(dataset_to_iterate), limit) if limit else len(dataset_to_iterate)
+            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc, total=total)
         else:
-            pbar = tqdm(enumerate(self._dataset), desc=desc, total=limit)
+            pbar = tqdm(enumerate(dataset_to_iterate), desc=desc)
 
         for i, article in pbar:
             title = article.get("title", "")
             text = article.get("text", "")
 
-            # WikiRank filter: skip articles not in top-K
-            if self._allowed_titles is not None:
+            # WikiRank filter already applied above for non-streaming
+            # But for streaming mode, we still need to filter here
+            if use_streaming and self._allowed_titles is not None:
                 if _normalize_title(title) not in self._allowed_titles:
                     continue
 
@@ -230,8 +258,8 @@ class WikipediaCorpus(DocumentCorpus):
             seen_titles.add(title)
             collected += 1
 
-            # Update progress with collected count when filtering
-            if self._allowed_titles is not None:
+            # Update progress with collected count when filtering (streaming only)
+            if use_streaming and self._allowed_titles is not None:
                 pbar.set_postfix(collected=collected, scanned=i + 1)
 
             # Create document WITHOUT answer information

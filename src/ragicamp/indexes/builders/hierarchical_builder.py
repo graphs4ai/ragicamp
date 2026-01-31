@@ -67,6 +67,8 @@ def build_hierarchical_index(
         corpus_metadata["min_chars"] = corpus_config["min_chars"]
     if "streaming" in corpus_config:
         corpus_metadata["streaming"] = corpus_config["streaming"]
+    if corpus_config.get("num_proc"):
+        corpus_metadata["num_proc"] = corpus_config["num_proc"]
 
     corpus_cfg = CorpusConfig(
         name=f"wikipedia_{corpus_config.get('version', 'simple')}",

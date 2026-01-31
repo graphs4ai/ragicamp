@@ -82,11 +82,12 @@ rag:
     version: 20231101.en
     max_docs: 200000
     wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
-    streaming: false           # Load full dataset into RAM (faster, requires ~20GB)
+    streaming: false        # Load full dataset into RAM (faster, requires ~20GB)
+    num_proc: 128           # Parallel workers for dataset loading & WikiRank filtering
     # Index building batch sizes (tuned for high-RAM/VRAM machines)
     doc_batch_size: 50000      # Documents to chunk per batch
     embedding_batch_size: 4096 # Texts to embed per GPU batch
-    chunk_workers: 32          # Parallel workers for chunking
+    chunk_workers: 128         # Parallel workers for chunking
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)
