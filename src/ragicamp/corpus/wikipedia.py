@@ -195,15 +195,16 @@ class WikipediaCorpus(DocumentCorpus):
         # Yield documents
         seen_titles = set()
         min_chars = self.config.metadata.get("min_chars", 100)
+        collected = 0
 
         desc = f"Loading {self.config.name}"
-        iterator = tqdm(enumerate(self._dataset), desc=desc, total=limit)
+        # When filtering, we don't know total upfront, so show collected count
+        if self._allowed_titles is not None:
+            pbar = tqdm(enumerate(self._dataset), desc=desc)
+        else:
+            pbar = tqdm(enumerate(self._dataset), desc=desc, total=limit)
 
-        for i, article in iterator:
-            # Check limit
-            if limit and i >= limit:
-                break
-
+        for i, article in pbar:
             title = article.get("title", "")
             text = article.get("text", "")
 
@@ -217,10 +218,15 @@ class WikipediaCorpus(DocumentCorpus):
                 continue
 
             seen_titles.add(title)
+            collected += 1
+
+            # Update progress with collected count when filtering
+            if self._allowed_titles is not None:
+                pbar.set_postfix(collected=collected, scanned=i + 1)
 
             # Create document WITHOUT answer information
             yield Document(
-                id=f"wiki_{i}",
+                id=f"wiki_{collected}",
                 text=text,
                 metadata={
                     "title": title,
@@ -229,6 +235,10 @@ class WikipediaCorpus(DocumentCorpus):
                     "corpus": self.config.name,
                 },
             )
+
+            # Check limit based on COLLECTED docs, not scanned
+            if limit and collected >= limit:
+                break
 
     def get_info(self) -> dict:
         """Get Wikipedia corpus metadata."""
