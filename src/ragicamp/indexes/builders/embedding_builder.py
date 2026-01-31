@@ -87,12 +87,23 @@ def build_embedding_index(
     )
     corpus = WikipediaCorpus(corpus_cfg)
 
-    # Initialize encoder with Flash Attention and trust_remote_code
+    # Initialize encoder with Flash Attention (if available) and trust_remote_code
     print("Loading embedding model...")
+
+    # Try Flash Attention 2 if available, otherwise fall back to default
+    model_kwargs = {}
+    try:
+        import flash_attn  # noqa: F401
+
+        model_kwargs["attn_implementation"] = "flash_attention_2"
+        print("  Flash Attention 2 available, enabling")
+    except ImportError:
+        print("  flash-attn not installed, using default attention")
+
     encoder = SentenceTransformer(
         embedding_model,
         trust_remote_code=True,
-        model_kwargs={"attn_implementation": "flash_attention_2"},
+        model_kwargs=model_kwargs if model_kwargs else None,
     )
     embedding_dim = encoder.get_sentence_embedding_dimension()
 

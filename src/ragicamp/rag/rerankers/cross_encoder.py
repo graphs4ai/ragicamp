@@ -72,11 +72,22 @@ class CrossEncoderReranker(Reranker):
         self.batch_size = batch_size
 
         logger.info("Loading cross-encoder: %s on %s", self.model_id, self.device)
+
+        # Try Flash Attention 2 if available, otherwise fall back to default
+        automodel_args = {}
+        try:
+            import flash_attn  # noqa: F401
+
+            automodel_args["attn_implementation"] = "flash_attention_2"
+            logger.info("Flash Attention 2 available, enabling for cross-encoder")
+        except ImportError:
+            logger.debug("flash-attn not installed, using default attention")
+
         self.model = CrossEncoder(
             self.model_id,
             device=self.device,
             trust_remote_code=True,
-            automodel_args={"attn_implementation": "flash_attention_2"},
+            automodel_args=automodel_args if automodel_args else None,
         )
 
         # Apply torch.compile() for additional speedup (PyTorch 2.0+)

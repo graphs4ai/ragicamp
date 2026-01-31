@@ -88,11 +88,21 @@ def build_hierarchical_index(
     )
 
     print("Processing documents in batches...")
-    # Initialize encoder with Flash Attention and trust_remote_code
+
+    # Try Flash Attention 2 if available, otherwise fall back to default
+    model_kwargs = {}
+    try:
+        import flash_attn  # noqa: F401
+
+        model_kwargs["attn_implementation"] = "flash_attention_2"
+        print("  Flash Attention 2 available, enabling")
+    except ImportError:
+        print("  flash-attn not installed, using default attention")
+
     encoder = SentenceTransformer(
         embedding_model,
         trust_remote_code=True,
-        model_kwargs={"attn_implementation": "flash_attention_2"},
+        model_kwargs=model_kwargs if model_kwargs else None,
     )
     embedding_dim = encoder.get_sentence_embedding_dimension()
 

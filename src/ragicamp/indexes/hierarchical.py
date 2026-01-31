@@ -77,13 +77,22 @@ class HierarchicalIndex(Index):
 
     @property
     def encoder(self) -> SentenceTransformer:
-        """Lazy load encoder with Flash Attention and torch.compile()."""
+        """Lazy load encoder with Flash Attention (if available) and torch.compile()."""
         if self._encoder is None:
-            # Enable Flash Attention 2 and trust remote code for optimized models
+            # Try Flash Attention 2 if available, otherwise fall back to default
+            model_kwargs = {}
+            try:
+                import flash_attn  # noqa: F401
+
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+                logger.info("Flash Attention 2 available, enabling for embeddings")
+            except ImportError:
+                logger.debug("flash-attn not installed, using default attention")
+
             self._encoder = SentenceTransformer(
                 self.embedding_model_name,
                 trust_remote_code=True,
-                model_kwargs={"attn_implementation": "flash_attention_2"},
+                model_kwargs=model_kwargs if model_kwargs else None,
             )
             self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
 
