@@ -273,12 +273,18 @@ class RecursiveChunker(ChunkingStrategy):
 
     This is similar to LangChain's RecursiveCharacterTextSplitter.
     """
+    
+    # Safety limits to prevent pathological cases
+    MAX_RECURSION_DEPTH = 10
+    MAX_CHUNKS_PER_DOC = 2000
 
     def chunk(self, text: str) -> List[str]:
         """Recursively split text into chunks."""
-        return self._recursive_split(text, self.config.separators)
+        return self._recursive_split(text, self.config.separators, depth=0)
 
-    def _recursive_split(self, text: str, separators: List[str]) -> List[str]:
+    def _recursive_split(
+        self, text: str, separators: List[str], depth: int = 0
+    ) -> List[str]:
         """Recursively split text using separator hierarchy."""
         if not text.strip():
             return []
@@ -286,6 +292,10 @@ class RecursiveChunker(ChunkingStrategy):
         # Base case: text fits in chunk
         if len(text) <= self.config.chunk_size:
             return [text]
+        
+        # Safety: bail out if recursion is too deep
+        if depth >= self.MAX_RECURSION_DEPTH:
+            return self._hard_split(text)
 
         # Try each separator in order
         for i, sep in enumerate(separators):
@@ -297,6 +307,12 @@ class RecursiveChunker(ChunkingStrategy):
                 current_chunk = ""
 
                 for split in splits:
+                    # Safety: bail out if we have too many chunks
+                    if len(chunks) >= self.MAX_CHUNKS_PER_DOC:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        return chunks
+                    
                     test_chunk = (current_chunk + sep + split).strip() if current_chunk else split
 
                     if len(test_chunk) <= self.config.chunk_size:
@@ -311,7 +327,9 @@ class RecursiveChunker(ChunkingStrategy):
                             remaining_seps = (
                                 separators[i + 1 :] if i + 1 < len(separators) else [" "]
                             )
-                            sub_chunks = self._recursive_split(split, remaining_seps)
+                            sub_chunks = self._recursive_split(
+                                split, remaining_seps, depth=depth + 1
+                            )
                             chunks.extend(sub_chunks)
                             current_chunk = ""
                         else:
@@ -452,7 +470,7 @@ class DocumentChunker:
         documents: List[Document],
         num_workers: Optional[int] = None,
         show_progress: bool = True,
-        max_doc_chars: int = 500_000,
+        max_doc_chars: int = 100_000,
         ipc_chunksize: int = 32,
     ) -> List[Document]:
         """Chunk multiple documents in parallel using multiprocessing.
