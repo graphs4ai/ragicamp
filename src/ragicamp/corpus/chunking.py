@@ -8,8 +8,9 @@ Chunking long documents improves retrieval quality by:
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Optional
 
 from ragicamp.retrievers.base import Document
 
@@ -30,7 +31,7 @@ class ChunkConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
     min_chunk_size: int = 50
-    separators: Optional[List[str]] = None
+    separators: Optional[list[str]] = None
 
     def __post_init__(self):
         if self.separators is None:
@@ -45,7 +46,7 @@ class ChunkingStrategy(ABC):
         self.config = config
 
     @abstractmethod
-    def chunk(self, text: str) -> List[str]:
+    def chunk(self, text: str) -> list[str]:
         """Split text into chunks.
 
         Args:
@@ -91,7 +92,7 @@ class FixedSizeChunker(ChunkingStrategy):
     Simple and predictable. Best for uniform document processing.
     """
 
-    def chunk(self, text: str) -> List[str]:
+    def chunk(self, text: str) -> list[str]:
         """Split text into fixed-size chunks."""
         chunks = []
         start = 0
@@ -125,7 +126,7 @@ class SentenceChunker(ChunkingStrategy):
 
     SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
-    def chunk(self, text: str) -> List[str]:
+    def chunk(self, text: str) -> list[str]:
         """Split text into sentence-based chunks."""
         sentences = self.SENTENCE_PATTERN.split(text)
         sentences = [s.strip() for s in sentences if s.strip()]
@@ -157,7 +158,7 @@ class ParagraphChunker(ChunkingStrategy):
     Respects natural document structure. May produce variable chunk sizes.
     """
 
-    def chunk(self, text: str) -> List[str]:
+    def chunk(self, text: str) -> list[str]:
         """Split text into paragraph-based chunks."""
         paragraphs = re.split(r"\n\s*\n", text)
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
@@ -197,7 +198,7 @@ class ParagraphChunker(ChunkingStrategy):
 
         return chunks
 
-    def _split_large_paragraph(self, text: str) -> List[str]:
+    def _split_large_paragraph(self, text: str) -> list[str]:
         """Split a large paragraph using sentence boundaries."""
         sentence_chunker = SentenceChunker(
             ChunkConfig(
@@ -231,13 +232,11 @@ class RecursiveChunker(ChunkingStrategy):
     MAX_RECURSION_DEPTH = 10
     MAX_CHUNKS_PER_DOC = 2000
 
-    def chunk(self, text: str) -> List[str]:
+    def chunk(self, text: str) -> list[str]:
         """Recursively split text into chunks."""
         return self._recursive_split(text, self.config.separators, depth=0)
 
-    def _recursive_split(
-        self, text: str, separators: List[str], depth: int = 0
-    ) -> List[str]:
+    def _recursive_split(self, text: str, separators: list[str], depth: int = 0) -> list[str]:
         """Recursively split text using separator hierarchy."""
         if not text.strip():
             return []
@@ -278,8 +277,12 @@ class RecursiveChunker(ChunkingStrategy):
                             chunks.append(current_chunk)
 
                         if len(split) > self.config.chunk_size:
-                            remaining_seps = separators[i + 1:] if i + 1 < len(separators) else [" "]
-                            sub_chunks = self._recursive_split(split, remaining_seps, depth=depth + 1)
+                            remaining_seps = (
+                                separators[i + 1 :] if i + 1 < len(separators) else [" "]
+                            )
+                            sub_chunks = self._recursive_split(
+                                split, remaining_seps, depth=depth + 1
+                            )
                             chunks.extend(sub_chunks)
                             current_chunk = ""
                         else:
@@ -293,7 +296,7 @@ class RecursiveChunker(ChunkingStrategy):
         # Fallback: hard split at chunk_size
         return self._hard_split(text)
 
-    def _apply_overlap(self, chunks: List[str]) -> List[str]:
+    def _apply_overlap(self, chunks: list[str]) -> list[str]:
         """Apply overlap between consecutive chunks."""
         if self.config.chunk_overlap <= 0 or len(chunks) <= 1:
             return chunks
@@ -304,7 +307,7 @@ class RecursiveChunker(ChunkingStrategy):
             curr_chunk = chunks[i]
 
             overlap = (
-                prev_chunk[-self.config.chunk_overlap:]
+                prev_chunk[-self.config.chunk_overlap :]
                 if len(prev_chunk) > self.config.chunk_overlap
                 else prev_chunk
             )
@@ -312,14 +315,14 @@ class RecursiveChunker(ChunkingStrategy):
             if not curr_chunk.startswith(overlap):
                 space_idx = overlap.find(" ")
                 if space_idx > 0:
-                    overlap = overlap[space_idx + 1:]
+                    overlap = overlap[space_idx + 1 :]
                 result.append(overlap + " " + curr_chunk)
             else:
                 result.append(curr_chunk)
 
         return result
 
-    def _hard_split(self, text: str) -> List[str]:
+    def _hard_split(self, text: str) -> list[str]:
         """Last resort: split at exact chunk_size boundaries."""
         chunks = []
         start = 0
@@ -348,8 +351,7 @@ def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
 
     if config.strategy not in strategies:
         raise ValueError(
-            f"Unknown chunking strategy: {config.strategy}. "
-            f"Available: {list(strategies.keys())}"
+            f"Unknown chunking strategy: {config.strategy}. Available: {list(strategies.keys())}"
         )
 
     return strategies[config.strategy](config)
@@ -392,8 +394,7 @@ class DocumentChunker:
             doc_chunks = list(self.strategy.chunk_document(doc))
             total_chunks += len(doc_chunks)
 
-            for chunk_doc in doc_chunks:
-                yield chunk_doc
+            yield from doc_chunks
 
             if show_progress and doc_count % 100 == 0:
                 print(f"  Processed {doc_count} docs → {total_chunks} chunks")
@@ -402,7 +403,7 @@ class DocumentChunker:
             print(f"✓ Chunking complete: {doc_count} docs → {total_chunks} chunks")
             print(f"  Avg chunks per doc: {total_chunks / max(doc_count, 1):.1f}")
 
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> dict[str, Any]:
         """Get chunking configuration info."""
         return {
             "strategy": self.config.strategy,

@@ -14,13 +14,11 @@ Usage:
 import json
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, Mock
+from typing import Any, Optional
 
 import pytest
 
 # Import RAGiCamp components
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
 from ragicamp.datasets.base import QADataset, QAExample
 from ragicamp.metrics.base import Metric
 from ragicamp.retrievers.base import Document
@@ -38,12 +36,12 @@ class MockLanguageModel:
         self,
         model_name: str = "mock_model",
         default_response: str = "Mock answer",
-        responses: Optional[Dict[str, str]] = None,
+        responses: Optional[dict[str, str]] = None,
     ):
         self.model_name = model_name
         self.default_response = default_response
         self.responses = responses or {}
-        self.call_history: List[Dict[str, Any]] = []
+        self.call_history: list[dict[str, Any]] = []
 
     def generate(
         self,
@@ -69,7 +67,7 @@ class MockLanguageModel:
 
         return self.default_response
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Return mock embeddings."""
         return [[0.1, 0.2, 0.3, 0.4, 0.5] for _ in texts]
 
@@ -108,13 +106,13 @@ class MockRetriever:
     def __init__(
         self,
         name: str = "mock_retriever",
-        documents: Optional[List[Document]] = None,
+        documents: Optional[list[Document]] = None,
     ):
         self.name = name
         self.documents = documents or self._default_documents()
-        self.call_history: List[Dict[str, Any]] = []
+        self.call_history: list[dict[str, Any]] = []
 
-    def _default_documents(self) -> List[Document]:
+    def _default_documents(self) -> list[Document]:
         """Create default mock documents."""
         return [
             Document(
@@ -142,7 +140,7 @@ class MockRetriever:
         query: str,
         top_k: int = 5,
         **kwargs,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Retrieve mock documents."""
         self.call_history.append(
             {
@@ -153,7 +151,7 @@ class MockRetriever:
         )
         return self.documents[:top_k]
 
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Store documents for retrieval."""
         self.documents = documents
 
@@ -168,7 +166,7 @@ def mock_retriever() -> MockRetriever:
 
 
 @pytest.fixture
-def sample_qa_examples() -> List[QAExample]:
+def sample_qa_examples() -> list[QAExample]:
     """Create sample QA examples for testing."""
     return [
         QAExample(
@@ -209,7 +207,7 @@ class MockQADataset(QADataset):
 
     def __init__(
         self,
-        examples: List[QAExample],
+        examples: list[QAExample],
         name: str = "mock_dataset",
         split: str = "test",
     ):
@@ -253,10 +251,10 @@ class MockMetric(Metric):
 
     def compute(
         self,
-        predictions: List[str],
-        references: List[List[str]],
+        predictions: list[str],
+        references: list[list[str]],
         **kwargs,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute mock metric."""
         self.call_count += 1
 
@@ -280,7 +278,7 @@ def mock_metric() -> MockMetric:
 
 
 @pytest.fixture
-def mock_metrics() -> List[MockMetric]:
+def mock_metrics() -> list[MockMetric]:
     """Create a list of mock metrics."""
     return [
         MockMetric(name="mock_em"),

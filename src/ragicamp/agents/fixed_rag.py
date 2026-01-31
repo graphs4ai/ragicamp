@@ -1,11 +1,11 @@
 """Fixed RAG agent - Baseline 2: Standard RAG with fixed parameters."""
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import RAGResponseMeta, RetrievedDoc, AgentType
+from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
 from ragicamp.models.base import LanguageModel
-from ragicamp.retrievers.base import Document, Retriever
+from ragicamp.retrievers.base import Retriever
 from ragicamp.retrievers.dense import DenseRetriever
 from ragicamp.utils.artifacts import get_artifact_manager
 from ragicamp.utils.formatting import ContextFormatter
@@ -76,9 +76,10 @@ class FixedRAGAgent(RAGAgent):
         self.top_k_retrieve = top_k_retrieve or (top_k * 4 if reranker else top_k)
 
         # Build pipeline if advanced features are used
-        self._pipeline: Optional["RAGPipeline"] = None
+        self._pipeline: "Optional[RAGPipeline]" = None  # noqa: UP037
         if query_transformer is not None or reranker is not None:
             from ragicamp.rag.pipeline import RAGPipeline
+
             self._pipeline = RAGPipeline(
                 retriever=retriever,
                 query_transformer=query_transformer,
@@ -92,6 +93,7 @@ class FixedRAGAgent(RAGAgent):
             self.prompt_builder = prompt_builder
         else:
             from ragicamp.utils.prompts import PromptConfig
+
             self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
 
         # Legacy template support (for backwards compat with study.py)
@@ -165,7 +167,7 @@ class FixedRAGAgent(RAGAgent):
             ),
         )
 
-    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
         """Generate answers for multiple queries using batch processing.
 
         Optimized for speed:
@@ -212,7 +214,7 @@ class FixedRAGAgent(RAGAgent):
 
         # Create responses with prompts for debugging/analysis
         responses = []
-        for query, prompt, answer, context, docs, ctx_text in zip(
+        for _query, prompt, answer, context, docs, _ctx_text in zip(
             queries, prompts, answers, contexts, all_docs, context_texts
         ):
             # Build structured retrieved docs for typed metadata
@@ -224,7 +226,7 @@ class FixedRAGAgent(RAGAgent):
                 )
                 for i, doc in enumerate(docs)
             ]
-            
+
             response = RAGResponse(
                 answer=answer,
                 context=context,

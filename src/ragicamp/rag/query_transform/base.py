@@ -1,7 +1,6 @@
 """Base class for query transformers."""
 
 from abc import ABC, abstractmethod
-from typing import List
 
 
 class QueryTransformer(ABC):
@@ -14,7 +13,7 @@ class QueryTransformer(ABC):
     """
 
     @abstractmethod
-    def transform(self, query: str) -> List[str]:
+    def transform(self, query: str) -> list[str]:
         """Transform a query into one or more search queries.
 
         Args:
@@ -26,7 +25,7 @@ class QueryTransformer(ABC):
         """
         pass
 
-    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+    def batch_transform(self, queries: list[str]) -> list[list[str]]:
         """Transform multiple queries at once.
 
         Override this in subclasses for efficient batched implementations.
@@ -50,6 +49,6 @@ class PassthroughTransformer(QueryTransformer):
     Useful as a baseline or when no transformation is needed.
     """
 
-    def transform(self, query: str) -> List[str]:
+    def transform(self, query: str) -> list[str]:
         """Return the original query unchanged."""
         return [query]

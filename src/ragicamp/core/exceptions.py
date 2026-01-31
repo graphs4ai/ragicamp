@@ -12,7 +12,7 @@ Usage:
         logger.error("RAGiCamp error: %s", e)
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class RAGiCampError(Exception):
@@ -27,7 +27,7 @@ class RAGiCampError(Exception):
     def __init__(
         self,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: Optional[dict[str, Any]] = None,
         cause: Optional[Exception] = None,
     ):
         self.message = message
@@ -92,10 +92,10 @@ class RecoverableError(RAGiCampError):
     - CUDA out of memory (can reduce batch size)
     - Temporary GPU errors (can retry)
     - Resource allocation failures (can retry with different config)
-    
+
     These errors should be caught and handled with retry logic,
     not propagated to crash the entire experiment.
-    
+
     Example:
         >>> try:
         ...     model.generate(prompts, batch_size=32)

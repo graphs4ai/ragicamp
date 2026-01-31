@@ -4,19 +4,19 @@ Builds ExperimentSpec objects from YAML configuration files.
 This is the main entry point for generating the experiment matrix.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from ragicamp.spec.experiment import ExperimentSpec
 from ragicamp.spec.naming import name_direct, name_rag
 
 
-def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
+def build_specs(config: dict[str, Any]) -> list[ExperimentSpec]:
     """Build experiment specs from YAML config.
 
     Generates the full experiment matrix by combining:
     - Models x Datasets x Prompts x Quantizations (for direct)
     - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
-    
+
     Also supports singleton experiments via the 'experiments' list for hypothesis-driven research.
 
     Args:
@@ -31,7 +31,7 @@ def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
         >>> specs = build_specs(config)
         >>> print(f"Generated {len(specs)} experiments")
     """
-    specs: List[ExperimentSpec] = []
+    specs: list[ExperimentSpec] = []
 
     # Global settings
     datasets = config.get("datasets", ["nq"])
@@ -42,40 +42,32 @@ def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
     # Build direct experiment specs (grid search)
     direct = config.get("direct", {})
     if direct.get("enabled"):
-        specs.extend(
-            _build_direct_specs(
-                direct, datasets, batch_size, min_batch_size, metrics
-            )
-        )
+        specs.extend(_build_direct_specs(direct, datasets, batch_size, min_batch_size, metrics))
 
     # Build RAG experiment specs (grid search)
     rag = config.get("rag", {})
     if rag.get("enabled"):
-        specs.extend(
-            _build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics)
-        )
+        specs.extend(_build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics))
 
     # Build singleton experiments (hypothesis-driven)
     experiments = config.get("experiments", [])
     if experiments:
         specs.extend(
-            _build_singleton_specs(
-                experiments, config, batch_size, min_batch_size, metrics
-            )
+            _build_singleton_specs(experiments, config, batch_size, min_batch_size, metrics)
         )
 
     return specs
 
 
 def _build_direct_specs(
-    direct_config: Dict[str, Any],
-    datasets: List[str],
+    direct_config: dict[str, Any],
+    datasets: list[str],
     batch_size: int,
     min_batch_size: int,
-    metrics: List[str],
-) -> List[ExperimentSpec]:
+    metrics: list[str],
+) -> list[ExperimentSpec]:
     """Build specs for direct (non-RAG) experiments."""
-    specs: List[ExperimentSpec] = []
+    specs: list[ExperimentSpec] = []
 
     models = direct_config.get("models", [])
     prompts = direct_config.get("prompts", ["default"])
@@ -108,14 +100,14 @@ def _build_direct_specs(
 
 
 def _build_rag_specs(
-    rag_config: Dict[str, Any],
-    datasets: List[str],
+    rag_config: dict[str, Any],
+    datasets: list[str],
     batch_size: int,
     min_batch_size: int,
-    metrics: List[str],
-) -> List[ExperimentSpec]:
+    metrics: list[str],
+) -> list[ExperimentSpec]:
     """Build specs for RAG experiments."""
-    specs: List[ExperimentSpec] = []
+    specs: list[ExperimentSpec] = []
 
     models = rag_config.get("models", [])
     retrievers = rag_config.get("retrievers", [])
@@ -143,9 +135,7 @@ def _build_rag_specs(
     for model in models:
         for ret_config in retrievers:
             # Handle both string and dict retriever configs
-            ret_name = (
-                ret_config["name"] if isinstance(ret_config, dict) else ret_config
-            )
+            ret_name = ret_config["name"] if isinstance(ret_config, dict) else ret_config
 
             for top_k in top_k_values:
                 for prompt in prompts:
@@ -157,15 +147,9 @@ def _build_rag_specs(
                         for qt in query_transforms:
                             for rr_cfg in reranker_cfgs:
                                 rr_name = (
-                                    rr_cfg.get("name", "none")
-                                    if rr_cfg.get("enabled")
-                                    else "none"
+                                    rr_cfg.get("name", "none") if rr_cfg.get("enabled") else "none"
                                 )
-                                rr_model = (
-                                    rr_cfg.get("model")
-                                    if rr_cfg.get("enabled")
-                                    else None
-                                )
+                                rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
 
                                 for dataset in datasets:
                                     name = name_rag(
@@ -178,7 +162,7 @@ def _build_rag_specs(
                                         qt,
                                         rr_name,
                                     )
-                                    
+
                                     # Compute fetch_k: explicit > multiplier (if reranking) > None
                                     has_reranker = rr_name != "none" and rr_cfg.get("enabled")
                                     if fetch_k_config is not None:
@@ -187,7 +171,7 @@ def _build_rag_specs(
                                         fetch_k = top_k * fetch_k_multiplier
                                     else:
                                         fetch_k = None
-                                    
+
                                     specs.append(
                                         ExperimentSpec(
                                             name=name,
@@ -212,57 +196,57 @@ def _build_rag_specs(
 
 
 def _build_singleton_specs(
-    experiments: List[Dict[str, Any]],
-    config: Dict[str, Any],
+    experiments: list[dict[str, Any]],
+    config: dict[str, Any],
     batch_size: int,
     min_batch_size: int,
-    metrics: List[str],
-) -> List[ExperimentSpec]:
+    metrics: list[str],
+) -> list[ExperimentSpec]:
     """Build specs from explicit singleton experiment definitions.
-    
+
     This enables hypothesis-driven research where each experiment is
     explicitly defined rather than generated from a grid search.
-    
+
     Args:
         experiments: List of experiment definition dicts
         config: Full study config (for defaults)
         batch_size: Default batch size
         min_batch_size: Default min batch size
         metrics: Default metrics list
-        
+
     Returns:
         List of ExperimentSpec objects
     """
-    specs: List[ExperimentSpec] = []
-    
+    specs: list[ExperimentSpec] = []
+
     # Get defaults from config
     default_model = config.get("models", {}).get("default")
     default_dataset = config.get("datasets", ["nq"])[0] if config.get("datasets") else "nq"
     default_prompt = "concise"
     default_quant = "none"
-    
+
     for exp in experiments:
         # Required field
         name = exp["name"]
-        
+
         # Determine exp_type from agent_type or presence of retriever
         agent_type = exp.get("agent_type")
         has_retriever = exp.get("retriever") is not None
-        
+
         if agent_type == "direct" or (not has_retriever and agent_type is None):
             exp_type = "direct"
         else:
             exp_type = "rag"
-        
+
         # Get experiment-specific or default values
         model = exp.get("model", default_model)
         if model is None:
             raise ValueError(f"Experiment '{name}' requires a model")
-        
+
         dataset = exp.get("dataset", default_dataset)
         prompt = exp.get("prompt", default_prompt)
         quant = exp.get("quant", exp.get("quantization", default_quant))
-        
+
         # RAG-specific fields
         retriever = exp.get("retriever")
         top_k = exp.get("top_k", 5)
@@ -270,7 +254,7 @@ def _build_singleton_specs(
         query_transform = exp.get("query_transform")
         reranker = exp.get("reranker")
         reranker_model = exp.get("reranker_model")
-        
+
         # If reranker is specified as short name, map to model
         if reranker and not reranker_model:
             reranker_map = {
@@ -278,31 +262,36 @@ def _build_singleton_specs(
                 "ms-marco": "ms-marco",
             }
             reranker_model = reranker_map.get(reranker, reranker)
-        
+
         # Singleton-specific fields
         hypothesis = exp.get("hypothesis")
-        
+
         # Extract agent_params from agent-type-specific config blocks
         agent_params = {}
         if agent_type:
             # Check for agent-specific config block (e.g., iterative_rag: {...})
             agent_config_block = exp.get(agent_type, {})
             agent_params.update(agent_config_block)
-        
+
         # Also check common agent param names at top level
-        for param_name in ["max_iterations", "stop_on_sufficient", "retrieval_threshold", 
-                          "verify_answer", "fallback_to_direct"]:
+        for param_name in [
+            "max_iterations",
+            "stop_on_sufficient",
+            "retrieval_threshold",
+            "verify_answer",
+            "fallback_to_direct",
+        ]:
             if param_name in exp:
                 agent_params[param_name] = exp[param_name]
-        
+
         # Convert agent_params dict to tuple for frozen dataclass
         agent_params_tuple = tuple(agent_params.items())
-        
+
         # Override batch settings if specified
         exp_batch_size = exp.get("batch_size", batch_size)
         exp_min_batch_size = exp.get("min_batch_size", min_batch_size)
         exp_metrics = exp.get("metrics", metrics)
-        
+
         specs.append(
             ExperimentSpec(
                 name=name,
@@ -325,5 +314,5 @@ def _build_singleton_specs(
                 agent_params=agent_params_tuple,
             )
         )
-    
+
     return specs

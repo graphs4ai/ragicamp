@@ -10,7 +10,7 @@ without needing to quantize model weights.
 """
 
 import gc
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
@@ -167,13 +167,13 @@ class VLLMModel(LanguageModel):
 
     def generate(
         self,
-        prompt: Union[str, List[str]],
+        prompt: Union[str, list[str]],
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Union[str, List[str]]:
+    ) -> Union[str, list[str]]:
         """Generate text using vLLM.
 
         Args:
@@ -212,7 +212,7 @@ class VLLMModel(LanguageModel):
 
         return results if is_batch else results[0]
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for texts.
 
         Note: vLLM is optimized for generation, not embeddings.

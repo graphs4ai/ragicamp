@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
@@ -53,8 +53,8 @@ class GenerationHandler(PhaseHandler):
         questions = q_data["questions"]
 
         # Load existing predictions if resuming
-        predictions_data: Dict[str, Any] = {"experiment": spec.name, "predictions": []}
-        completed_indices: Set[int] = set()
+        predictions_data: dict[str, Any] = {"experiment": spec.name, "predictions": []}
+        completed_indices: set[int] = set()
 
         if predictions_path.exists():
             with open(predictions_path) as f:
@@ -87,7 +87,7 @@ class GenerationHandler(PhaseHandler):
         )
 
         # Checkpoint callback
-        def on_checkpoint(results: List[Dict]) -> None:
+        def on_checkpoint(results: list[dict]) -> None:
             # Convert executor results to predictions format
             for r in results:
                 if r["idx"] not in completed_indices:
@@ -141,7 +141,7 @@ class GenerationHandler(PhaseHandler):
 
         return state
 
-    def _save_predictions(self, data: Dict[str, Any], path: Path) -> None:
+    def _save_predictions(self, data: dict[str, Any], path: Path) -> None:
         """Save predictions atomically using ExperimentIO."""
         io = ExperimentIO(path.parent)
         io.save_predictions(data)

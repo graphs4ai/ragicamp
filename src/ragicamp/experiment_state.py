@@ -6,10 +6,10 @@ Canonical imports should use: from ragicamp.state import ...
 
 # Re-export everything from new location for backward compatibility
 from ragicamp.state import (
+    PHASE_ORDER,
     ExperimentHealth,
     ExperimentPhase,
     ExperimentState,
-    PHASE_ORDER,
     check_health,
     detect_state,
 )

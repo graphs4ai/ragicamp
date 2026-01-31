@@ -8,17 +8,17 @@ Provides utilities for:
 """
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional
 
 from ragicamp.analysis.loader import ExperimentResult
 
 
 def compare_results(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     group_by: str = "model",
     metric: str = "f1",
     sort: bool = True,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Compare results grouped by a dimension.
 
     Args:
@@ -42,7 +42,7 @@ def compare_results(
         >>> compare_results(results, group_by="embedding_model", metric="f1")
         >>> compare_results(results, group_by="chunk_size", metric="bleurt")
     """
-    groups: Dict[str, List[float]] = defaultdict(list)
+    groups: dict[str, list[float]] = defaultdict(list)
 
     for r in results:
         # Get group key based on dimension
@@ -88,11 +88,11 @@ def compare_results(
 
 
 def best_by(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     metric: str = "f1",
     n: int = 10,
     filter_fn: Optional[Callable[[ExperimentResult], bool]] = None,
-) -> List[ExperimentResult]:
+) -> list[ExperimentResult]:
     """Get the top N results by a metric.
 
     Args:
@@ -118,7 +118,7 @@ def best_by(
 
 
 def pivot_results(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     rows: str = "model",
     cols: str = "dataset",
     metric: str = "f1",
@@ -141,7 +141,7 @@ def pivot_results(
         >>> print(pivot)  # Nice DataFrame output
     """
     # Collect values per cell
-    cells: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    cells: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
     for r in results:
         # Get row key
@@ -200,7 +200,7 @@ def pivot_results(
         return pivot_dict
 
 
-def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
+def summarize_results(results: list[ExperimentResult]) -> dict[str, Any]:
     """Generate summary statistics for a set of results.
 
     Args:
@@ -220,20 +220,20 @@ def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
     # Basic counts
     summary = {
         "count": len(results),
-        "models": list(set(r.model_short for r in results)),
-        "datasets": list(set(r.dataset for r in results)),
-        "prompts": list(set(r.prompt for r in results)),
-        "types": list(set(r.type for r in results)),
+        "models": list({r.model_short for r in results}),
+        "datasets": list({r.dataset for r in results}),
+        "prompts": list({r.prompt for r in results}),
+        "types": list({r.type for r in results}),
     }
 
     # RAG-specific counts
     rag_results = [r for r in results if r.type == "rag"]
     if rag_results:
         summary["embedding_models"] = list(
-            set(r.embedding_model for r in rag_results if r.embedding_model != "unknown")
+            {r.embedding_model for r in rag_results if r.embedding_model != "unknown"}
         )
-        summary["chunk_sizes"] = list(set(r.chunk_size for r in rag_results if r.chunk_size > 0))
-        summary["corpora"] = list(set(r.corpus for r in rag_results if r.corpus != "unknown"))
+        summary["chunk_sizes"] = list({r.chunk_size for r in rag_results if r.chunk_size > 0})
+        summary["corpora"] = list({r.corpus for r in rag_results if r.corpus != "unknown"})
 
     # Best by each metric
     all_metrics = [
@@ -273,7 +273,7 @@ def summarize_results(results: List[ExperimentResult]) -> Dict[str, Any]:
 
 
 def format_comparison_table(
-    stats: Dict[str, Dict[str, Any]],
+    stats: dict[str, dict[str, Any]],
     title: str = "Comparison",
     metric: str = "f1",
 ) -> str:
@@ -303,7 +303,7 @@ def format_comparison_table(
     return "\n".join(lines)
 
 
-def _std(values: List[float]) -> float:
+def _std(values: list[float]) -> float:
     """Compute standard deviation."""
     if len(values) < 2:
         return 0.0

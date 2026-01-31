@@ -20,7 +20,7 @@ Example usage:
     docs = pipeline.retrieve("What is the capital of France?")
 """
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.rag.query_transform.base import PassthroughTransformer, QueryTransformer
@@ -68,7 +68,7 @@ class RAGPipeline:
         self.top_k_retrieve = top_k_retrieve
         self.top_k_final = top_k_final
 
-    def retrieve(self, query: str) -> List["Document"]:
+    def retrieve(self, query: str) -> list["Document"]:
         """Execute the full retrieval pipeline.
 
         Args:
@@ -85,8 +85,8 @@ class RAGPipeline:
         )
 
         # Stage 2: Retrieval from all query variations
-        all_docs: List["Document"] = []
-        seen_ids: Set[str] = set()
+        all_docs: list[Document] = []
+        seen_ids: set[str] = set()
 
         for q in transformed_queries:
             docs = self.retriever.retrieve(q, top_k=self.top_k_retrieve)
@@ -127,7 +127,7 @@ class RAGPipeline:
 
         return reranked_docs
 
-    def batch_retrieve(self, queries: List[str]) -> List[List["Document"]]:
+    def batch_retrieve(self, queries: list[str]) -> list[list["Document"]]:
         """Retrieve documents for multiple queries with batched operations.
 
         Optimizations:
@@ -152,7 +152,7 @@ class RAGPipeline:
         # We need to track which original query each transformed query belongs to
         all_transformed = []
         query_indices = []  # Maps each transformed query to its original index
-        
+
         for orig_idx, transformed in enumerate(transformed_query_lists):
             for t_query in transformed:
                 all_transformed.append(t_query)
@@ -166,13 +166,12 @@ class RAGPipeline:
         else:
             # Fallback to sequential
             all_retrieved = [
-                self.retriever.retrieve(q, top_k=self.top_k_retrieve)
-                for q in all_transformed
+                self.retriever.retrieve(q, top_k=self.top_k_retrieve) for q in all_transformed
             ]
 
         # Stage 4: Aggregate and deduplicate per original query
-        results_per_query: List[List["Document"]] = [[] for _ in queries]
-        seen_per_query: List[Set[str]] = [set() for _ in queries]
+        results_per_query: list[list[Document]] = [[] for _ in queries]
+        seen_per_query: list[set[str]] = [set() for _ in queries]
 
         for docs, orig_idx in zip(all_retrieved, query_indices):
             for doc in docs:
@@ -212,7 +211,7 @@ class RAGPipeline:
                 final_results.append(sorted_docs[: self.top_k_final])
             return final_results
 
-    def get_config(self) -> Dict:
+    def get_config(self) -> dict:
         """Get pipeline configuration for logging/debugging."""
         return {
             "retriever": repr(self.retriever),

@@ -4,7 +4,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -21,9 +21,9 @@ class QAExample:
 
     id: str
     question: str
-    answers: List[str]
+    answers: list[str]
     context: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    metadata: dict[str, Any] = None
 
     def __post_init__(self):
         if self.metadata is None:
@@ -52,7 +52,7 @@ class QADataset(ABC):
         self.split = split
         self.config = kwargs
         self.cache_dir = cache_dir or Path("data/datasets")
-        self.examples: List[QAExample] = []
+        self.examples: list[QAExample] = []
 
     @abstractmethod
     def load(self) -> None:
@@ -71,7 +71,7 @@ class QADataset(ABC):
         """Iterate over examples."""
         return iter(self.examples)
 
-    def get_subset(self, n: int, seed: Optional[int] = None) -> List[QAExample]:
+    def get_subset(self, n: int, seed: Optional[int] = None) -> list[QAExample]:
         """Get a random subset of examples.
 
         Args:
@@ -106,7 +106,7 @@ class QADataset(ABC):
             print(f"Filtered out {filtered_count} examples without explicit answers")
             print(f"Remaining: {len(self.examples)} examples")
 
-    def get_examples_with_answers(self, n: Optional[int] = None) -> List[QAExample]:
+    def get_examples_with_answers(self, n: Optional[int] = None) -> list[QAExample]:
         """Get examples that have explicit answers.
 
         Args:
@@ -142,7 +142,7 @@ class QADataset(ABC):
         """
         return self.cache_dir / f"{self.name}_{self.split}.json"
 
-    def save_to_cache(self, info: Optional[Dict[str, Any]] = None) -> Path:
+    def save_to_cache(self, info: Optional[dict[str, Any]] = None) -> Path:
         """Save dataset to cache file.
 
         Args:
@@ -190,7 +190,7 @@ class QADataset(ABC):
             return False
 
         try:
-            with open(cache_path, "r") as f:
+            with open(cache_path) as f:
                 data = json.load(f)
 
             # Load examples

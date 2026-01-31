@@ -1,7 +1,7 @@
 """Base class for rerankers."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ragicamp.retrievers.base import Document
@@ -21,9 +21,9 @@ class Reranker(ABC):
     def rerank(
         self,
         query: str,
-        documents: List["Document"],
+        documents: list["Document"],
         top_k: int,
-    ) -> List["Document"]:
+    ) -> list["Document"]:
         """Rerank documents based on relevance to query.
 
         Args:

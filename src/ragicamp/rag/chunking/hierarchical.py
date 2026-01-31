@@ -11,8 +11,9 @@ During retrieval:
 This gives the best of both worlds: precise matching with rich context.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Optional
 
 from ragicamp.corpus.chunking import ChunkConfig, RecursiveChunker
 from ragicamp.retrievers.base import Document
@@ -34,7 +35,7 @@ class HierarchicalChunk:
     parent_text: Optional[str] = None
     is_parent: bool = False
     parent_id: Optional[str] = None
-    child_ids: List[str] = None
+    child_ids: list[str] = None
 
     def __post_init__(self):
         if self.child_ids is None:
@@ -99,7 +100,7 @@ class HierarchicalChunker:
     def chunk_document(
         self,
         document: Document,
-    ) -> Tuple[List[Document], List[Document], Dict[str, str]]:
+    ) -> tuple[list[Document], list[Document], dict[str, str]]:
         """Chunk a document into parent and child chunks.
 
         Args:
@@ -113,7 +114,7 @@ class HierarchicalChunker:
         """
         parent_docs = []
         child_docs = []
-        child_to_parent: Dict[str, str] = {}
+        child_to_parent: dict[str, str] = {}
 
         # First, create parent chunks
         parent_texts = self.parent_chunker.chunk(document.text)
@@ -164,7 +165,7 @@ class HierarchicalChunker:
     def chunk_documents(
         self,
         documents: Iterator[Document],
-    ) -> Tuple[List[Document], List[Document], Dict[str, str]]:
+    ) -> tuple[list[Document], list[Document], dict[str, str]]:
         """Chunk multiple documents into parent and child chunks.
 
         Args:
@@ -178,7 +179,7 @@ class HierarchicalChunker:
         """
         all_parents = []
         all_children = []
-        all_mappings: Dict[str, str] = {}
+        all_mappings: dict[str, str] = {}
 
         for doc in documents:
             parents, children, mappings = self.chunk_document(doc)
@@ -188,7 +189,7 @@ class HierarchicalChunker:
 
         return all_parents, all_children, all_mappings
 
-    def get_info(self) -> Dict:
+    def get_info(self) -> dict:
         """Get chunking configuration info."""
         return {
             "strategy": "hierarchical",
@@ -201,6 +202,5 @@ class HierarchicalChunker:
 
     def __repr__(self) -> str:
         return (
-            f"HierarchicalChunker(parent={self.parent_chunk_size}, "
-            f"child={self.child_chunk_size})"
+            f"HierarchicalChunker(parent={self.parent_chunk_size}, child={self.child_chunk_size})"
         )

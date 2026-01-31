@@ -44,11 +44,11 @@ jobs:
           version: "latest"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-      - run: uv sync --extra dev
-      - name: Check formatting (black)
-        run: uv run black --check --diff src/ tests/ --line-length 100
-      - name: Check import sorting (isort)
-        run: uv run isort --check-only --diff src/ tests/ --profile black
+      - run: uv sync
+      - name: Check formatting (ruff)
+        run: uv run ruff format --check src/ tests/
+      - name: Check linting (ruff)
+        run: uv run ruff check src/ tests/
 
   import-check:
     name: Import Check
@@ -72,7 +72,7 @@ jobs:
           print('✓ ragicamp.corpus')
           from ragicamp.retrievers import DenseRetriever
           print('✓ ragicamp.retrievers')
-          from ragicamp.cli import app
+          from ragicamp.cli import main
           print('✓ ragicamp.cli')
           print('✅ All imports successful!')
           "

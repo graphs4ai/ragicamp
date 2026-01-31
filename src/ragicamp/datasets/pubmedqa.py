@@ -80,7 +80,7 @@ class PubMedQADataset(QADataset):
             raise RuntimeError(
                 f"Failed to load PubMedQA dataset. Error: {e}\n"
                 "Visit https://huggingface.co/datasets/qiaojin/PubMedQA"
-            )
+            ) from e
 
         # For pqa_labeled, manually split if needed
         if self.subset == "pqa_labeled" and self.split in ("validation", "test"):

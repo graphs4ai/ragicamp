@@ -8,7 +8,7 @@ the hypothetical answer is more similar to actual documents.
 Reference: https://arxiv.org/abs/2212.10496
 """
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from ragicamp.rag.query_transform.base import QueryTransformer
 
@@ -60,7 +60,7 @@ Answer:"""
         self.num_hypothetical = num_hypothetical
         self.max_tokens = max_tokens
 
-    def transform(self, query: str) -> List[str]:
+    def transform(self, query: str) -> list[str]:
         """Generate hypothetical answer(s) and return as search queries.
 
         Args:
@@ -91,7 +91,7 @@ Answer:"""
 
         return queries
 
-    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+    def batch_transform(self, queries: list[str]) -> list[list[str]]:
         """Generate hypothetical answers for multiple queries in one batch call.
 
         This is much faster than calling transform() sequentially because

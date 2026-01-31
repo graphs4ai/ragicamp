@@ -4,7 +4,6 @@ Centralizes all magic strings and constants used throughout the codebase.
 """
 
 from enum import Enum
-from typing import List
 
 
 class AgentType(str, Enum):
@@ -16,7 +15,7 @@ class AgentType(str, Enum):
     MDP_RAG = "mdp_rag"
 
     @classmethod
-    def rag_types(cls) -> List["AgentType"]:
+    def rag_types(cls) -> list["AgentType"]:
         """Get agent types that use retrieval."""
         return [cls.FIXED_RAG, cls.BANDIT_RAG, cls.MDP_RAG]
 
@@ -70,17 +69,17 @@ class MetricType(str, Enum):
     HALLUCINATION = "hallucination"
 
     @classmethod
-    def standard_metrics(cls) -> List["MetricType"]:
+    def standard_metrics(cls) -> list["MetricType"]:
         """Fast, deterministic metrics."""
         return [cls.EXACT_MATCH, cls.F1]
 
     @classmethod
-    def semantic_metrics(cls) -> List["MetricType"]:
+    def semantic_metrics(cls) -> list["MetricType"]:
         """Neural-based semantic metrics."""
         return [cls.BERTSCORE, cls.BLEURT]
 
     @classmethod
-    def ragas_metrics(cls) -> List["MetricType"]:
+    def ragas_metrics(cls) -> list["MetricType"]:
         """Ragas-powered RAG metrics."""
         return [
             cls.FAITHFULNESS,
@@ -92,7 +91,7 @@ class MetricType(str, Enum):
         ]
 
     @classmethod
-    def llm_metrics(cls) -> List["MetricType"]:
+    def llm_metrics(cls) -> list["MetricType"]:
         """LLM-based metrics."""
         return [cls.LLM_JUDGE, cls.LLM_JUDGE_QA]
 

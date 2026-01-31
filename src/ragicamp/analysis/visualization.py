@@ -13,14 +13,13 @@ Example:
     fig.savefig("model_comparison.png")
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
 from ragicamp.analysis.comparison import compare_results, pivot_results
 from ragicamp.analysis.loader import ExperimentResult
 
 # Check for matplotlib
 try:
-    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
     MATPLOTLIB_AVAILABLE = True
@@ -52,19 +51,19 @@ def _pivot_to_matrix(pivot):
     else:
         # Dict format
         row_keys = sorted(pivot.keys())
-        col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
+        col_keys = sorted({k for row in pivot.values() for k in row.keys()})
         matrix = [[pivot.get(r, {}).get(c, 0) for c in col_keys] for r in row_keys]
         return matrix, row_keys, col_keys
 
 
 def plot_comparison(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     group_by: str = "model",
     metric: str = "f1",
-    figsize: Tuple[int, int] = (10, 6),
+    figsize: tuple[int, int] = (10, 6),
     title: Optional[str] = None,
     show_error_bars: bool = True,
-    color_palette: Optional[List[str]] = None,
+    color_palette: Optional[list[str]] = None,
 ) -> "plt.Figure":
     """Bar chart comparing groups by a metric.
 
@@ -134,11 +133,11 @@ def plot_comparison(
 
 
 def plot_heatmap(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     rows: str = "model",
     cols: str = "dataset",
     metric: str = "f1",
-    figsize: Tuple[int, int] = (10, 8),
+    figsize: tuple[int, int] = (10, 8),
     title: Optional[str] = None,
     cmap: str = "YlGnBu",
     annotate: bool = True,
@@ -169,7 +168,7 @@ def plot_heatmap(
     else:
         # Convert dict to DataFrame
         row_keys = sorted(pivot.keys())
-        col_keys = sorted(set(k for row in pivot.values() for k in row.keys()))
+        col_keys = sorted({k for row in pivot.values() for k in row.keys()})
         matrix = []
         for row_key in row_keys:
             row_data = pivot.get(row_key, {})
@@ -203,10 +202,10 @@ def plot_heatmap(
 
 
 def plot_multi_metric(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     group_by: str = "model",
-    metrics: List[str] = None,
-    figsize: Tuple[int, int] = (12, 6),
+    metrics: list[str] = None,
+    figsize: tuple[int, int] = (12, 6),
     title: Optional[str] = None,
 ) -> "plt.Figure":
     """Grouped bar chart comparing multiple metrics.
@@ -246,7 +245,7 @@ def plot_multi_metric(
         stats = all_stats[metric]
         values = [stats.get(g, {}).get("mean", 0) for g in groups]
         offset = (i - n_metrics / 2 + 0.5) * width
-        bars = ax.bar(x + offset, values, width, label=metric.upper(), color=colors[i])
+        ax.bar(x + offset, values, width, label=metric.upper(), color=colors[i])
 
     ax.set_xlabel(group_by.title(), fontsize=12)
     ax.set_ylabel("Score", fontsize=12)
@@ -260,11 +259,11 @@ def plot_multi_metric(
 
 
 def plot_scatter(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     x_metric: str = "f1",
     y_metric: str = "throughput_qps",
     color_by: str = "model",
-    figsize: Tuple[int, int] = (10, 8),
+    figsize: tuple[int, int] = (10, 8),
     title: Optional[str] = None,
 ) -> "plt.Figure":
     """Scatter plot of two metrics, colored by a dimension.
@@ -317,10 +316,10 @@ def plot_scatter(
 
 
 def plot_distribution(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     metric: str = "f1",
     group_by: Optional[str] = None,
-    figsize: Tuple[int, int] = (10, 6),
+    figsize: tuple[int, int] = (10, 6),
     title: Optional[str] = None,
 ) -> "plt.Figure":
     """Box plot or violin plot of metric distribution.
@@ -388,8 +387,8 @@ def plot_distribution(
 
 
 def create_summary_dashboard(
-    results: List[ExperimentResult],
-    figsize: Tuple[int, int] = (16, 12),
+    results: list[ExperimentResult],
+    figsize: tuple[int, int] = (16, 12),
 ) -> "plt.Figure":
     """Create a multi-panel summary dashboard.
 
@@ -411,14 +410,14 @@ def create_summary_dashboard(
     axes[0, 0].bar(groups, means, color=plt.cm.Set2.colors[: len(groups)])
     axes[0, 0].set_title("F1 by Model", fontsize=12)
     axes[0, 0].set_ylabel("F1")
-    for i, (g, m) in enumerate(zip(groups, means)):
+    for i, (_g, m) in enumerate(zip(groups, means)):
         axes[0, 0].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom")
 
     # 2. Heatmap: model x dataset
     pivot = pivot_results(results, rows="model", cols="dataset", metric="f1")
     matrix, row_keys, col_keys = _pivot_to_matrix(pivot)
 
-    im = axes[0, 1].imshow(matrix, cmap="YlGnBu", aspect="auto")
+    axes[0, 1].imshow(matrix, cmap="YlGnBu", aspect="auto")
     axes[0, 1].set_xticks(range(len(col_keys)))
     axes[0, 1].set_yticks(range(len(row_keys)))
     axes[0, 1].set_xticklabels(col_keys)
@@ -444,7 +443,7 @@ def create_summary_dashboard(
     axes[1, 1].bar(groups, means, color=["#ff9999", "#99ccff"])
     axes[1, 1].set_title("F1: Direct LLM vs RAG", fontsize=12)
     axes[1, 1].set_ylabel("F1")
-    for i, (g, m) in enumerate(zip(groups, means)):
+    for i, (_g, m) in enumerate(zip(groups, means)):
         axes[1, 1].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom")
 
     plt.suptitle("Experiment Summary Dashboard", fontsize=16, y=1.02)
@@ -453,9 +452,9 @@ def create_summary_dashboard(
 
 
 def create_rag_breakdown_dashboard(
-    results: List[ExperimentResult],
+    results: list[ExperimentResult],
     metric: str = "f1",
-    figsize: Tuple[int, int] = (16, 12),
+    figsize: tuple[int, int] = (16, 12),
 ) -> "plt.Figure":
     """Create a dashboard breaking down RAG performance by retrieval configurations.
 

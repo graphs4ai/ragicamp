@@ -2,8 +2,6 @@
 
 from unittest.mock import Mock, patch
 
-import pytest
-
 
 class TestHuggingFaceModelQuantization:
     """Test HuggingFace model quantization configurations."""
@@ -16,13 +14,12 @@ class TestHuggingFaceModelQuantization:
             patch("ragicamp.models.huggingface.AutoTokenizer") as mock_tokenizer,
             patch("ragicamp.models.huggingface.AutoModelForCausalLM") as mock_model_cls,
         ):
-
             # Create mocks
             mock_tokenizer.from_pretrained.return_value = Mock()
             mock_model_cls.from_pretrained.return_value = Mock()
 
             # Initialize with 8-bit
-            model = HuggingFaceModel(model_name="test-model", device="cuda", load_in_8bit=True)
+            HuggingFaceModel(model_name="test-model", device="cuda", load_in_8bit=True)
 
             # Verify AutoModelForCausalLM.from_pretrained was called correctly
             call_args = mock_model_cls.from_pretrained.call_args
@@ -46,13 +43,12 @@ class TestHuggingFaceModelQuantization:
             patch("ragicamp.models.huggingface.AutoTokenizer") as mock_tokenizer,
             patch("ragicamp.models.huggingface.AutoModelForCausalLM") as mock_model_cls,
         ):
-
             # Create mocks
             mock_tokenizer.from_pretrained.return_value = Mock()
             mock_model_cls.from_pretrained.return_value = Mock()
 
             # Initialize with 4-bit
-            model = HuggingFaceModel(model_name="test-model", device="cuda", load_in_4bit=True)
+            HuggingFaceModel(model_name="test-model", device="cuda", load_in_4bit=True)
 
             # Verify AutoModelForCausalLM.from_pretrained was called correctly
             call_args = mock_model_cls.from_pretrained.call_args
@@ -77,14 +73,13 @@ class TestHuggingFaceModelQuantization:
             patch("ragicamp.models.huggingface.AutoModelForCausalLM") as mock_model_cls,
             patch("ragicamp.models.huggingface.torch.cuda.is_available", return_value=True),
         ):
-
             # Create mocks
             mock_tokenizer.from_pretrained.return_value = Mock()
             mock_model_instance = Mock()
             mock_model_cls.from_pretrained.return_value = mock_model_instance
 
             # Initialize without quantization
-            model = HuggingFaceModel(model_name="test-model", device="cuda")
+            HuggingFaceModel(model_name="test-model", device="cuda")
 
             # Verify AutoModelForCausalLM.from_pretrained was called correctly
             call_args = mock_model_cls.from_pretrained.call_args
@@ -106,13 +101,12 @@ class TestHuggingFaceModelQuantization:
             patch("ragicamp.models.huggingface.AutoTokenizer") as mock_tokenizer,
             patch("ragicamp.models.huggingface.AutoModelForCausalLM") as mock_model_cls,
         ):
-
             # Create mocks
             mock_tokenizer.from_pretrained.return_value = Mock()
             mock_model_cls.from_pretrained.return_value = Mock()
 
             # Initialize with both (4-bit should take precedence)
-            model = HuggingFaceModel(
+            HuggingFaceModel(
                 model_name="test-model", device="cuda", load_in_8bit=True, load_in_4bit=True
             )
 

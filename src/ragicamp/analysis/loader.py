@@ -9,7 +9,7 @@ Supports loading from:
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from ragicamp.core.logging import get_logger
 
@@ -49,7 +49,7 @@ class ExperimentResult:
     timestamp: str = ""
 
     # Raw data for access to all metrics
-    raw: Dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
     # Parsed RAG details (extracted from retriever name)
     corpus: str = "unknown"
@@ -58,7 +58,7 @@ class ExperimentResult:
     chunk_strategy: str = "unknown"
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExperimentResult":
+    def from_dict(cls, data: dict[str, Any]) -> "ExperimentResult":
         """Create from dictionary (comparison.json format)."""
         # Support both "results" (old format) and "metrics" (new format)
         results = data.get("results", {}) or data.get("metrics", {})
@@ -112,7 +112,7 @@ class ExperimentResult:
         )
 
     @classmethod
-    def from_metadata(cls, metadata: Dict[str, Any], summary: Dict[str, Any]) -> "ExperimentResult":
+    def from_metadata(cls, metadata: dict[str, Any], summary: dict[str, Any]) -> "ExperimentResult":
         """Create from metadata.json + summary.json format."""
         metrics = summary.get("overall_metrics", summary)
         retriever = metadata.get("retriever")
@@ -162,7 +162,7 @@ class ExperimentResult:
             chunk_strategy=chunk_strategy,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         result = {
             "name": self.name,
@@ -235,7 +235,7 @@ class ResultsLoader:
         """
         self.base_dir = Path(base_dir)
 
-    def load_all(self) -> List[ExperimentResult]:
+    def load_all(self) -> list[ExperimentResult]:
         """Load all experiment results from the directory.
 
         Tries comparison.json first (fastest), falls back to individual dirs.
@@ -256,7 +256,7 @@ class ResultsLoader:
         # Fall back to individual directories
         return self._load_from_directories()
 
-    def _load_from_comparison(self, path: Path) -> List[ExperimentResult]:
+    def _load_from_comparison(self, path: Path) -> list[ExperimentResult]:
         """Load from comparison.json file, enriching with llm_judge from summary files."""
         logger.debug("Loading from comparison.json: %s", path)
         with open(path) as f:
@@ -291,7 +291,7 @@ class ResultsLoader:
         logger.info("Loaded %d experiments from comparison.json", len(results))
         return results
 
-    def _load_from_directories(self) -> List[ExperimentResult]:
+    def _load_from_directories(self) -> list[ExperimentResult]:
         """Load from individual experiment directories."""
         results = []
 
@@ -329,7 +329,7 @@ class ResultsLoader:
         logger.info("Loaded %d experiments from directories", len(results))
         return results
 
-    def load_predictions(self, experiment_name: str) -> Optional[List[Dict[str, Any]]]:
+    def load_predictions(self, experiment_name: str) -> Optional[list[dict[str, Any]]]:
         """Load predictions for a specific experiment.
 
         Args:

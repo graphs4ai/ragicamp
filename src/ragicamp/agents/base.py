@@ -2,11 +2,11 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
-    from ragicamp.retrievers.base import Document
     from ragicamp.core.schemas import RAGResponseMeta
+    from ragicamp.retrievers.base import Document
 
 
 @dataclass
@@ -21,9 +21,9 @@ class RAGContext:
     """
 
     query: str
-    retrieved_docs: List["Document"] = field(default_factory=list)
-    intermediate_steps: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    retrieved_docs: list["Document"] = field(default_factory=list)
+    intermediate_steps: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -43,12 +43,12 @@ class RAGResponse:
     context: RAGContext
     prompt: Optional[str] = None
     confidence: Optional[float] = None
-    metadata: Union[Dict[str, Any], "RAGResponseMeta"] = field(default_factory=dict)
+    metadata: Union[dict[str, Any], "RAGResponseMeta"] = field(default_factory=dict)
 
     @property
-    def metadata_dict(self) -> Dict[str, Any]:
+    def metadata_dict(self) -> dict[str, Any]:
         """Get metadata as a dict (for backwards compatibility).
-        
+
         Works whether metadata is a dict or RAGResponseMeta.
         """
         if isinstance(self.metadata, dict):
@@ -88,7 +88,7 @@ class RAGAgent(ABC):
         """
         pass
 
-    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
         """Generate answers for multiple queries (batch processing).
 
         Default implementation: loops through queries one by one.
@@ -103,9 +103,11 @@ class RAGAgent(ABC):
         """
         return [self.answer(query, **kwargs) for query in queries]
 
-    def reset(self) -> None:
-        """Reset agent state (useful for stateful agents)."""
-        pass
+    def reset(self) -> None:  # noqa: B027
+        """Reset agent state (useful for stateful agents).
+
+        Default implementation does nothing. Override in stateful agents.
+        """
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}')"

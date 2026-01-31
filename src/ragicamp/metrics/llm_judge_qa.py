@@ -18,7 +18,7 @@ Example:
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.models.base import LanguageModel
@@ -73,7 +73,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute judgment for a single prediction-reference pair (async, 1-to-1).
 
         Args:
@@ -117,7 +117,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             f"llm_judge_qa_{category}": 1.0,  # For category counting
         }
 
-    def _aggregate_results(self, results: List[Dict[str, float]]) -> Dict[str, float]:
+    def _aggregate_results(self, results: list[dict[str, float]]) -> dict[str, float]:
         """Aggregate individual results with category statistics.
 
         Args:

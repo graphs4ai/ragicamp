@@ -1,6 +1,6 @@
 """Retriever factory for creating retrievers from configuration."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
@@ -13,18 +13,20 @@ class RetrieverFactory:
     """Factory for creating retrievers from configuration."""
 
     # Custom retriever registry
-    _custom_retrievers: Dict[str, type] = {}
+    _custom_retrievers: dict[str, type] = {}
 
     @classmethod
     def register(cls, name: str):
         """Register a custom retriever type."""
+
         def decorator(retriever_class: type) -> type:
             cls._custom_retrievers[name] = retriever_class
             return retriever_class
+
         return decorator
 
     @staticmethod
-    def create(config: Dict[str, Any]) -> Retriever:
+    def create(config: dict[str, Any]) -> Retriever:
         """Create a retriever from configuration.
 
         Args:
@@ -45,6 +47,7 @@ class RetrieverFactory:
             return DenseRetriever(**config_copy)
         elif retriever_type == "sparse":
             from ragicamp.retrievers import SparseRetriever
+
             return SparseRetriever(**config_copy)
         elif retriever_type == "hybrid":
             return HybridRetriever(**config_copy)
@@ -101,9 +104,11 @@ def create_query_transformer(transform_type: str, model: LanguageModel):
 
     if transform_type == "hyde":
         from ragicamp.rag.query_transform.hyde import HyDETransformer
+
         return HyDETransformer(model)
     elif transform_type == "multiquery":
         from ragicamp.rag.query_transform.multiquery import MultiQueryTransformer
+
         return MultiQueryTransformer(model, num_queries=3)
     else:
         logger.warning("Unknown query transform type: %s", transform_type)

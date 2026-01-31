@@ -1,6 +1,6 @@
 """Formatting utilities for RAG components."""
 
-from typing import Dict, List, Optional
+from typing import Optional
 
 from ragicamp.retrievers.base import Document
 
@@ -14,7 +14,7 @@ class ContextFormatter:
 
     @staticmethod
     def format_documents(
-        docs: List[Document],
+        docs: list[Document],
         template: str = "[{idx}] {text}",
         separator: str = "\n\n",
         empty_message: str = "No relevant context found.",
@@ -72,7 +72,7 @@ class ContextFormatter:
 
     @staticmethod
     def format_with_scores(
-        docs: List[Document], show_score: bool = True, score_format: str = "{:.3f}"
+        docs: list[Document], show_score: bool = True, score_format: str = "{:.3f}"
     ) -> str:
         """Format documents with retrieval scores.
 
@@ -97,7 +97,7 @@ class ContextFormatter:
         return ContextFormatter.format_documents(docs, template=template)
 
     @staticmethod
-    def format_numbered(docs: List[Document]) -> str:
+    def format_numbered(docs: list[Document]) -> str:
         """Simple numbered format (default).
 
         Args:
@@ -112,7 +112,7 @@ class ContextFormatter:
         return ContextFormatter.format_documents(docs)
 
     @staticmethod
-    def format_with_titles(docs: List[Document], title_key: str = "title") -> str:
+    def format_with_titles(docs: list[Document], title_key: str = "title") -> str:
         """Format documents with titles from metadata.
 
         Args:

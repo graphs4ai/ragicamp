@@ -1,7 +1,7 @@
 """Dataset factory for creating QA datasets from configuration."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets import (
@@ -25,7 +25,7 @@ class DatasetFactory:
         split: str = "validation",
         limit: Optional[int] = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Parse a dataset name into a config dict.
 
         Args:
@@ -62,7 +62,7 @@ class DatasetFactory:
         return config
 
     @staticmethod
-    def create(config: Dict[str, Any]) -> QADataset:
+    def create(config: dict[str, Any]) -> QADataset:
         """Create a dataset from configuration.
 
         Args:

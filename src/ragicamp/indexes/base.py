@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from ragicamp.retrievers.base import Document
 
@@ -36,7 +36,7 @@ class Index(ABC):
         self.config = kwargs
 
     @abstractmethod
-    def build(self, documents: List[Document]) -> None:
+    def build(self, documents: list[Document]) -> None:
         """Build the index from documents.
 
         Args:
@@ -45,7 +45,7 @@ class Index(ABC):
         pass
 
     @abstractmethod
-    def search(self, query_embedding: Any, top_k: int = 10) -> List[tuple]:
+    def search(self, query_embedding: Any, top_k: int = 10) -> list[tuple]:
         """Search the index with a query embedding.
 
         Args:

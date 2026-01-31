@@ -1,6 +1,6 @@
 """Sparse retriever using BM25."""
 
-from typing import Any, List
+from typing import Any
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -26,16 +26,16 @@ class SparseRetriever(Retriever):
         super().__init__(name, **kwargs)
 
         self.vectorizer = TfidfVectorizer(max_features=max_features, stop_words="english", **kwargs)
-        self.documents: List[Document] = []
+        self.documents: list[Document] = []
         self.doc_vectors = None
 
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Index documents using TF-IDF."""
         self.documents = documents
         texts = [doc.text for doc in documents]
         self.doc_vectors = self.vectorizer.fit_transform(texts)
 
-    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
+    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve documents using TF-IDF similarity."""
         if len(self.documents) == 0 or self.doc_vectors is None:
             return []
@@ -59,8 +59,8 @@ class SparseRetriever(Retriever):
         return results
 
     def batch_retrieve(
-        self, queries: List[str], top_k: int = 5, **kwargs: Any
-    ) -> List[List[Document]]:
+        self, queries: list[str], top_k: int = 5, **kwargs: Any
+    ) -> list[list[Document]]:
         """Retrieve documents for multiple queries using batched TF-IDF.
 
         Vectorizes all queries at once for efficiency.
@@ -85,7 +85,7 @@ class SparseRetriever(Retriever):
 
         # Get top-k for each query
         all_results = []
-        for i, similarities in enumerate(all_similarities):
+        for _i, similarities in enumerate(all_similarities):
             top_indices = np.argsort(similarities)[-top_k:][::-1]
 
             results = []
@@ -94,9 +94,9 @@ class SparseRetriever(Retriever):
                 doc = Document(
                     id=self.documents[idx].id,
                     text=self.documents[idx].text,
-                    metadata=self.documents[idx].metadata.copy()
-                    if self.documents[idx].metadata
-                    else {},
+                    metadata=(
+                        self.documents[idx].metadata.copy() if self.documents[idx].metadata else {}
+                    ),
                 )
                 doc.score = float(similarities[idx])
                 results.append(doc)

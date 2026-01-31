@@ -10,9 +10,9 @@ This package provides state tracking and health checking for experiments:
 """
 
 from ragicamp.state.experiment_state import (
+    PHASE_ORDER,
     ExperimentPhase,
     ExperimentState,
-    PHASE_ORDER,
 )
 from ragicamp.state.health import (
     ExperimentHealth,

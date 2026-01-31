@@ -27,12 +27,13 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+
+# TYPE_CHECKING import to avoid circular imports
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from ragicamp.agents.base import RAGAgent
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets.base import QADataset
-from ragicamp.execution import ResilientExecutor
 from ragicamp.execution.phases import (
     ExecutionContext,
     GenerationHandler,
@@ -40,6 +41,8 @@ from ragicamp.execution.phases import (
     MetricsHandler,
     PhaseHandler,
 )
+from ragicamp.metrics.base import Metric
+from ragicamp.models.base import LanguageModel
 from ragicamp.state import (
     ExperimentHealth,
     ExperimentPhase,
@@ -47,13 +50,9 @@ from ragicamp.state import (
     check_health,
     detect_state,
 )
-from ragicamp.metrics.base import Metric
-from ragicamp.models.base import LanguageModel
 from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
 
-# TYPE_CHECKING import to avoid circular imports
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ragicamp.spec import ExperimentSpec
 
@@ -63,10 +62,11 @@ logger = get_logger(__name__)
 @dataclass(frozen=True)
 class _MinimalSpec:
     """Minimal spec adapter for use with phase handlers.
-    
+
     The Experiment class creates this to pass to handlers that
     expect an ExperimentSpec-like object.
     """
+
     name: str
 
 
@@ -77,7 +77,7 @@ class _MetricsIncompleteError(Exception):
     the user to fix the issue (e.g., set API keys) and re-run.
     """
 
-    def __init__(self, missing_metrics: List[str]):
+    def __init__(self, missing_metrics: list[str]):
         self.missing_metrics = missing_metrics
         super().__init__(f"Metrics incomplete: {missing_metrics}")
 
@@ -105,7 +105,7 @@ class ExperimentCallbacks:
     on_batch_start: Optional[Callable[[int, int], None]] = None
     """Called before each batch. Args: (batch_index, total_batches)"""
 
-    on_batch_end: Optional[Callable[[int, int, List[str]], None]] = None
+    on_batch_end: Optional[Callable[[int, int, list[str]], None]] = None
     """Called after each batch. Args: (batch_index, total_batches, predictions)"""
 
     on_checkpoint: Optional[Callable[[int, Path], None]] = None
@@ -120,12 +120,12 @@ class ExperimentResult:
     """Result of running an experiment."""
 
     name: str
-    metrics: Dict[str, float]
+    metrics: dict[str, float]
     num_examples: int
     duration_seconds: float
     output_path: Optional[Path] = None
     predictions_path: Optional[Path] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def f1(self) -> float:
@@ -135,7 +135,7 @@ class ExperimentResult:
     def exact_match(self) -> float:
         return self.metrics.get("exact_match", 0.0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "metrics": self.metrics,
@@ -176,7 +176,7 @@ class Experiment:
     name: str
     agent: RAGAgent
     dataset: QADataset
-    metrics: List[Metric] = field(default_factory=list)
+    metrics: list[Metric] = field(default_factory=list)
     output_dir: Path = field(default_factory=lambda: Path("outputs"))
 
     # Optional references for cleanup and metadata
@@ -190,9 +190,9 @@ class Experiment:
     _min_batch_size: int = field(default=1, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
-    
+
     # Phase handlers (lazy initialized)
-    _handlers: Optional[Dict[ExperimentPhase, PhaseHandler]] = field(default=None, repr=False)
+    _handlers: Optional[dict[ExperimentPhase, PhaseHandler]] = field(default=None, repr=False)
 
     # =========================================================================
     # Public API
@@ -239,7 +239,7 @@ class Experiment:
         checkpoint_every: int = 50,
         resume: bool = True,
         callbacks: Optional[ExperimentCallbacks] = None,
-        phases: Optional[List[str]] = None,
+        phases: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> ExperimentResult:
         """Run the experiment with phase-aware execution.
@@ -349,7 +349,7 @@ class Experiment:
     # Phase Implementations
     # =========================================================================
 
-    def _get_handlers(self) -> Dict[ExperimentPhase, PhaseHandler]:
+    def _get_handlers(self) -> dict[ExperimentPhase, PhaseHandler]:
         """Get or create phase handlers."""
         if self._handlers is None:
             self._handlers = {
@@ -387,7 +387,7 @@ class Experiment:
             spec = _MinimalSpec(name=self.name)
             context = self._create_context()
             self._state = handlers[phase].execute(spec, self._state, context)
-            
+
             # Post-handler validation for COMPUTING_METRICS
             if phase == ExperimentPhase.COMPUTING_METRICS:
                 missing = set(self._state.metrics_requested) - set(self._state.metrics_computed)
@@ -448,7 +448,7 @@ class Experiment:
         for key, val in result.metrics.items():
             if isinstance(val, float):
                 if key in ("f1", "exact_match", "bertscore_f1", "bleurt", "llm_judge_qa"):
-                    metrics_parts.append(f"{key}={val*100:.1f}%")
+                    metrics_parts.append(f"{key}={val * 100:.1f}%")
                 else:
                     metrics_parts.append(f"{key}={val:.3f}")
         metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
@@ -461,7 +461,7 @@ class Experiment:
     # Helpers
     # =========================================================================
 
-    def _save_predictions(self, data: Dict[str, Any]) -> None:
+    def _save_predictions(self, data: dict[str, Any]) -> None:
         """Save predictions atomically."""
         temp_path = self.predictions_path.with_suffix(".tmp")
         with open(temp_path, "w") as f:
@@ -525,7 +525,7 @@ class Experiment:
         with open(self.results_path, "w") as f:
             json.dump(result_data, f, indent=2)
 
-    def _phases_from(self, phase: ExperimentPhase) -> List[ExperimentPhase]:
+    def _phases_from(self, phase: ExperimentPhase) -> list[ExperimentPhase]:
         """Get list of phases starting from the given phase."""
         all_phases = [
             ExperimentPhase.INIT,
@@ -549,7 +549,7 @@ class Experiment:
         judge_model: Any = None,
     ) -> "Experiment":
         """Create a fully-configured Experiment from an ExperimentSpec.
-        
+
         This is the preferred way to create experiments as it handles all
         component creation automatically based on the spec.
 
@@ -561,7 +561,7 @@ class Experiment:
 
         Returns:
             Fully configured Experiment ready to run
-            
+
         Example:
             >>> from ragicamp.spec import ExperimentSpec
             >>> spec = ExperimentSpec.from_dict({...})
@@ -569,22 +569,21 @@ class Experiment:
             >>> result = exp.run()
         """
         from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ModelFactory
-        from ragicamp.spec import ExperimentSpec
-        
+
         # Create model
         model_config = ModelFactory.parse_spec(spec.model, quantization=spec.quant)
         model = ModelFactory.create(model_config)
-        
+
         # Create dataset
         dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
         dataset = DatasetFactory.create(dataset_config)
-        
+
         # Create agent (AgentFactory.from_spec handles all the wiring)
         agent = AgentFactory.from_spec(spec, model)
-        
+
         # Create metrics
         metrics = MetricFactory.create(spec.metrics, judge_model=judge_model)
-        
+
         return cls(
             name=spec.name,
             agent=agent,
@@ -594,7 +593,7 @@ class Experiment:
             _model=model,
             _spec=spec,
         )
-    
+
     @classmethod
     def from_components(
         cls,
@@ -602,11 +601,11 @@ class Experiment:
         model: LanguageModel,
         agent: RAGAgent,
         dataset: QADataset,
-        metrics: List[Metric],
+        metrics: list[Metric],
         output_dir: Union[str, Path] = "outputs",
     ) -> "Experiment":
         """Create experiment from pre-built components.
-        
+
         Use this when you've already created components manually.
         For most cases, prefer from_spec().
 
@@ -632,10 +631,10 @@ class Experiment:
 
 
 def run_experiments(
-    experiments: List[Experiment],
+    experiments: list[Experiment],
     skip_existing: bool = True,
     **kwargs: Any,
-) -> List[ExperimentResult]:
+) -> list[ExperimentResult]:
     """Run multiple experiments with proper resource management.
 
     Args:

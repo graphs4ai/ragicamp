@@ -265,7 +265,7 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume incomplete experiments."""
-    from ragicamp.experiment_state import ExperimentPhase, check_health
+    from ragicamp.experiment_state import check_health
 
     output_dir = args.output_dir
     if not output_dir.exists():
@@ -300,7 +300,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     # Note: Actually resuming would require loading the original config
     # For now, just report what needs to be done
-    print(f"\nTo resume, run the original study config with --skip-existing=False")
+    print("\nTo resume, run the original study config with --skip-existing=False")
     print("Or use `ragicamp metrics <dir>` to recompute just metrics")
     return 0
 
@@ -341,7 +341,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
             p = Path(default_dir)
             if p.exists():
                 dirs_to_backup.append(p)
-        
+
         if not dirs_to_backup:
             print("No artifacts/ or outputs/ directories found.")
             print("Specify a path explicitly: ragicamp backup <path>")
@@ -485,6 +485,7 @@ def create_parser() -> argparse.ArgumentParser:
         description="RAGiCamp - RAG Experimentation Framework",
     )
     from ragicamp import __version__
+
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -594,8 +595,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Backup command
     backup_parser = subparsers.add_parser(
-        "backup", 
-        help="Backup artifacts and outputs to Backblaze B2"
+        "backup", help="Backup artifacts and outputs to Backblaze B2"
     )
     backup_parser.add_argument(
         "path",

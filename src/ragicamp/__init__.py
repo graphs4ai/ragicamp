@@ -50,6 +50,8 @@ from ragicamp.experiment import (
     ExperimentResult,
     run_experiments,
 )
+from ragicamp.factory import ComponentFactory
+
 # Import from canonical locations (state/ package)
 from ragicamp.state import (
     ExperimentHealth,
@@ -58,7 +60,6 @@ from ragicamp.state import (
     check_health,
     detect_state,
 )
-from ragicamp.factory import ComponentFactory
 
 __all__ = [
     # Core

@@ -1,7 +1,7 @@
 """HuggingFace model implementation with proper resource management."""
 
 import gc
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -116,13 +116,13 @@ class HuggingFaceModel(LanguageModel):
 
     def generate(
         self,
-        prompt: Union[str, List[str]],
+        prompt: Union[str, list[str]],
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Union[str, List[str]]:
+    ) -> Union[str, list[str]]:
         """Generate text using HuggingFace model."""
         is_batch = isinstance(prompt, list)
         prompts = prompt if is_batch else [prompt]
@@ -174,7 +174,7 @@ class HuggingFaceModel(LanguageModel):
 
         return results if is_batch else results[0]
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using the model's hidden states."""
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(
             self.device

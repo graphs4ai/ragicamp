@@ -37,7 +37,7 @@ class TestMetricBase:
     def test_compute_returns_dict(self):
         """Test that compute returns a dictionary."""
         metric = MockMetric("test")
-        result = metric.compute(predictions=["pred1", "pred2"], references=[["ref1"], ["ref2"]])
+        result = metric.compute(predictions=["pred1", "pred2"], references=["ref1", "ref2"])
 
         assert isinstance(result, dict)
         assert "test" in result
@@ -52,7 +52,7 @@ class TestExactMatch:
         metric = ExactMatchMetric()
 
         predictions = ["Paris", "London", "Berlin"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         result = metric.compute(predictions, references)
 
@@ -64,7 +64,7 @@ class TestExactMatch:
         metric = ExactMatchMetric()
 
         predictions = ["Paris", "Madrid", "Berlin"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         result = metric.compute(predictions, references)
 
@@ -76,7 +76,7 @@ class TestExactMatch:
         metric = ExactMatchMetric()
 
         predictions = ["Wrong1", "Wrong2", "Wrong3"]
-        references = [["Right1"], ["Right2"], ["Right3"]]
+        references = ["Right1", "Right2", "Right3"]
 
         result = metric.compute(predictions, references)
 
@@ -87,30 +87,26 @@ class TestExactMatch:
         metric = ExactMatchMetric()
 
         predictions = ["PARIS", "london", "BeRlIn"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         result = metric.compute(predictions, references)
 
         # Should match after normalization
         assert result["exact_match"] == 1.0
 
-    def test_exact_match_multiple_references(self):
-        """Test exact match with multiple reference answers."""
-        metric = ExactMatchMetric()
-
-        predictions = ["Paris", "Madrid"]
-        references = [["Paris", "paris", "PARIS"], ["London", "Madrid"]]
-
-        result = metric.compute(predictions, references)
-
-        # Both should match (first matches "Paris", second matches "Madrid")
-        assert result["exact_match"] == 1.0
-
     def test_exact_match_single(self):
         """Test exact match on single prediction."""
         metric = ExactMatchMetric()
 
-        score = metric.compute_single("Paris", ["Paris", "paris"])
+        score = metric.compute_single("Paris", "Paris")
+
+        assert score["exact_match"] == 1.0
+
+    def test_exact_match_single_case_insensitive(self):
+        """Test exact match on single prediction with different case."""
+        metric = ExactMatchMetric()
+
+        score = metric.compute_single("paris", "PARIS")
 
         assert score["exact_match"] == 1.0
 
@@ -123,7 +119,7 @@ class TestF1Score:
         metric = F1Metric()
 
         predictions = ["The capital of France is Paris"]
-        references = [["The capital of France is Paris"]]
+        references = ["The capital of France is Paris"]
 
         result = metric.compute(predictions, references)
 
@@ -135,7 +131,7 @@ class TestF1Score:
         metric = F1Metric()
 
         predictions = ["Paris is nice"]
-        references = [["The capital is Paris"]]
+        references = ["The capital is Paris"]
 
         result = metric.compute(predictions, references)
 
@@ -147,7 +143,7 @@ class TestF1Score:
         metric = F1Metric()
 
         predictions = ["Berlin"]
-        references = [["Paris"]]
+        references = ["Paris"]
 
         result = metric.compute(predictions, references)
 
@@ -158,29 +154,17 @@ class TestF1Score:
         metric = F1Metric()
 
         predictions = ["Paris", "London", "Berlin"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         result = metric.compute(predictions, references)
 
         assert result["f1"] == 1.0
 
-    def test_f1_with_multiple_references(self):
-        """Test F1 with multiple reference answers."""
-        metric = F1Metric()
-
-        predictions = ["Paris"]
-        references = [["The capital is Paris", "Paris", "paris"]]
-
-        result = metric.compute(predictions, references)
-
-        # Should match at least one reference perfectly
-        assert result["f1"] > 0.0
-
     def test_f1_single(self):
         """Test F1 on single prediction."""
         metric = F1Metric()
 
-        score = metric.compute_single("Paris", ["Paris"])
+        score = metric.compute_single("Paris", "Paris")
 
         assert score["f1"] == 1.0
 
@@ -209,7 +193,7 @@ class TestMetricEdgeCases:
         f1_metric = F1Metric()
 
         predictions = ["", "Paris"]
-        references = [["Paris"], ["Paris"]]
+        references = ["Paris", "Paris"]
 
         em_result = em_metric.compute(predictions, references)
         f1_result = f1_metric.compute(predictions, references)
@@ -223,7 +207,7 @@ class TestMetricEdgeCases:
         em_metric = ExactMatchMetric()
 
         predictions = ["  Paris  ", "London\n", "\tBerlin"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         result = em_metric.compute(predictions, references)
 
@@ -235,7 +219,7 @@ class TestMetricEdgeCases:
         f1_metric = F1Metric()
 
         predictions = ["Paris."]
-        references = [["Paris"]]
+        references = ["Paris"]
 
         result = f1_metric.compute(predictions, references)
 
@@ -251,7 +235,7 @@ class TestMetricConsistency:
         em_metric = ExactMatchMetric()
 
         prediction = "Paris"
-        reference = ["Paris"]
+        reference = "Paris"
 
         # Compute on single item
         batch_result = em_metric.compute([prediction], [reference])
@@ -266,7 +250,7 @@ class TestMetricConsistency:
         f1_metric = F1Metric()
 
         predictions = ["Paris", "London", "Berlin"]
-        references = [["Paris"], ["London"], ["Berlin"]]
+        references = ["Paris", "London", "Berlin"]
 
         # Compute twice
         em_result1 = em_metric.compute(predictions, references)

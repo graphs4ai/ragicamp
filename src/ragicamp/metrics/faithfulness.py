@@ -5,7 +5,7 @@ This is critical for RAG systems to prevent hallucination and ensure answers
 are grounded in the provided documents.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -75,11 +75,11 @@ class FaithfulnessMetric(Metric):
                     device=0 if self._has_cuda() else -1,
                     batch_size=self.batch_size,
                 )
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "transformers library required for NLI-based faithfulness. "
                     "Install with: pip install transformers"
-                )
+                ) from e
         return self._nli_pipeline
 
     def _has_cuda(self) -> bool:
@@ -92,7 +92,7 @@ class FaithfulnessMetric(Metric):
             return False
 
     def compute(
-        self, prediction: str, reference: str, context: Optional[List[str]] = None, **kwargs: Any
+        self, prediction: str, reference: str, context: Optional[list[str]] = None, **kwargs: Any
     ) -> float:
         """Compute faithfulness score.
 
@@ -127,7 +127,7 @@ class FaithfulnessMetric(Metric):
         else:
             raise ValueError(f"Unknown faithfulness method: {self.method}")
 
-    def _compute_nli_faithfulness(self, prediction: str, context: List[str]) -> float:
+    def _compute_nli_faithfulness(self, prediction: str, context: list[str]) -> float:
         """Compute faithfulness using NLI entailment.
 
         Strategy:
@@ -164,7 +164,7 @@ class FaithfulnessMetric(Metric):
 
         return float(max_entailment)
 
-    def _compute_token_overlap(self, prediction: str, context: List[str]) -> float:
+    def _compute_token_overlap(self, prediction: str, context: list[str]) -> float:
         """Simple token overlap baseline.
 
         Measures what fraction of prediction tokens appear in context.
@@ -208,7 +208,7 @@ class FaithfulnessMetric(Metric):
 
         return float(precision)
 
-    def _compute_llm_faithfulness(self, prediction: str, context: List[str]) -> float:
+    def _compute_llm_faithfulness(self, prediction: str, context: list[str]) -> float:
         """Use LLM to judge faithfulness.
 
         Requires judge_model to be set.
@@ -248,7 +248,7 @@ Response:"""
             print(f"Warning: LLM faithfulness check failed: {e}")
             return 0.5
 
-    def aggregate(self, scores: List[float]) -> Dict[str, Any]:
+    def aggregate(self, scores: list[float]) -> dict[str, Any]:
         """Aggregate faithfulness scores across examples.
 
         Args:

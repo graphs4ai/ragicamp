@@ -60,7 +60,7 @@ jobs:
         run: |
           uv run python -c "
           from ragicamp.corpus import DocumentChunker
-          from ragicamp.cli import app
+          from ragicamp.cli import main
           print('✅ Core imports work')
           "
 

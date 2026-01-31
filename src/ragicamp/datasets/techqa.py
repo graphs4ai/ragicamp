@@ -70,7 +70,7 @@ class TechQADataset(QADataset):
                 f"Failed to load TechQA dataset. Error: {e}\n"
                 "Note: TechQA may require accepting terms on HuggingFace. "
                 "Visit https://huggingface.co/datasets/ibm/techqa"
-            )
+            ) from e
 
         # Convert to our format
         for item in dataset:

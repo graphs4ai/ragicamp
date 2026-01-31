@@ -3,15 +3,15 @@
 Provides ModelFactory for creating HuggingFace, OpenAI, and vLLM models.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from ragicamp.core.logging import get_logger
-from ragicamp.models import HuggingFaceModel, LanguageModel, OpenAIModel, VLLMModel, _VLLM_AVAILABLE
+from ragicamp.models import _VLLM_AVAILABLE, HuggingFaceModel, LanguageModel, OpenAIModel, VLLMModel
 
 logger = get_logger(__name__)
 
 
-def validate_model_config(config: Dict[str, Any]) -> None:
+def validate_model_config(config: dict[str, Any]) -> None:
     """Validate model configuration.
 
     Args:
@@ -42,7 +42,7 @@ class ModelFactory:
     """
 
     # Custom model registry
-    _custom_models: Dict[str, type] = {}
+    _custom_models: dict[str, type] = {}
 
     @classmethod
     def register(cls, name: str):
@@ -53,9 +53,11 @@ class ModelFactory:
             class AnthropicModel(LanguageModel):
                 ...
         """
+
         def decorator(model_class: type) -> type:
             cls._custom_models[name] = model_class
             return model_class
+
         return decorator
 
     @staticmethod
@@ -63,7 +65,7 @@ class ModelFactory:
         spec: str,
         quantization: str = "none",
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Parse a model spec string into a config dict.
 
         Args:
@@ -114,7 +116,7 @@ class ModelFactory:
         return config
 
     @classmethod
-    def create(cls, config: Dict[str, Any]) -> LanguageModel:
+    def create(cls, config: dict[str, Any]) -> LanguageModel:
         """Create a language model from configuration.
 
         Args:

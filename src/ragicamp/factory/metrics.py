@@ -1,6 +1,6 @@
 """Metric factory for creating evaluation metrics from configuration."""
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics import Metric
@@ -13,22 +13,24 @@ class MetricFactory:
     """Factory for creating evaluation metrics from configuration."""
 
     # Custom metric registry
-    _custom_metrics: Dict[str, type] = {}
+    _custom_metrics: dict[str, type] = {}
 
     @classmethod
     def register(cls, name: str):
         """Register a custom metric type."""
+
         def decorator(metric_class: type) -> type:
             cls._custom_metrics[name] = metric_class
             return metric_class
+
         return decorator
 
     @classmethod
     def create(
         cls,
-        config: List[Union[str, Dict[str, Any]]],
+        config: list[Union[str, dict[str, Any]]],
         judge_model: Optional[LanguageModel] = None,
-    ) -> List[Metric]:
+    ) -> list[Metric]:
         """Create metrics from configuration.
 
         Args:
@@ -47,30 +49,35 @@ class MetricFactory:
         # Import optional metrics with guards
         try:
             from ragicamp.metrics.bertscore import BERTScoreMetric
+
             BERTSCORE_AVAILABLE = True
         except ImportError:
             BERTSCORE_AVAILABLE = False
 
         try:
             from ragicamp.metrics.bleurt import BLEURTMetric
+
             BLEURT_AVAILABLE = True
         except ImportError:
             BLEURT_AVAILABLE = False
 
         try:
             from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
+
             LLM_JUDGE_AVAILABLE = True
         except ImportError:
             LLM_JUDGE_AVAILABLE = False
 
         try:
             from ragicamp.metrics.faithfulness import FaithfulnessMetric
+
             FAITHFULNESS_AVAILABLE = True
         except ImportError:
             FAITHFULNESS_AVAILABLE = False
 
         try:
             from ragicamp.metrics.hallucination import HallucinationMetric
+
             HALLUCINATION_AVAILABLE = True
         except ImportError:
             HALLUCINATION_AVAILABLE = False

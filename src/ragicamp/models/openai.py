@@ -16,7 +16,7 @@ Example:
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import openai
 import tiktoken
@@ -89,7 +89,7 @@ class OpenAIModel(LanguageModel):
         max_tokens: Optional[int],
         temperature: float,
         top_p: float,
-        stop: Optional[List[str]],
+        stop: Optional[list[str]],
         **kwargs: Any,
     ) -> str:
         """Generate text for a single prompt."""
@@ -114,14 +114,14 @@ class OpenAIModel(LanguageModel):
 
     def generate(
         self,
-        prompt: Union[str, List[str]],
+        prompt: Union[str, list[str]],
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         parallel: bool = True,
         **kwargs: Any,
-    ) -> Union[str, List[str]]:
+    ) -> Union[str, list[str]]:
         """Generate text using OpenAI API.
 
         Args:
@@ -178,7 +178,7 @@ class OpenAIModel(LanguageModel):
                 )
             return results
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using OpenAI embeddings API."""
         response = openai.embeddings.create(model="text-embedding-ada-002", input=texts)
         return [item.embedding for item in response.data]
@@ -197,7 +197,7 @@ class OpenAIModel(LanguageModel):
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         system_message: Optional[str] = None,
         **kwargs: Any,
     ) -> str:
@@ -241,14 +241,14 @@ class OpenAIModel(LanguageModel):
 
     async def agenerate(
         self,
-        prompts: List[str],
+        prompts: list[str],
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         system_message: Optional[str] = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate text for multiple prompts asynchronously with rate limiting.
 
         Uses asyncio.Semaphore to limit concurrent API calls.
@@ -294,7 +294,7 @@ class OpenAIModel(LanguageModel):
         sorted_results = sorted(results, key=lambda x: x[0])
         return [r[1] for r in sorted_results]
 
-    async def aget_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def aget_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using OpenAI embeddings API asynchronously.
 
         Args:

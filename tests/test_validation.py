@@ -3,13 +3,13 @@
 import pytest
 
 from ragicamp.config.validation import (
+    VALID_DATASETS,
+    VALID_PROVIDERS,
+    VALID_QUANTIZATIONS,
     ConfigError,
     validate_config,
     validate_dataset,
     validate_model_spec,
-    VALID_DATASETS,
-    VALID_PROVIDERS,
-    VALID_QUANTIZATIONS,
 )
 
 
@@ -90,7 +90,7 @@ class TestValidateConfig:
         """Test that no datasets produces warning."""
         config = {"name": "test"}
         warnings = validate_config(config)
-        
+
         assert any("No datasets" in w for w in warnings)
 
     def test_invalid_dataset_raises(self):
@@ -111,7 +111,7 @@ class TestValidateConfig:
             "direct": {"enabled": True},
         }
         warnings = validate_config(config)
-        
+
         assert any("no models" in w.lower() for w in warnings)
 
     def test_rag_enabled_no_retrievers_warning(self):
@@ -122,7 +122,7 @@ class TestValidateConfig:
             "rag": {"enabled": True, "models": ["hf:test/model"]},
         }
         warnings = validate_config(config)
-        
+
         assert any("no retrievers" in w.lower() for w in warnings)
 
     def test_invalid_quantization_raises(self):

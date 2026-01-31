@@ -7,7 +7,7 @@ import gc
 import os
 import pickle
 import tempfile
-from typing import Any, Dict
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
@@ -16,8 +16,8 @@ logger = get_logger(__name__)
 
 
 def build_hierarchical_index(
-    retriever_config: Dict[str, Any],
-    corpus_config: Dict[str, Any],
+    retriever_config: dict[str, Any],
+    corpus_config: dict[str, Any],
     doc_batch_size: int = 1000,
     embedding_batch_size: int = 64,
 ) -> str:
@@ -52,12 +52,12 @@ def build_hierarchical_index(
     parent_overlap = retriever_config.get("parent_overlap", 100)
     child_overlap = retriever_config.get("child_overlap", 50)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Building hierarchical index: {retriever_name}")
     print(f"  Parent chunks: {parent_chunk_size}")
     print(f"  Child chunks: {child_chunk_size}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Build metadata dict for WikiRank filter and other options
     corpus_metadata = {}
@@ -97,22 +97,16 @@ def build_hierarchical_index(
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     # Temporary files for incremental saving
-    temp_parent_file = tempfile.NamedTemporaryFile(
-        delete=False, suffix='.pkl', dir=str(temp_dir)
-    )
-    temp_child_file = tempfile.NamedTemporaryFile(
-        delete=False, suffix='.pkl', dir=str(temp_dir)
-    )
-    temp_mapping_file = tempfile.NamedTemporaryFile(
-        delete=False, suffix='.pkl', dir=str(temp_dir)
-    )
+    temp_parent_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
+    temp_child_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
+    temp_mapping_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
     temp_parent_file.close()
     temp_child_file.close()
     temp_mapping_file.close()
 
-    parent_file = open(temp_parent_file.name, 'ab')
-    child_file = open(temp_child_file.name, 'ab')
-    mapping_file = open(temp_mapping_file.name, 'ab')
+    parent_file = open(temp_parent_file.name, "ab")
+    child_file = open(temp_child_file.name, "ab")
+    mapping_file = open(temp_mapping_file.name, "ab")
 
     total_docs = 0
     doc_batch = []
@@ -134,8 +128,8 @@ def build_hierarchical_index(
                 batch_num += 1
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
-                
-                print(f"    Chunking (hierarchical)...", end=" ", flush=True)
+
+                print("    Chunking (hierarchical)...", end=" ", flush=True)
                 parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                     iter(doc_batch)
                 )
@@ -147,11 +141,11 @@ def build_hierarchical_index(
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    print(f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})...")
+                    print(
+                        f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
+                    )
                     embeddings = encoder.encode(
-                        child_texts, 
-                        show_progress_bar=True,
-                        batch_size=embedding_batch_size
+                        child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
@@ -182,8 +176,8 @@ def build_hierarchical_index(
             batch_num += 1
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
-            
-            print(f"    Chunking (hierarchical)...", end=" ", flush=True)
+
+            print("    Chunking (hierarchical)...", end=" ", flush=True)
             parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                 iter(doc_batch)
             )
@@ -193,11 +187,11 @@ def build_hierarchical_index(
 
             if child_chunks:
                 child_texts = [c.text for c in child_chunks]
-                print(f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})...")
+                print(
+                    f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
+                )
                 embeddings = encoder.encode(
-                    child_texts, 
-                    show_progress_bar=True,
-                    batch_size=embedding_batch_size
+                    child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
@@ -214,7 +208,9 @@ def build_hierarchical_index(
             )
             del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
 
-        print(f"✓ Processing complete: {total_docs} docs → {parent_count} parents, {child_count} children")
+        print(
+            f"✓ Processing complete: {total_docs} docs → {parent_count} parents, {child_count} children"
+        )
 
     finally:
         parent_file.close()
@@ -227,6 +223,7 @@ def build_hierarchical_index(
     index_path.mkdir(parents=True, exist_ok=True)
 
     import shutil
+
     shutil.copy2(temp_parent_file.name, index_path / "parent_docs.pkl")
     shutil.copy2(temp_child_file.name, index_path / "child_docs.pkl")
 
@@ -238,7 +235,7 @@ def build_hierarchical_index(
     parent_id_to_idx = {}
 
     idx = 0
-    with open(temp_parent_file.name, 'rb') as f:
+    with open(temp_parent_file.name, "rb") as f:
         while True:
             try:
                 batch = pickle.load(f)
@@ -249,7 +246,7 @@ def build_hierarchical_index(
             except EOFError:
                 break
 
-    with open(temp_child_file.name, 'rb') as f:
+    with open(temp_child_file.name, "rb") as f:
         while True:
             try:
                 batch = pickle.load(f)
@@ -257,7 +254,7 @@ def build_hierarchical_index(
             except EOFError:
                 break
 
-    with open(temp_mapping_file.name, 'rb') as f:
+    with open(temp_mapping_file.name, "rb") as f:
         while True:
             try:
                 batch_mapping = pickle.load(f)

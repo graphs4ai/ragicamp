@@ -1,7 +1,6 @@
 """Init phase handler - exports questions and metadata."""
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ragicamp.core.logging import get_logger

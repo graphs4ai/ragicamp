@@ -3,7 +3,7 @@
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class ArtifactManager:
@@ -51,7 +51,7 @@ class ArtifactManager:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def save_json(self, data: Dict[str, Any], path: Path) -> None:
+    def save_json(self, data: dict[str, Any], path: Path) -> None:
         """Save dictionary as JSON.
 
         Args:
@@ -61,7 +61,7 @@ class ArtifactManager:
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
-    def load_json(self, path: Path) -> Dict[str, Any]:
+    def load_json(self, path: Path) -> dict[str, Any]:
         """Load JSON file.
 
         Args:
@@ -70,7 +70,7 @@ class ArtifactManager:
         Returns:
             Loaded dictionary
         """
-        with open(path, "r") as f:
+        with open(path) as f:
             return json.load(f)
 
     def save_pickle(self, obj: Any, path: Path) -> None:
@@ -119,23 +119,22 @@ class ArtifactManager:
         """
         path = self.retrievers_dir / name
         config_path = path / "config.json"
-        
+
         if not config_path.exists():
             return False
-        
+
         # Check config to determine retriever type
         try:
             config = self.load_json(config_path)
             retriever_type = config.get("type", "dense")
         except Exception:
             return False
-        
+
         if retriever_type == "hybrid":
             # Hybrid needs BM25 sparse index
-            return (
-                (path / "sparse_matrix.pkl").exists()
-                and (path / "sparse_vectorizer.pkl").exists()
-            )
+            return (path / "sparse_matrix.pkl").exists() and (
+                path / "sparse_vectorizer.pkl"
+            ).exists()
         else:
             # Dense/hierarchical just need config with index reference
             has_index_ref = (
@@ -173,18 +172,18 @@ class ArtifactManager:
         path = self.indexes_dir / name
         if not path.exists():
             return False
-        
+
         config_path = path / "config.json"
         if not config_path.exists():
             return False
-        
+
         # Check config to determine index type
         try:
             config = self.load_json(config_path)
             index_type = config.get("type", "embedding")
         except Exception:
             return False
-        
+
         if index_type == "hierarchical":
             # Hierarchical index files
             return (
@@ -195,10 +194,7 @@ class ArtifactManager:
             )
         else:
             # Standard embedding index files
-            return (
-                (path / "index.faiss").exists()
-                and (path / "documents.pkl").exists()
-            )
+            return (path / "index.faiss").exists() and (path / "documents.pkl").exists()
 
     def list_embedding_indexes(self) -> list:
         """List all saved embedding indexes.

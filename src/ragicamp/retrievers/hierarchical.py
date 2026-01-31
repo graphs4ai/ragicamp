@@ -11,7 +11,7 @@ This gives you:
 - Rich context (large chunks have more information)
 """
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.hierarchical import HierarchicalIndex
@@ -55,7 +55,7 @@ class HierarchicalRetriever(Retriever):
         self.parent_chunk_size = parent_chunk_size
         self.child_chunk_size = child_chunk_size
 
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Build index from documents.
 
         Note: Prefer building the index separately and passing to __init__.
@@ -69,7 +69,7 @@ class HierarchicalRetriever(Retriever):
             )
         self.index.build(documents)
 
-    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
+    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve parent chunks by searching child chunks.
 
         Args:
@@ -108,8 +108,8 @@ class HierarchicalRetriever(Retriever):
         return results
 
     def batch_retrieve(
-        self, queries: List[str], top_k: int = 5, **kwargs: Any
-    ) -> List[List[Document]]:
+        self, queries: list[str], top_k: int = 5, **kwargs: Any
+    ) -> list[list[Document]]:
         """Retrieve parent chunks for multiple queries using batched encoding.
 
         This is significantly faster than calling retrieve() for each query:
@@ -158,14 +158,14 @@ class HierarchicalRetriever(Retriever):
         return all_results
 
     @property
-    def parent_docs(self) -> List[Document]:
+    def parent_docs(self) -> list[Document]:
         """Get parent documents (for backward compatibility)."""
         if self.index is None:
             return []
         return self.index.parent_docs
 
     @property
-    def child_docs(self) -> List[Document]:
+    def child_docs(self) -> list[Document]:
         """Get child documents (for backward compatibility)."""
         if self.index is None:
             return []

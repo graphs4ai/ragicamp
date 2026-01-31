@@ -11,47 +11,21 @@ The actual implementation is delegated to specialized modules:
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-import yaml
-
-from ragicamp.config.validation import ConfigError, validate_config, validate_model_spec
-from ragicamp.execution.runner import ExpSpec, build_specs, run_spec
-from ragicamp.indexes.builder import ensure_indexes_exist
-from ragicamp.models import OpenAIModel
-from ragicamp.utils.artifacts import get_artifact_manager
+from typing import Any, Optional
 
 # Re-export for backward compatibility
 from ragicamp.config.validation import (
-    ConfigError,
     validate_config,
-    validate_dataset,
     validate_model_spec,
-    VALID_DATASETS,
-    VALID_PROVIDERS,
-    VALID_QUANTIZATIONS,
 )
-
-from ragicamp.indexes.builder import (
-    get_embedding_index_name,
-    build_embedding_index,
-    build_hierarchical_index,
-    build_retriever_from_index,
-    ensure_indexes_exist,
-)
-
 from ragicamp.execution.runner import (
-    ExpSpec,
     build_specs,
     run_spec,
-    run_spec_subprocess,
 )
-
-from ragicamp.factory import (
-    load_retriever,
-    create_query_transformer,
-    create_reranker,
+from ragicamp.indexes.builder import (
+    ensure_indexes_exist,
 )
+from ragicamp.models import OpenAIModel
 
 
 def get_prompt_builder(prompt_type: str, dataset: str):
@@ -86,7 +60,7 @@ def create_dataset(name: str, limit: Optional[int] = None):
     return ComponentFactory.create_dataset(config)
 
 
-def create_judge_model(llm_judge_config: Optional[Dict[str, Any]]):
+def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):
     """Create LLM judge model from config."""
     if not llm_judge_config:
         return None
@@ -100,7 +74,7 @@ def create_judge_model(llm_judge_config: Optional[Dict[str, Any]]):
 
 
 def run_study(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     dry_run: bool = False,
     skip_existing: bool = True,
     validate_only: bool = False,
@@ -139,11 +113,11 @@ def run_study(
     out = Path(config.get("output_dir", f"outputs/{study_name}"))
     out.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Study: {study_name}")
     if description:
         print(f"  {description}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Override limit from config if not specified
     if limit is None:
@@ -186,7 +160,7 @@ def run_study(
     should_force = force or not skip_existing
 
     for i, spec in enumerate(specs):
-        print(f"\n[{i+1}/{len(specs)}] {spec.name}")
+        print(f"\n[{i + 1}/{len(specs)}] {spec.name}")
 
         status = run_spec(
             spec=spec,
@@ -207,12 +181,12 @@ def run_study(
             results["skipped"] += 1
 
     # Summary
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Study Complete: {study_name}")
     print(f"  Completed: {results['completed']}")
     print(f"  Failed: {results['failed']}")
     print(f"  Skipped: {results['skipped']}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Save study metadata
     meta = {

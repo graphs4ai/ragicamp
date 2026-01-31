@@ -11,7 +11,7 @@ with a `batch_answer` or `answer` method.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Optional, Protocol
 
 from tqdm import tqdm
 
@@ -50,7 +50,7 @@ class Answerable(Protocol):
 class BatchAnswerable(Answerable, Protocol):
     """Protocol for anything that can answer questions in batches."""
 
-    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[Any]:
+    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[Any]:
         """Answer multiple queries in a batch."""
         ...
 
@@ -75,9 +75,9 @@ class ExecutionConfig:
 class BatchResult:
     """Result of processing a batch."""
 
-    items: List[Dict[str, Any]]
+    items: list[dict[str, Any]]
     batch_size_used: int
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def success_count(self) -> int:
@@ -127,12 +127,12 @@ class ResilientExecutor:
 
     def execute(
         self,
-        queries: List[Tuple[int, str, List[str]]],
+        queries: list[tuple[int, str, list[str]]],
         progress: bool = True,
         checkpoint_every: int = 0,
-        checkpoint_callback: Optional[Callable[[List[Dict]], None]] = None,
+        checkpoint_callback: Optional[Callable[[list[dict]], None]] = None,
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Execute queries with resilient batch processing.
 
         Args:
@@ -148,7 +148,7 @@ class ResilientExecutor:
         if not queries:
             return []
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         pending = list(queries)
 
         if self._supports_batch and self.current_batch_size > 1:
@@ -172,16 +172,16 @@ class ResilientExecutor:
 
     def _execute_batched(
         self,
-        queries: List[Tuple[int, str, List[str]]],
+        queries: list[tuple[int, str, list[str]]],
         progress: bool,
         checkpoint_every: int,
-        checkpoint_callback: Optional[Callable[[List[Dict]], None]],
+        checkpoint_callback: Optional[Callable[[list[dict]], None]],
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Execute with batch processing and auto-reduction."""
         import torch
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         idx = 0
         pbar = tqdm(total=len(queries), desc="Generating", disable=not progress)
         consecutive_failures = 0
@@ -205,7 +205,9 @@ class ResilientExecutor:
                     }
                     # Include retrieved docs if available (for RAG)
                     # Use metadata_dict property for consistent access
-                    metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                    metadata = (
+                        getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                    )
                     if "retrieved_docs" in metadata:
                         result_item["retrieved_docs"] = metadata["retrieved_docs"]
                     results.append(result_item)
@@ -321,16 +323,16 @@ class ResilientExecutor:
 
     def _execute_sequential(
         self,
-        queries: List[Tuple[int, str, List[str]]],
+        queries: list[tuple[int, str, list[str]]],
         progress: bool,
         checkpoint_every: int,
-        checkpoint_callback: Optional[Callable[[List[Dict]], None]],
+        checkpoint_callback: Optional[Callable[[list[dict]], None]],
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Execute queries one at a time."""
         import torch
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for orig_idx, query, expected in tqdm(queries, desc="Generating", disable=not progress):
             try:
@@ -345,7 +347,9 @@ class ResilientExecutor:
                 }
                 # Include retrieved docs if available (for RAG)
                 # Use metadata_dict property for consistent access
-                metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                metadata = (
+                    getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                )
                 if "retrieved_docs" in metadata:
                     result_item["retrieved_docs"] = metadata["retrieved_docs"]
                 results.append(result_item)
@@ -373,9 +377,9 @@ class ResilientExecutor:
 
     def _execute_sequential_batch(
         self,
-        batch: List[Tuple[int, str, List[str]]],
+        batch: list[tuple[int, str, list[str]]],
         **kwargs: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Process a batch sequentially (fallback when batching fails)."""
         import torch
 
@@ -393,7 +397,9 @@ class ResilientExecutor:
                 }
                 # Include retrieved docs if available (for RAG)
                 # Use metadata_dict property for consistent access
-                metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                metadata = (
+                    getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+                )
                 if "retrieved_docs" in metadata:
                     result_item["retrieved_docs"] = metadata["retrieved_docs"]
                 results.append(result_item)

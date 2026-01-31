@@ -5,7 +5,7 @@ experiment configurations.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
@@ -131,7 +131,7 @@ class MetricConfig(BaseModel):
     """Metric configuration (can be string or dict)."""
 
     name: str = Field(..., description="Metric name")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Metric parameters")
+    params: dict[str, Any] = Field(default_factory=dict, description="Metric parameters")
 
 
 class EvaluationConfig(BaseModel):
@@ -161,7 +161,7 @@ class EvaluationConfig(BaseModel):
         default=True, description="Save experiment state for phase-level resumption"
     )
     state_file: Optional[str] = Field(default=None, description="Path to state file")
-    force_rerun_phases: List[str] = Field(
+    force_rerun_phases: list[str] = Field(
         default_factory=list, description="List of phase names to force rerun (e.g., ['metrics'])"
     )
 
@@ -192,7 +192,7 @@ class MLflowConfig(BaseModel):
     experiment_name: Optional[str] = Field(default=None, description="MLflow experiment name")
     tracking_uri: Optional[str] = Field(default=None, description="MLflow tracking URI")
     run_name: Optional[str] = Field(default=None, description="MLflow run name")
-    tags: Dict[str, str] = Field(default_factory=dict, description="MLflow run tags")
+    tags: dict[str, str] = Field(default_factory=dict, description="MLflow run tags")
     log_artifacts: bool = Field(default=True, description="Log artifacts to MLflow")
     log_models: bool = Field(default=False, description="Log models to MLflow (slower)")
 
@@ -237,7 +237,7 @@ class OptunaConfig(BaseModel):
     metric_to_optimize: str = Field(default="f1", description="Metric name to optimize")
 
     # Parameter search spaces (examples)
-    search_params: Dict[str, Any] = Field(
+    search_params: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameter search spaces (e.g., {'top_k': [1, 20], 'temperature': [0.1, 2.0]})",
     )
@@ -252,7 +252,7 @@ class ExperimentConfig(BaseModel):
     dataset: Optional[DatasetConfig] = Field(None, description="Dataset configuration")
 
     # Always required
-    metrics: List[Union[str, Dict[str, Any]]] = Field(..., description="Metrics configuration")
+    metrics: list[Union[str, dict[str, Any]]] = Field(..., description="Metrics configuration")
 
     # Optional fields
     judge_model: Optional[ModelConfig] = Field(
@@ -324,7 +324,7 @@ class ExperimentConfig(BaseModel):
         extra = "forbid"  # Don't allow extra fields at top level
 
 
-def parse_metric_config(metric: Union[str, Dict[str, Any]]) -> MetricConfig:
+def parse_metric_config(metric: Union[str, dict[str, Any]]) -> MetricConfig:
     """Parse a metric configuration.
 
     Args:

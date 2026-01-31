@@ -1,7 +1,9 @@
 """Wikipedia corpus implementation."""
 
 import heapq
-from typing import Iterator, Optional, Set
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Optional
 
 from datasets import load_dataset
 from tqdm import tqdm
@@ -10,9 +12,8 @@ from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
 from ragicamp.retrievers.base import Document
 
 
-def _get_wikirank_cache_path(language: str) -> "Path":
+def _get_wikirank_cache_path(language: str) -> Path:
     """Get path for cached WikiRank scores."""
-    from pathlib import Path
 
     cache_dir = Path.home() / ".cache" / "ragicamp" / "wikirank"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -74,7 +75,7 @@ def _load_wikirank_scores(language: str) -> dict:
     return scores
 
 
-def _load_wikirank_top_titles(top_k: int, language: str = "en") -> Set[str]:
+def _load_wikirank_top_titles(top_k: int, language: str = "en") -> set[str]:
     """Load top-K article titles from WikiRank dataset.
 
     WikiRank combines pageviews, edit frequency, references, and link structure
@@ -146,7 +147,7 @@ class WikipediaCorpus(DocumentCorpus):
         """
         super().__init__(config)
         self._dataset = None
-        self._allowed_titles: Optional[Set[str]] = None
+        self._allowed_titles: Optional[set[str]] = None
 
         # Load WikiRank filter if configured
         top_k = self.config.metadata.get("wikirank_top_k")
@@ -179,14 +180,14 @@ class WikipediaCorpus(DocumentCorpus):
         # Load dataset - streaming mode by default, can disable for high-RAM machines
         use_streaming = self.config.metadata.get("streaming", True)
         num_proc = self.config.metadata.get("num_proc", 128)  # For parallel loading/filtering
-        
+
         if self._dataset is None:
             try:
                 if use_streaming:
                     print("  Loading Wikipedia (streaming mode)...")
                 else:
                     print(f"  Loading Wikipedia into RAM with {num_proc} workers...")
-                
+
                 # num_proc only works for non-streaming (sharded loading)
                 load_kwargs = {
                     "path": self.config.source,
@@ -197,9 +198,9 @@ class WikipediaCorpus(DocumentCorpus):
                 }
                 if not use_streaming:
                     load_kwargs["num_proc"] = num_proc
-                
+
                 self._dataset = load_dataset(**load_kwargs)
-                
+
                 if not use_streaming:
                     print(f"  ✓ Loaded {len(self._dataset):,} articles into RAM")
             except Exception as e:
@@ -212,14 +213,14 @@ class WikipediaCorpus(DocumentCorpus):
         dataset_to_iterate = self._dataset
         if not use_streaming and self._allowed_titles is not None:
             print(f"  Filtering with {num_proc} workers (this parallelizes the scan)...")
-            
+
             # Need to pass allowed_titles to filter function
             allowed_titles = self._allowed_titles
-            
+
             def wikirank_filter(example):
                 title = example.get("title", "")
                 return _normalize_title(title) in allowed_titles
-            
+
             dataset_to_iterate = self._dataset.filter(
                 wikirank_filter,
                 num_proc=num_proc,
@@ -233,10 +234,10 @@ class WikipediaCorpus(DocumentCorpus):
         collected = 0
 
         desc = f"Loading {self.config.name}"
-        
+
         # Determine total for progress bar
         # Use leave=False so bar clears when we pause for batch processing
-        if not use_streaming and hasattr(dataset_to_iterate, '__len__'):
+        if not use_streaming and hasattr(dataset_to_iterate, "__len__"):
             total = min(len(dataset_to_iterate), limit) if limit else len(dataset_to_iterate)
             pbar = tqdm(enumerate(dataset_to_iterate), desc=desc, total=total, leave=False)
         else:

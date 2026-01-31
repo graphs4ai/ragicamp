@@ -22,7 +22,7 @@ Example:
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from tqdm.asyncio import tqdm as atqdm
 
@@ -35,7 +35,7 @@ class AsyncAPIMetric(Metric):
     Subclasses should implement `acompute_single()` which handles a single
     prediction-reference pair (1-to-1). The base class handles parallelization,
     rate limiting, and progress tracking.
-    
+
     Multi-reference aggregation is handled externally by compute_metrics_batched().
 
     Attributes:
@@ -69,7 +69,7 @@ class AsyncAPIMetric(Metric):
         reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute metric for a single prediction-reference pair (async, 1-to-1).
 
         Subclasses must implement this method.
@@ -87,11 +87,11 @@ class AsyncAPIMetric(Metric):
 
     async def acompute(
         self,
-        predictions: List[str],
-        references: List[str],
-        questions: Optional[List[str]] = None,
+        predictions: list[str],
+        references: list[str],
+        questions: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute metric for all predictions using async parallel execution.
 
         Args:
@@ -110,7 +110,7 @@ class AsyncAPIMetric(Metric):
             pred: str,
             ref: str,
             q: Optional[str],
-        ) -> Dict[str, float]:
+        ) -> dict[str, float]:
             """Compute with rate limiting."""
             async with semaphore:
                 try:
@@ -142,16 +142,16 @@ class AsyncAPIMetric(Metric):
         # Aggregate results
         return self._aggregate_results(results)
 
-    def get_per_item_scores(self) -> List[float]:
+    def get_per_item_scores(self) -> list[float]:
         """Get per-item main scores from last compute() call."""
         results = getattr(self, "_last_results", [])
         return [r.get(self.name, 0.0) for r in results]
 
-    def get_per_item_results(self) -> List[Dict[str, float]]:
+    def get_per_item_results(self) -> list[dict[str, float]]:
         """Get full per-item result dicts from last compute() call."""
         return getattr(self, "_last_results", [])
 
-    def _aggregate_results(self, results: List[Dict[str, float]]) -> Dict[str, float]:
+    def _aggregate_results(self, results: list[dict[str, float]]) -> dict[str, float]:
         """Aggregate individual results into final metrics.
 
         Args:
@@ -179,11 +179,11 @@ class AsyncAPIMetric(Metric):
 
     def compute(
         self,
-        predictions: List[str],
-        references: List[str],
-        questions: Optional[List[str]] = None,
+        predictions: list[str],
+        references: list[str],
+        questions: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute metric synchronously (wrapper around async).
 
         This provides backward compatibility with the sync Metric interface.
@@ -199,7 +199,7 @@ class AsyncAPIMetric(Metric):
         """
         # Check if we're already in an event loop
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # We're in an async context, can't use asyncio.run()
             # Create a new thread to run the async code
             import concurrent.futures
@@ -219,7 +219,7 @@ class AsyncAPIMetric(Metric):
         reference: str,
         question: Optional[str] = None,
         **kwargs: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute metric for a single item (sync wrapper).
 
         Args:

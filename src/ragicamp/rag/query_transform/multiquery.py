@@ -6,7 +6,7 @@ Results from all queries are merged and deduplicated.
 """
 
 import re
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from ragicamp.rag.query_transform.base import QueryTransformer
 
@@ -57,7 +57,7 @@ Alternative questions:"""
         self.include_original = include_original
         self.max_tokens = max_tokens
 
-    def transform(self, query: str) -> List[str]:
+    def transform(self, query: str) -> list[str]:
         """Generate multiple query variations.
 
         Args:
@@ -93,7 +93,7 @@ Alternative questions:"""
 
         return queries
 
-    def _parse_variations(self, response: str) -> List[str]:
+    def _parse_variations(self, response: str) -> list[str]:
         """Parse LLM response into individual query variations.
 
         Args:
@@ -125,7 +125,7 @@ Alternative questions:"""
 
         return variations[: self.num_queries]  # Limit to requested number
 
-    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+    def batch_transform(self, queries: list[str]) -> list[list[str]]:
         """Generate query variations for multiple queries in one batch call.
 
         This is much faster than calling transform() sequentially because
@@ -142,8 +142,7 @@ Alternative questions:"""
 
         # Build prompts for all queries
         prompts = [
-            self.prompt_template.format(query=q, num_queries=self.num_queries)
-            for q in queries
+            self.prompt_template.format(query=q, num_queries=self.num_queries) for q in queries
         ]
 
         # Batch generate variations (single batched LLM call!)

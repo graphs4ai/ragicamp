@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 
 class ExperimentPhase(Enum):
@@ -50,8 +50,8 @@ class ExperimentState:
     updated_at: str
     total_questions: int = 0
     predictions_complete: int = 0
-    metrics_computed: List[str] = field(default_factory=list)
-    metrics_requested: List[str] = field(default_factory=list)
+    metrics_computed: list[str] = field(default_factory=list)
+    metrics_requested: list[str] = field(default_factory=list)
     error: Optional[str] = None
 
     def save(self, path: Path) -> None:
@@ -90,7 +90,7 @@ class ExperimentState:
 
     @classmethod
     def new(
-        cls, total_questions: int = 0, metrics: Optional[List[str]] = None
+        cls, total_questions: int = 0, metrics: Optional[list[str]] = None
     ) -> "ExperimentState":
         """Create a new experiment state."""
         now = datetime.now().isoformat()

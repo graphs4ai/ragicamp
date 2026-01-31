@@ -13,7 +13,7 @@ The combination is done using Reciprocal Rank Fusion (RRF) which
 is robust and doesn't require score calibration.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.embedding import EmbeddingIndex
@@ -76,13 +76,13 @@ class HybridRetriever(Retriever):
         return self._sparse
 
     @property
-    def documents(self) -> List[Document]:
+    def documents(self) -> list[Document]:
         """Get documents from index."""
         if self.index is None:
             return []
         return self.index.documents
 
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Build index from documents.
 
         Note: Prefer building the index separately and passing to __init__.
@@ -99,7 +99,7 @@ class HybridRetriever(Retriever):
 
         logger.info("Hybrid indexing complete: %d documents", len(documents))
 
-    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
+    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve documents using hybrid search with RRF fusion.
 
         Args:
@@ -125,7 +125,9 @@ class HybridRetriever(Retriever):
         for idx, score in dense_hits:
             doc = self.index.get_document(idx)
             if doc:
-                result = Document(id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score)
+                result = Document(
+                    id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score
+                )
                 dense_results.append(result)
 
         # Sparse search
@@ -147,8 +149,8 @@ class HybridRetriever(Retriever):
         return results
 
     def batch_retrieve(
-        self, queries: List[str], top_k: int = 5, **kwargs: Any
-    ) -> List[List[Document]]:
+        self, queries: list[str], top_k: int = 5, **kwargs: Any
+    ) -> list[list[Document]]:
         """Retrieve documents for multiple queries using fully batched operations.
 
         Both dense and sparse retrieval are batched for maximum speed.
@@ -176,7 +178,7 @@ class HybridRetriever(Retriever):
 
         # Process each query - combine dense and sparse results
         all_results = []
-        for i, query in enumerate(queries):
+        for i, _query in enumerate(queries):
             # Convert dense hits to documents
             dense_results = []
             for idx, score in all_dense_hits[i]:
@@ -208,14 +210,14 @@ class HybridRetriever(Retriever):
 
     def _reciprocal_rank_fusion(
         self,
-        dense_results: List[Document],
-        sparse_results: List[Document],
-    ) -> Dict[str, float]:
+        dense_results: list[Document],
+        sparse_results: list[Document],
+    ) -> dict[str, float]:
         """Compute RRF scores.
 
         RRF formula: score(d) = Σ 1/(k + rank(d))
         """
-        rrf_scores: Dict[str, float] = {}
+        rrf_scores: dict[str, float] = {}
 
         # Add dense scores (with alpha weight)
         for rank, doc in enumerate(dense_results, start=1):
@@ -232,8 +234,8 @@ class HybridRetriever(Retriever):
     def _get_doc_by_id(
         self,
         doc_id: str,
-        dense_results: List[Document],
-        sparse_results: List[Document],
+        dense_results: list[Document],
+        sparse_results: list[Document],
     ) -> Optional[Document]:
         """Find a document by ID."""
         for doc in dense_results:
@@ -315,6 +317,7 @@ class HybridRetriever(Retriever):
             else:
                 # Legacy format - need to rebuild from documents.pkl
                 import pickle
+
                 docs_path = artifact_path / "documents.pkl"
                 if docs_path.exists():
                     logger.info("Loading legacy hybrid retriever")
@@ -338,22 +341,22 @@ class HybridRetriever(Retriever):
         if config.get("has_sparse"):
             sparse_vectorizer_path = artifact_path / "sparse_vectorizer.pkl"
             sparse_matrix_path = artifact_path / "sparse_matrix.pkl"
-            
+
             if sparse_vectorizer_path.exists() and sparse_matrix_path.exists():
                 import pickle
-                
+
                 logger.info("Loading pre-built sparse index for: %s", artifact_name)
                 sparse = SparseRetriever(name=f"{artifact_name}_sparse")
-                
+
                 with open(sparse_vectorizer_path, "rb") as f:
                     sparse.vectorizer = pickle.load(f)
                 with open(sparse_matrix_path, "rb") as f:
                     sparse.doc_vectors = pickle.load(f)
-                
+
                 # Link documents from the dense index
                 if index:
                     sparse.documents = index.documents
-                
+
                 retriever._sparse = sparse
                 logger.info("Loaded sparse index: %d documents", len(sparse.documents))
             else:
@@ -362,5 +365,7 @@ class HybridRetriever(Retriever):
                     artifact_name,
                 )
 
-        logger.info("Loaded hybrid retriever: %s (%d docs)", artifact_name, len(index) if index else 0)
+        logger.info(
+            "Loaded hybrid retriever: %s (%d docs)", artifact_name, len(index) if index else 0
+        )
         return retriever

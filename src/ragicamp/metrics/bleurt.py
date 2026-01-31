@@ -3,7 +3,7 @@
 import gc
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 # Fix matplotlib backend BEFORE any imports that might use it
 if "MPLBACKEND" not in os.environ:
@@ -57,11 +57,11 @@ class BLEURTMetric(Metric):
 
         try:
             from bleurt import score as bleurt_score
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "BLEURT is required for BLEURTMetric. "
                 "Install with: uv sync (already included in dependencies)"
-            )
+            ) from e
 
         print(f"  📥 Loading BLEURT model: {self.checkpoint}")
 
@@ -76,7 +76,7 @@ class BLEURTMetric(Metric):
             try:
                 self._checkpoint_path = self._download_checkpoint(self.checkpoint)
                 self._scorer = bleurt_score.BleurtScorer(self._checkpoint_path)
-                print(f"  ✓ BLEURT checkpoint loaded successfully")
+                print("  ✓ BLEURT checkpoint loaded successfully")
             except Exception as download_error:
                 raise RuntimeError(
                     f"Failed to load/download BLEURT checkpoint '{self.checkpoint}'.\n"
@@ -88,7 +88,7 @@ class BLEURTMetric(Metric):
                     f"  cd ~/.cache/bleurt\n"
                     f"  wget {BLEURT_CHECKPOINTS.get(self.checkpoint, 'URL_NOT_FOUND')}\n"
                     f"  unzip {self.checkpoint}.zip"
-                )
+                ) from download_error
 
     def _unload_scorer(self) -> None:
         """Unload the BLEURT model to free GPU memory."""
@@ -122,7 +122,7 @@ class BLEURTMetric(Metric):
             pass
 
         gc.collect()
-        print(f"  🗑️  BLEURT model unloaded")
+        print("  🗑️  BLEURT model unloaded")
 
     def _download_checkpoint(self, checkpoint: str) -> str:
         """Download BLEURT checkpoint.
@@ -165,8 +165,8 @@ class BLEURTMetric(Metric):
         return str(extract_path)
 
     def compute(
-        self, predictions: List[str], references: List[str], **kwargs: Any
-    ) -> Dict[str, float]:
+        self, predictions: list[str], references: list[str], **kwargs: Any
+    ) -> dict[str, float]:
         """Compute BLEURT scores (1-to-1).
 
         Loads model, computes scores, then unloads to free GPU memory.
@@ -194,6 +194,6 @@ class BLEURTMetric(Metric):
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
 
-    def get_per_item_scores(self) -> List[float]:
+    def get_per_item_scores(self) -> list[float]:
         """Get per-item scores from last compute() call."""
         return getattr(self, "_last_scores", [])

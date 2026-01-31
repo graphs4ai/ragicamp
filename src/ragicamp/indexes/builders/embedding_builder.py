@@ -8,7 +8,7 @@ import os
 import pickle
 import tempfile
 import time
-from typing import Any, Dict
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
@@ -24,7 +24,7 @@ def build_embedding_index(
     embedding_model: str,
     chunk_size: int,
     chunk_overlap: int,
-    corpus_config: Dict[str, Any],
+    corpus_config: dict[str, Any],
     chunking_strategy: str = "recursive",
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 64,
@@ -59,13 +59,13 @@ def build_embedding_index(
 
     manager = get_artifact_manager()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
     print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Initialize corpus
     corpus_metadata = {}
@@ -105,10 +105,10 @@ def build_embedding_index(
 
     # Process documents in batches - save incrementally to avoid memory bloat
     temp_docs_file = tempfile.NamedTemporaryFile(
-        delete=False, suffix='.pkl', dir=str(manager.indexes_dir)
+        delete=False, suffix=".pkl", dir=str(manager.indexes_dir)
     )
     temp_docs_file.close()
-    docs_file = open(temp_docs_file.name, 'ab')
+    docs_file = open(temp_docs_file.name, "ab")
 
     total_docs = 0
     total_chunks = 0
@@ -129,7 +129,7 @@ def build_embedding_index(
                 t_chunk = time.time()
                 batch_chunks = []
                 truncated = 0
-                
+
                 for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
                     # Truncate oversized docs to prevent slow chunking
                     text = doc.text
@@ -137,12 +137,12 @@ def build_embedding_index(
                         text = text[:MAX_DOC_CHARS]
                         truncated += 1
                         doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-                    
+
                     doc_chunks = list(chunker.strategy.chunk_document(doc))
                     batch_chunks.extend(doc_chunks)
-                
+
                 chunk_elapsed = time.time() - t_chunk
-                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)"
+                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
                 if truncated > 0:
                     msg += f" (truncated {truncated})"
                 print(msg)
@@ -154,11 +154,11 @@ def build_embedding_index(
                     texts = [c.text for c in batch_chunks]
 
                     # Embedding phase with progress
-                    print(f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})...")
+                    print(
+                        f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})..."
+                    )
                     embeddings = encoder.encode(
-                        texts,
-                        show_progress_bar=True,
-                        batch_size=embedding_batch_size
+                        texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
@@ -167,7 +167,9 @@ def build_embedding_index(
                     pickle.dump(batch_chunks, docs_file)
                     docs_file.flush()
 
-                print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
+                print(
+                    f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})"
+                )
                 doc_batch = []
                 del batch_chunks, texts, embeddings
                 gc.collect()
@@ -181,7 +183,7 @@ def build_embedding_index(
             t_chunk = time.time()
             batch_chunks = []
             truncated = 0
-            
+
             for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
                 text = doc.text
                 if len(text) > MAX_DOC_CHARS:
@@ -190,9 +192,9 @@ def build_embedding_index(
                     doc = Document(id=doc.id, text=text, metadata=doc.metadata)
                 doc_chunks = list(chunker.strategy.chunk_document(doc))
                 batch_chunks.extend(doc_chunks)
-            
+
             chunk_elapsed = time.time() - t_chunk
-            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)"
+            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
             if truncated > 0:
                 msg += f" (truncated {truncated})"
             print(msg)
@@ -204,9 +206,7 @@ def build_embedding_index(
                 texts = [c.text for c in batch_chunks]
                 print(f"    Embedding {len(texts)} chunks...")
                 embeddings = encoder.encode(
-                    texts,
-                    show_progress_bar=True,
-                    batch_size=embedding_batch_size
+                    texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
@@ -229,7 +229,7 @@ def build_embedding_index(
     # Combine all batches into single pickle file
     print("Combining batches for final save...")
     all_documents = []
-    with open(temp_docs_file.name, 'rb') as f:
+    with open(temp_docs_file.name, "rb") as f:
         while True:
             try:
                 batch = pickle.load(f)

@@ -11,8 +11,6 @@ Index building utilities are in ragicamp.indexes.builder.
 """
 
 from ragicamp.indexes.base import Index
-from ragicamp.indexes.embedding import EmbeddingIndex
-from ragicamp.indexes.hierarchical import HierarchicalIndex
 from ragicamp.indexes.builder import (
     build_embedding_index,
     build_hierarchical_index,
@@ -20,6 +18,8 @@ from ragicamp.indexes.builder import (
     ensure_indexes_exist,
     get_embedding_index_name,
 )
+from ragicamp.indexes.embedding import EmbeddingIndex
+from ragicamp.indexes.hierarchical import HierarchicalIndex
 
 __all__ = [
     "Index",

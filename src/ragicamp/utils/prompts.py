@@ -10,7 +10,7 @@ Usage:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -18,6 +18,7 @@ import yaml
 @dataclass
 class FewShotExample:
     """A single few-shot example."""
+
     question: str
     answer: str
 
@@ -25,10 +26,11 @@ class FewShotExample:
 @dataclass
 class PromptConfig:
     """Configuration for prompt building."""
+
     style: str = ""
     stop_instruction: str = ""
     knowledge_instruction: str = ""
-    examples: List[FewShotExample] = field(default_factory=list)
+    examples: list[FewShotExample] = field(default_factory=list)
 
 
 class PromptBuilder:
@@ -41,7 +43,7 @@ class PromptBuilder:
     4. Consistent formatting throughout
     """
 
-    _fewshot_cache: Optional[Dict[str, Any]] = None
+    _fewshot_cache: Optional[dict[str, Any]] = None
 
     def __init__(self, config: PromptConfig):
         self.config = config
@@ -124,13 +126,16 @@ class PromptBuilder:
         return "\n".join(lines).rstrip()
 
     @classmethod
-    def _load_fewshot_file(cls) -> Dict[str, Any]:
+    def _load_fewshot_file(cls) -> dict[str, Any]:
         """Load fewshot examples from YAML file (cached)."""
         if cls._fewshot_cache is not None:
             return cls._fewshot_cache
 
         paths = [
-            Path(__file__).parent.parent.parent.parent / "conf" / "prompts" / "fewshot_examples.yaml",
+            Path(__file__).parent.parent.parent.parent
+            / "conf"
+            / "prompts"
+            / "fewshot_examples.yaml",
             Path("conf/prompts/fewshot_examples.yaml"),
         ]
 
@@ -155,14 +160,18 @@ class PromptBuilder:
             Configured PromptBuilder
         """
         if prompt_type == "default":
-            return cls(PromptConfig(
-                style="Give only the answer, no explanations.",
-            ))
+            return cls(
+                PromptConfig(
+                    style="Give only the answer, no explanations.",
+                )
+            )
 
         if prompt_type == "concise":
-            return cls(PromptConfig(
-                style="Reply with just the answer.",
-            ))
+            return cls(
+                PromptConfig(
+                    style="Reply with just the answer.",
+                )
+            )
 
         if prompt_type.startswith("fewshot"):
             n_examples = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(prompt_type, 5)
@@ -172,16 +181,17 @@ class PromptBuilder:
 
             raw_examples = dataset_config.get("examples", [])[:n_examples]
             examples = [
-                FewShotExample(question=ex["question"], answer=ex["answer"])
-                for ex in raw_examples
+                FewShotExample(question=ex["question"], answer=ex["answer"]) for ex in raw_examples
             ]
 
-            return cls(PromptConfig(
-                style=dataset_config.get("style", "Give a short, direct answer."),
-                stop_instruction=dataset_config.get("stop_instruction", ""),
-                knowledge_instruction=dataset_config.get("knowledge_instruction", ""),
-                examples=examples,
-            ))
+            return cls(
+                PromptConfig(
+                    style=dataset_config.get("style", "Give a short, direct answer."),
+                    stop_instruction=dataset_config.get("stop_instruction", ""),
+                    knowledge_instruction=dataset_config.get("knowledge_instruction", ""),
+                    examples=examples,
+                )
+            )
 
         return cls(PromptConfig())
 

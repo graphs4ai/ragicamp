@@ -18,18 +18,18 @@ from ragicamp.execution.executor import (
     ExecutionConfig,
     ResilientExecutor,
 )
-from ragicamp.execution.runner import (
-    run_spec,
-    run_spec_subprocess,
-    run_generation,
-    run_metrics_only,
-)
 from ragicamp.execution.phases import (
     ExecutionContext,
     GenerationHandler,
     InitHandler,
     MetricsHandler,
     PhaseHandler,
+)
+from ragicamp.execution.runner import (
+    run_generation,
+    run_metrics_only,
+    run_spec,
+    run_spec_subprocess,
 )
 
 # Re-export spec types for convenience (canonical location is ragicamp.spec)

@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -18,10 +18,10 @@ class Document:
 
     id: str
     text: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     score: Optional[float] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format."""
         return {
             "id": self.id,
@@ -51,7 +51,7 @@ class Retriever(ABC):
         self.config = kwargs
 
     @abstractmethod
-    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
+    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve relevant documents for a query.
 
         Args:
@@ -65,7 +65,7 @@ class Retriever(ABC):
         pass
 
     @abstractmethod
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Index a collection of documents for retrieval.
 
         Args:

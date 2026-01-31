@@ -11,7 +11,7 @@ Key Principles:
 
 Usage:
     from ragicamp.core.schemas import PredictionRecord, RetrievedDoc
-    
+
     # Create a prediction
     pred = PredictionRecord(
         idx=0,
@@ -22,10 +22,9 @@ Usage:
     )
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 from enum import Enum
-
+from typing import Any, Optional
 
 # =============================================================================
 # Enums
@@ -34,6 +33,7 @@ from enum import Enum
 
 class AgentType(str, Enum):
     """Types of RAG agents."""
+
     DIRECT_LLM = "direct_llm"
     FIXED_RAG = "fixed_rag"
     # New agent types
@@ -45,6 +45,7 @@ class AgentType(str, Enum):
 
 class PromptStyle(str, Enum):
     """Prompt styles available."""
+
     DEFAULT = "default"
     CONCISE = "concise"
     FEWSHOT = "fewshot"
@@ -60,10 +61,10 @@ class PromptStyle(str, Enum):
 @dataclass
 class RetrievedDoc:
     """A single retrieved document.
-    
+
     This is the canonical format for retrieved documents throughout the system.
     Saved in predictions.json as part of RAG experiments.
-    
+
     Attributes:
         rank: Position in retrieval results (1-indexed)
         content: Document text content
@@ -71,13 +72,14 @@ class RetrievedDoc:
         source: Source identifier (optional, e.g., "wikipedia")
         doc_id: Document ID in corpus (optional)
     """
+
     rank: int
     content: str
     score: Optional[float] = None
     source: Optional[str] = None
     doc_id: Optional[str] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         d = {"rank": self.rank, "content": self.content}
         if self.score is not None:
@@ -87,9 +89,9 @@ class RetrievedDoc:
         if self.doc_id is not None:
             d["doc_id"] = self.doc_id
         return d
-    
+
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "RetrievedDoc":
+    def from_dict(cls, d: dict[str, Any]) -> "RetrievedDoc":
         """Create from dict (for loading from JSON)."""
         return cls(
             rank=d["rank"],
@@ -108,10 +110,10 @@ class RetrievedDoc:
 @dataclass
 class PredictionRecord:
     """A single prediction record.
-    
+
     This is the canonical format for predictions saved in predictions.json.
     All experiments MUST save predictions in this format.
-    
+
     Attributes:
         idx: Index in the dataset (0-indexed)
         question: The input question
@@ -122,16 +124,17 @@ class PredictionRecord:
         metrics: Per-item metric scores (computed after generation)
         error: Error message if prediction failed
     """
+
     idx: int
     question: str
     prediction: str
-    expected: List[str]
+    expected: list[str]
     prompt: str
-    retrieved_docs: Optional[List[RetrievedDoc]] = None
-    metrics: Dict[str, float] = field(default_factory=dict)
+    retrieved_docs: Optional[list[RetrievedDoc]] = None
+    metrics: dict[str, float] = field(default_factory=dict)
     error: Optional[str] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         d = {
             "idx": self.idx,
@@ -146,14 +149,14 @@ class PredictionRecord:
         if self.error:
             d["error"] = self.error
         return d
-    
+
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PredictionRecord":
+    def from_dict(cls, d: dict[str, Any]) -> "PredictionRecord":
         """Create from dict (for loading from JSON)."""
         retrieved_docs = None
         if "retrieved_docs" in d and d["retrieved_docs"]:
             retrieved_docs = [RetrievedDoc.from_dict(doc) for doc in d["retrieved_docs"]]
-        
+
         return cls(
             idx=d["idx"],
             question=d["question"],
@@ -174,22 +177,23 @@ class PredictionRecord:
 @dataclass
 class RAGResponseMeta:
     """Typed metadata for RAG responses.
-    
+
     Instead of Dict[str, Any], use this structured class.
     Ensures all agents return consistent metadata.
-    
+
     Attributes:
         agent_type: Type of agent that generated the response
         batch_processing: Whether this was part of a batch
         num_docs_used: Number of documents used (RAG only)
         retrieved_docs: Structured retrieved documents (RAG only)
     """
+
     agent_type: AgentType
     batch_processing: bool = False
     num_docs_used: Optional[int] = None
-    retrieved_docs: Optional[List[RetrievedDoc]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+    retrieved_docs: Optional[list[RetrievedDoc]] = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for backwards compatibility."""
         d = {
             "agent_type": self.agent_type.value,
@@ -210,9 +214,9 @@ class RAGResponseMeta:
 @dataclass
 class ExperimentSpec:
     """Full specification for an experiment.
-    
+
     This replaces the ExpSpec namedtuple in study.py with a proper dataclass.
-    
+
     Attributes:
         name: Unique experiment identifier
         exp_type: "direct" or "rag"
@@ -225,6 +229,7 @@ class ExperimentSpec:
         batch_size: Batch size for generation
         min_batch_size: Minimum batch size (for auto-reduction)
     """
+
     name: str
     exp_type: str  # "direct" or "rag"
     model: str
@@ -235,8 +240,8 @@ class ExperimentSpec:
     top_k: int = 5
     batch_size: int = 32
     min_batch_size: int = 1
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "name": self.name,

@@ -10,9 +10,9 @@ the same index with different search parameters.
 
 from ragicamp.retrievers.base import Document, Retriever
 from ragicamp.retrievers.dense import DenseRetriever
-from ragicamp.retrievers.sparse import SparseRetriever
-from ragicamp.retrievers.hybrid import HybridRetriever
 from ragicamp.retrievers.hierarchical import HierarchicalRetriever
+from ragicamp.retrievers.hybrid import HybridRetriever
+from ragicamp.retrievers.sparse import SparseRetriever
 
 __all__ = [
     "Retriever",

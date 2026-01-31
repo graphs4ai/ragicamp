@@ -24,6 +24,7 @@ from ragicamp.factory.retrievers import (
     create_reranker,
 )
 
+
 # Backward compatibility: ComponentFactory as unified facade
 class ComponentFactory:
     """Unified factory facade for backward compatibility.

@@ -12,13 +12,13 @@ from ragicamp.config.schemas import (
     TrainingConfig,
 )
 from ragicamp.config.validation import (
+    VALID_DATASETS,
+    VALID_PROVIDERS,
+    VALID_QUANTIZATIONS,
     ConfigError,
     validate_config,
     validate_dataset,
     validate_model_spec,
-    VALID_DATASETS,
-    VALID_PROVIDERS,
-    VALID_QUANTIZATIONS,
 )
 
 __all__ = [

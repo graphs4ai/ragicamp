@@ -2,7 +2,7 @@
 
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import faiss
 import numpy as np
@@ -67,10 +67,10 @@ class HierarchicalIndex(Index):
         self._chunker: Optional[HierarchicalChunker] = None
 
         # Storage
-        self.parent_docs: List[Document] = []
-        self.child_docs: List[Document] = []
-        self.child_to_parent: Dict[str, str] = {}
-        self.parent_id_to_idx: Dict[str, int] = {}
+        self.parent_docs: list[Document] = []
+        self.child_docs: list[Document] = []
+        self.child_to_parent: dict[str, str] = {}
+        self.parent_id_to_idx: dict[str, int] = {}
 
         # FAISS index for child chunks
         self.index: Optional[faiss.Index] = None
@@ -102,7 +102,7 @@ class HierarchicalIndex(Index):
             )
         return self._chunker
 
-    def build(self, documents: List[Document]) -> None:
+    def build(self, documents: list[Document]) -> None:
         """Build hierarchical index from documents.
 
         Args:
@@ -116,8 +116,8 @@ class HierarchicalIndex(Index):
         )
 
         # Create hierarchical chunks
-        self.parent_docs, self.child_docs, self.child_to_parent = (
-            self.chunker.chunk_documents(iter(documents))
+        self.parent_docs, self.child_docs, self.child_to_parent = self.chunker.chunk_documents(
+            iter(documents)
         )
 
         # Build parent ID lookup
@@ -147,9 +147,7 @@ class HierarchicalIndex(Index):
 
         logger.info("Hierarchical index built with %d child vectors", self.index.ntotal)
 
-    def search(
-        self, query_embedding: np.ndarray, top_k: int = 10
-    ) -> List[Tuple[int, float, int]]:
+    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[tuple[int, float, int]]:
         """Search children and return parent indices.
 
         Args:
@@ -169,8 +167,8 @@ class HierarchicalIndex(Index):
         scores, indices = self.index.search(query, num_children)
 
         # Map children to parents and track best scores
-        parent_scores: Dict[str, float] = {}
-        parent_best_child: Dict[str, int] = {}
+        parent_scores: dict[str, float] = {}
+        parent_best_child: dict[str, int] = {}
 
         for idx, score in zip(indices[0], scores[0]):
             if idx < 0 or idx >= len(self.child_docs):
@@ -211,7 +209,7 @@ class HierarchicalIndex(Index):
         faiss.normalize_L2(embedding)
         return embedding[0]
 
-    def batch_encode_queries(self, queries: List[str]) -> np.ndarray:
+    def batch_encode_queries(self, queries: list[str]) -> np.ndarray:
         """Encode multiple queries at once (much faster than sequential).
 
         Args:
@@ -226,7 +224,7 @@ class HierarchicalIndex(Index):
 
     def batch_search(
         self, query_embeddings: np.ndarray, top_k: int = 10
-    ) -> List[List[Tuple[int, float, int]]]:
+    ) -> list[list[tuple[int, float, int]]]:
         """Search children for multiple queries and return parent indices.
 
         Args:
@@ -249,8 +247,8 @@ class HierarchicalIndex(Index):
         all_results = []
         for q_idx in range(len(query_embeddings)):
             # Map children to parents and track best scores
-            parent_scores: Dict[str, float] = {}
-            parent_best_child: Dict[str, int] = {}
+            parent_scores: dict[str, float] = {}
+            parent_best_child: dict[str, int] = {}
 
             for idx, score in zip(indices_batch[q_idx], scores_batch[q_idx]):
                 if idx < 0 or idx >= len(self.child_docs):

@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from ragicamp.state.experiment_state import ExperimentPhase, ExperimentState
 
@@ -27,9 +27,9 @@ class ExperimentHealth:
     is_healthy: bool  # No errors, consistent state
     total_questions: int
     predictions_complete: int
-    missing_predictions: List[int]  # Question indices missing predictions
-    metrics_computed: List[str]
-    metrics_missing: List[str]
+    missing_predictions: list[int]  # Question indices missing predictions
+    metrics_computed: list[str]
+    metrics_missing: list[str]
     error: Optional[str] = None
 
     @property
@@ -149,8 +149,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     # Log if we adjusted the phase
     if state.phase != original_phase:
         logger.warning(
-            "State mismatch detected: state.json claims %s but artifacts missing. "
-            "Adjusted to %s",
+            "State mismatch detected: state.json claims %s but artifacts missing. Adjusted to %s",
             original_phase.value,
             state.phase.value,
         )
@@ -158,7 +157,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     return state
 
 
-def detect_state(exp_dir: Path, requested_metrics: Optional[List[str]] = None) -> ExperimentState:
+def detect_state(exp_dir: Path, requested_metrics: Optional[list[str]] = None) -> ExperimentState:
     """Detect experiment state from files on disk.
 
     Args:
@@ -265,7 +264,7 @@ def detect_state(exp_dir: Path, requested_metrics: Optional[List[str]] = None) -
 
 def check_health(
     exp_dir: Path,
-    requested_metrics: Optional[List[str]] = None,
+    requested_metrics: Optional[list[str]] = None,
 ) -> ExperimentHealth:
     """Check health of an experiment.
 
@@ -290,7 +289,7 @@ def check_health(
     if questions_path.exists():
         with open(questions_path) as f:
             q_data = json.load(f)
-        q_indices = set(q["idx"] for q in q_data.get("questions", []))
+        q_indices = {q["idx"] for q in q_data.get("questions", [])}
         total_questions = len(q_indices)
 
         if predictions_path.exists():

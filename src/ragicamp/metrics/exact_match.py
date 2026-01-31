@@ -11,7 +11,7 @@ Follows best practices from SQuAD and other QA benchmarks:
 import re
 import string
 from collections import Counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ragicamp.metrics.base import Metric
 
@@ -104,8 +104,8 @@ class ExactMatchMetric(Metric):
                 self.use_stemming = False
 
     def compute(
-        self, predictions: List[str], references: List[str], **kwargs: Any
-    ) -> Dict[str, float]:
+        self, predictions: list[str], references: list[str], **kwargs: Any
+    ) -> dict[str, float]:
         """Compute exact match score (1-to-1 comparison).
 
         Args:
@@ -114,6 +114,10 @@ class ExactMatchMetric(Metric):
 
         Returns:
             Dict with exact_match score
+
+        Note:
+            For multiple valid answers per question, the caller should run
+            this metric once per reference and take the max score.
         """
         scores = []
 
@@ -129,7 +133,6 @@ class ExactMatchMetric(Metric):
                 pred_norm = pred
                 ref_norm = ref
 
-            # Simple 1-to-1 comparison
             score = 1.0 if pred_norm == ref_norm else 0.0
             scores.append(score)
 
@@ -179,8 +182,8 @@ class F1Metric(Metric):
                 self.use_stemming = False
 
     def compute(
-        self, predictions: List[str], references: List[str], **kwargs: Any
-    ) -> Dict[str, float]:
+        self, predictions: list[str], references: list[str], **kwargs: Any
+    ) -> dict[str, float]:
         """Compute F1 score (1-to-1 comparison).
 
         Args:
@@ -189,11 +192,14 @@ class F1Metric(Metric):
 
         Returns:
             Dict with f1 score
+
+        Note:
+            For multiple valid answers per question, the caller should run
+            this metric once per reference and take the max score.
         """
         scores = []
 
         for pred, ref in zip(predictions, references):
-            # Simple 1-to-1 F1 computation
             score = self._compute_f1(pred, ref)
             scores.append(score)
 

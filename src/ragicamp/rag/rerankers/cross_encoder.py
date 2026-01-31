@@ -10,7 +10,7 @@ Use cross-encoders as a second stage after initial retrieval:
 3. Return top-k reranked results
 """
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.rag.rerankers.base import Reranker
@@ -57,8 +57,8 @@ class CrossEncoderReranker(Reranker):
             device: Device to run on ('cuda', 'cpu', or None for auto)
             batch_size: Batch size for scoring
         """
-        from sentence_transformers import CrossEncoder
         import torch
+        from sentence_transformers import CrossEncoder
 
         # Resolve model name
         self.model_id = self.MODELS.get(model_name, model_name)
@@ -77,9 +77,9 @@ class CrossEncoderReranker(Reranker):
     def rerank(
         self,
         query: str,
-        documents: List["Document"],
+        documents: list["Document"],
         top_k: int,
-    ) -> List["Document"]:
+    ) -> list["Document"]:
         """Rerank documents using cross-encoder scores.
 
         Args:
@@ -113,10 +113,10 @@ class CrossEncoderReranker(Reranker):
 
     def batch_rerank(
         self,
-        queries: List[str],
-        documents_list: List[List["Document"]],
+        queries: list[str],
+        documents_list: list[list["Document"]],
         top_k: int,
-    ) -> List[List["Document"]]:
+    ) -> list[list["Document"]]:
         """Rerank documents for multiple queries more efficiently.
 
         Batches all (query, document) pairs together for faster scoring.
@@ -135,7 +135,7 @@ class CrossEncoderReranker(Reranker):
         # Build all pairs at once with indices to track which query each belongs to
         all_pairs = []
         pair_indices = []  # (query_idx, doc_idx_within_query)
-        
+
         for q_idx, (query, docs) in enumerate(zip(queries, documents_list)):
             for d_idx, doc in enumerate(docs):
                 all_pairs.append((query, doc.text))

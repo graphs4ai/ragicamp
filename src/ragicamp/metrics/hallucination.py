@@ -4,7 +4,7 @@ Detects when the model generates content not supported by retrieved documents.
 Complementary to faithfulness - focuses on identifying problematic outputs.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -70,11 +70,11 @@ class HallucinationMetric(Metric):
                     model=self.nli_model_name,
                     device=0 if self._has_cuda() else -1,
                 )
-            except ImportError:
+            except ImportError as e:
                 raise ImportError(
                     "transformers library required for NLI-based hallucination detection. "
                     "Install with: pip install transformers"
-                )
+                ) from e
         return self._nli_pipeline
 
     def _has_cuda(self) -> bool:
@@ -87,7 +87,7 @@ class HallucinationMetric(Metric):
             return False
 
     def compute(
-        self, prediction: str, reference: str, context: Optional[List[str]] = None, **kwargs: Any
+        self, prediction: str, reference: str, context: Optional[list[str]] = None, **kwargs: Any
     ) -> float:
         """Compute hallucination score.
 
@@ -126,7 +126,7 @@ class HallucinationMetric(Metric):
         else:
             raise ValueError(f"Unknown hallucination method: {self.method}")
 
-    def _detect_nli_hallucination(self, prediction: str, context: List[str]) -> float:
+    def _detect_nli_hallucination(self, prediction: str, context: list[str]) -> float:
         """Detect hallucination using NLI.
 
         Strategy:
@@ -171,7 +171,7 @@ class HallucinationMetric(Metric):
 
         return float(hallucination_score)
 
-    def _detect_simple_hallucination(self, prediction: str, context: List[str]) -> float:
+    def _detect_simple_hallucination(self, prediction: str, context: list[str]) -> float:
         """Simple token-based hallucination detection.
 
         Measures what fraction of content words in prediction
@@ -223,7 +223,7 @@ class HallucinationMetric(Metric):
 
         return float(hallucination_ratio)
 
-    def aggregate(self, scores: List[float]) -> Dict[str, Any]:
+    def aggregate(self, scores: list[float]) -> dict[str, Any]:
         """Aggregate hallucination scores across examples.
 
         Args:

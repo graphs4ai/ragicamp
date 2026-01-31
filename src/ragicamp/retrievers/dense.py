@@ -1,6 +1,6 @@
 """Dense retriever using vector similarity."""
 
-from typing import Any, List, Optional, Union
+from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.embedding import EmbeddingIndex
@@ -37,7 +37,7 @@ class DenseRetriever(Retriever):
         self.index = index
         self.embedding_model_name = embedding_model
 
-    def index_documents(self, documents: List[Document]) -> None:
+    def index_documents(self, documents: list[Document]) -> None:
         """Build index from documents.
 
         Note: Prefer building the index separately and passing it to __init__.
@@ -50,7 +50,7 @@ class DenseRetriever(Retriever):
             )
         self.index.build(documents)
 
-    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> List[Document]:
+    def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve documents using dense similarity search."""
         if self.index is None or len(self.index) == 0:
             return []
@@ -76,8 +76,8 @@ class DenseRetriever(Retriever):
         return docs
 
     def batch_retrieve(
-        self, queries: List[str], top_k: int = 5, **kwargs: Any
-    ) -> List[List[Document]]:
+        self, queries: list[str], top_k: int = 5, **kwargs: Any
+    ) -> list[list[Document]]:
         """Retrieve documents for multiple queries using batched encoding and search.
 
         This is significantly faster than calling retrieve() for each query:
@@ -119,7 +119,7 @@ class DenseRetriever(Retriever):
         return all_docs
 
     @property
-    def documents(self) -> List[Document]:
+    def documents(self) -> list[Document]:
         """Get documents from index (for backward compatibility)."""
         if self.index is None:
             return []

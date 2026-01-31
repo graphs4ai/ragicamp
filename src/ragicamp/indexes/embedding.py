@@ -2,7 +2,7 @@
 
 import pickle
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 
 import faiss
 import numpy as np
@@ -54,7 +54,7 @@ class EmbeddingIndex(Index):
         self._embedding_dim: Optional[int] = None
 
         # Storage
-        self.documents: List[Document] = []
+        self.documents: list[Document] = []
         self.index: Optional[faiss.Index] = None
 
     @property
@@ -82,7 +82,7 @@ class EmbeddingIndex(Index):
         else:
             raise ValueError(f"Unknown index type: {self.index_type}")
 
-    def build(self, documents: List[Document]) -> None:
+    def build(self, documents: list[Document]) -> None:
         """Build index from documents.
 
         Args:
@@ -107,7 +107,7 @@ class EmbeddingIndex(Index):
         self.index.add(embeddings.astype("float32"))
         logger.info("Index built with %d vectors", self.index.ntotal)
 
-    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> List[Tuple[int, float]]:
+    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[tuple[int, float]]:
         """Search the index.
 
         Args:
@@ -143,7 +143,7 @@ class EmbeddingIndex(Index):
         faiss.normalize_L2(embedding)
         return embedding[0]
 
-    def batch_encode_queries(self, queries: List[str]) -> np.ndarray:
+    def batch_encode_queries(self, queries: list[str]) -> np.ndarray:
         """Encode multiple queries at once (much faster than sequential).
 
         Args:
@@ -158,7 +158,7 @@ class EmbeddingIndex(Index):
 
     def batch_search(
         self, query_embeddings: np.ndarray, top_k: int = 10
-    ) -> List[List[Tuple[int, float]]]:
+    ) -> list[list[tuple[int, float]]]:
         """Search the index with multiple queries at once.
 
         Args:

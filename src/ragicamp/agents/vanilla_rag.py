@@ -9,10 +9,10 @@ No query transformation, no reranking - just retrieve and generate.
 Use this for clean baseline comparisons.
 """
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import RAGResponseMeta, RetrievedDoc, AgentType
+from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
 from ragicamp.factory.agents import AgentFactory
 from ragicamp.models.base import LanguageModel
 from ragicamp.retrievers.base import Retriever
@@ -26,17 +26,17 @@ if TYPE_CHECKING:
 @AgentFactory.register("vanilla_rag")
 class VanillaRAGAgent(RAGAgent):
     """Simplest RAG agent: retrieve → generate.
-    
+
     This agent provides a clean baseline for RAG experiments:
     - No query transformation (uses raw query)
     - No reranking (uses retriever ordering)
     - Single retrieval step
-    
+
     Use this when you want:
     - Clean baseline without any enhancements
     - Fast inference (single retrieval, no extra LLM calls)
     - Minimal complexity for debugging
-    
+
     Config:
         agent_type: vanilla_rag
         top_k: 5
@@ -65,7 +65,7 @@ class VanillaRAGAgent(RAGAgent):
         self.model = model
         self.retriever = retriever
         self.top_k = top_k
-        
+
         # Use provided prompt_builder or create default
         if prompt_builder is not None:
             self.prompt_builder = prompt_builder
@@ -125,7 +125,7 @@ class VanillaRAGAgent(RAGAgent):
             ),
         )
 
-    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
         """Generate answers for multiple queries using batch processing.
 
         Optimized for speed:
@@ -149,7 +149,7 @@ class VanillaRAGAgent(RAGAgent):
         prompts = []
         contexts = []
         context_texts = []
-        
+
         for query, docs in zip(queries, all_docs):
             context_text = ContextFormatter.format_numbered(docs)
             context_texts.append(context_text)
@@ -168,7 +168,7 @@ class VanillaRAGAgent(RAGAgent):
 
         # Step 4: Build responses
         responses = []
-        for query, prompt, answer, context, docs in zip(
+        for _query, prompt, answer, context, docs in zip(
             queries, prompts, answers, contexts, all_docs
         ):
             retrieved_structured = [
@@ -179,7 +179,7 @@ class VanillaRAGAgent(RAGAgent):
                 )
                 for i, doc in enumerate(docs)
             ]
-            
+
             response = RAGResponse(
                 answer=answer,
                 context=context,

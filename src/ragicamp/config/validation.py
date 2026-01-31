@@ -3,11 +3,12 @@
 This module provides validation for study configuration files.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 
 class ConfigError(ValueError):
     """Configuration validation error."""
+
     pass
 
 
@@ -35,8 +36,7 @@ def validate_model_spec(spec: str) -> None:
     provider = spec.split(":")[0]
     if provider not in VALID_PROVIDERS:
         raise ConfigError(
-            f"Unknown model provider: '{provider}'. "
-            f"Valid providers: {VALID_PROVIDERS}"
+            f"Unknown model provider: '{provider}'. Valid providers: {VALID_PROVIDERS}"
         )
 
 
@@ -50,13 +50,10 @@ def validate_dataset(name: str) -> None:
         ConfigError: If dataset name is invalid
     """
     if name not in VALID_DATASETS:
-        raise ConfigError(
-            f"Unknown dataset: '{name}'. "
-            f"Valid datasets: {VALID_DATASETS}"
-        )
+        raise ConfigError(f"Unknown dataset: '{name}'. Valid datasets: {VALID_DATASETS}")
 
 
-def validate_config(config: Dict[str, Any]) -> List[str]:
+def validate_config(config: dict[str, Any]) -> list[str]:
     """Validate study configuration.
 
     Args:
@@ -90,14 +87,12 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
             validate_model_spec(model)
         for q in direct.get("quantization", []):
             if q not in VALID_QUANTIZATIONS:
-                raise ConfigError(
-                    f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}"
-                )
+                raise ConfigError(f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}")
 
     # Validate RAG experiments
     rag = config.get("rag", {})
     singleton_experiments = config.get("experiments", [])
-    
+
     if rag.get("enabled"):
         if not rag.get("models"):
             # Only warn if no singleton experiments defined either
@@ -112,8 +107,6 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
             validate_model_spec(model)
         for q in rag.get("quantization", []):
             if q not in VALID_QUANTIZATIONS:
-                raise ConfigError(
-                    f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}"
-                )
+                raise ConfigError(f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}")
 
     return warnings

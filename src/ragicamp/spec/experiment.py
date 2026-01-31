@@ -6,7 +6,7 @@ reproduce an experiment.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Literal, Optional
 
 
 @dataclass(frozen=True)
@@ -51,11 +51,11 @@ class ExperimentSpec:
     reranker_model: Optional[str] = None
     batch_size: int = 8
     min_batch_size: int = 1
-    metrics: List[str] = field(default_factory=list)
+    metrics: list[str] = field(default_factory=list)
     # Singleton experiment fields
     agent_type: Optional[str] = None
     hypothesis: Optional[str] = None
-    agent_params: Tuple[Tuple[str, Any], ...] = field(default_factory=tuple)
+    agent_params: tuple[tuple[str, Any], ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         """Validate spec after initialization."""
@@ -96,7 +96,7 @@ class ExperimentSpec:
         # Convert agent_params dict to tuple of tuples
         agent_params_dict = data.get("agent_params", {})
         agent_params = tuple(agent_params_dict.items()) if agent_params_dict else ()
-        
+
         return cls(
             name=data["name"],
             exp_type=data["exp_type"],
@@ -117,7 +117,7 @@ class ExperimentSpec:
             hypothesis=data.get("hypothesis"),
             agent_params=agent_params,
         )
-    
-    def get_agent_params_dict(self) -> Dict[str, Any]:
+
+    def get_agent_params_dict(self) -> dict[str, Any]:
         """Get agent_params as a dictionary for convenience."""
         return dict(self.agent_params)

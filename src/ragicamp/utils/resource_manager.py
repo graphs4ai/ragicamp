@@ -12,7 +12,7 @@ Example:
 
 import gc
 from contextlib import contextmanager
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import torch
 
@@ -100,7 +100,7 @@ def managed_model(model_factory: Callable[[], Any], name: str = "model"):
             try:
                 if hasattr(model, "_use_quantization") and not model._use_quantization:
                     model.model = model.model.to("cpu")
-            except:
+            except Exception:
                 pass
 
             # Delete the model

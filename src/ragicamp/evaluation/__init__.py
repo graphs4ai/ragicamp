@@ -1,8 +1,7 @@
 """Evaluation utilities for computing metrics on predictions."""
 
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
@@ -12,9 +11,9 @@ logger = get_logger(__name__)
 
 def compute_metrics_from_file(
     predictions_path: str,
-    metrics: List[Metric],
+    metrics: list[Metric],
     output_path: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute metrics from saved predictions file.
 
     This is useful for post-hoc evaluation when you have predictions
@@ -45,8 +44,8 @@ def compute_metrics_from_file(
     references = [p.get("expected", "") for p in preds]
 
     # Compute metrics
-    aggregate_results: Dict[str, float] = {}
-    per_item_results: Dict[str, List[float]] = {}
+    aggregate_results: dict[str, float] = {}
+    per_item_results: dict[str, list[float]] = {}
 
     for metric in metrics:
         try:
@@ -101,9 +100,9 @@ class Evaluator:
     @staticmethod
     def compute_metrics_from_file(
         predictions_path: str,
-        metrics: List[Metric],
+        metrics: list[Metric],
         output_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compute metrics from saved predictions file."""
         return compute_metrics_from_file(predictions_path, metrics, output_path)
 

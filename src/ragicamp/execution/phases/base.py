@@ -7,7 +7,7 @@ execution to be encapsulated in a separate class.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from ragicamp.agents.base import RAGAgent
@@ -28,14 +28,14 @@ class ExecutionContext:
     output_path: Path
     agent: Optional["RAGAgent"] = None
     dataset: Optional["QADataset"] = None
-    metrics: Optional[List["Metric"]] = None
+    metrics: Optional[list["Metric"]] = None
     callbacks: Optional[Any] = None  # ExperimentCallbacks
 
     # Runtime configuration
     batch_size: int = 8
     min_batch_size: int = 1
     checkpoint_every: int = 50
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 class PhaseHandler(ABC):

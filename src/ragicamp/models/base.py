@@ -1,7 +1,7 @@
 """Base class for language models."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 
 class LanguageModel(ABC):
@@ -24,13 +24,13 @@ class LanguageModel(ABC):
     @abstractmethod
     def generate(
         self,
-        prompt: Union[str, List[str]],
+        prompt: Union[str, list[str]],
         max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[List[str]] = None,
+        stop: Optional[list[str]] = None,
         **kwargs: Any,
-    ) -> Union[str, List[str]]:
+    ) -> Union[str, list[str]]:
         """Generate text from a prompt.
 
         Args:
@@ -47,7 +47,7 @@ class LanguageModel(ABC):
         pass
 
     @abstractmethod
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for a list of texts.
 
         Args:
@@ -70,7 +70,7 @@ class LanguageModel(ABC):
         # Default simple approximation - override in subclasses
         return len(text.split())
 
-    def batch_generate(self, prompts: List[str], batch_size: int = 8, **kwargs: Any) -> List[str]:
+    def batch_generate(self, prompts: list[str], batch_size: int = 8, **kwargs: Any) -> list[str]:
         """Generate text for multiple prompts in batches.
 
         Args:

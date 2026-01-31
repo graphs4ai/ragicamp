@@ -1,9 +1,9 @@
 """Direct LLM agent - Baseline 1: No retrieval, just ask the LLM."""
 
-from typing import Any, List, Optional, Union
+from typing import Any, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import RAGResponseMeta, AgentType
+from ragicamp.core.schemas import AgentType, RAGResponseMeta
 from ragicamp.models.base import LanguageModel
 from ragicamp.utils.prompts import PromptBuilder
 
@@ -45,6 +45,7 @@ class DirectLLMAgent(RAGAgent):
         else:
             # Legacy: create basic builder using style field
             from ragicamp.utils.prompts import PromptConfig
+
             self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
 
         # Legacy template support (for backwards compat with study.py)
@@ -81,7 +82,7 @@ class DirectLLMAgent(RAGAgent):
             metadata=RAGResponseMeta(agent_type=AgentType.DIRECT_LLM),
         )
 
-    def batch_answer(self, queries: List[str], **kwargs: Any) -> List[RAGResponse]:
+    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
         """Generate answers for multiple queries using batch processing.
 
         This is much faster than calling answer() in a loop because it

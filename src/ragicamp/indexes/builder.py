@@ -9,7 +9,7 @@ The actual index building logic is in the builders/ subpackage.
 """
 
 import pickle
-from typing import Any, Dict, List
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
@@ -44,7 +44,7 @@ def get_embedding_index_name(
     model_short = embedding_model.split("/")[-1].replace("-", "_").lower()
     # Extract corpus short name (e.g., "20231101.en" -> "en")
     corpus_short = corpus_version.split(".")[-1] if "." in corpus_version else corpus_version
-    
+
     # Only include strategy in name if not default (for backwards compatibility)
     if chunking_strategy == "recursive":
         return f"{corpus_short}_{model_short}_c{chunk_size}_o{chunk_overlap}"
@@ -57,7 +57,7 @@ def get_embedding_index_name(
 
 
 def build_retriever_from_index(
-    retriever_config: Dict[str, Any],
+    retriever_config: dict[str, Any],
     embedding_index_name: str,
 ) -> str:
     """Build a retriever config that uses a shared embedding index.
@@ -99,11 +99,12 @@ def build_retriever_from_index(
     if retriever_type == "hybrid":
         retriever_cfg["alpha"] = retriever_config.get("alpha", 0.5)
         # For hybrid, we need to build the BM25 index
-        print(f"    Building BM25 index for hybrid retriever...")
+        print("    Building BM25 index for hybrid retriever...")
         with open(index_path / "documents.pkl", "rb") as f:
             documents = pickle.load(f)
 
         from ragicamp.retrievers.sparse import SparseRetriever
+
         sparse = SparseRetriever(name=f"{retriever_name}_sparse")
         sparse.index_documents(documents)
 
@@ -122,10 +123,10 @@ def build_retriever_from_index(
 
 
 def ensure_indexes_exist(
-    retriever_configs: List[Dict[str, Any]],
-    corpus_config: Dict[str, Any],
+    retriever_configs: list[dict[str, Any]],
+    corpus_config: dict[str, Any],
     build_if_missing: bool = True,
-) -> List[str]:
+) -> list[str]:
     """Ensure all required indexes exist, building missing ones if configured.
 
     Uses shared embedding indexes to avoid redundant computation.
@@ -142,7 +143,7 @@ def ensure_indexes_exist(
     corpus_version = corpus_config.get("version", "20231101.simple")
 
     # Step 1: Identify unique embedding indexes needed
-    index_to_retrievers: Dict[str, List[Dict[str, Any]]] = {}
+    index_to_retrievers: dict[str, list[dict[str, Any]]] = {}
 
     for config in retriever_configs:
         retriever_type = config.get("type", "dense")
@@ -162,8 +163,10 @@ def ensure_indexes_exist(
             index_to_retrievers[index_name] = []
         index_to_retrievers[index_name].append(config)
 
-    print(f"\n📊 Index analysis:")
-    print(f"   {len(retriever_configs)} retrievers → {len(index_to_retrievers)} unique embedding indexes")
+    print("\n📊 Index analysis:")
+    print(
+        f"   {len(retriever_configs)} retrievers → {len(index_to_retrievers)} unique embedding indexes"
+    )
 
     # Step 2: Build missing embedding indexes
     ready_indexes = []
