@@ -52,6 +52,11 @@ from ragicamp.models.base import LanguageModel
 from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
 
+# TYPE_CHECKING import to avoid circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ragicamp.spec import ExperimentSpec
+
 logger = get_logger(__name__)
 
 
@@ -174,8 +179,9 @@ class Experiment:
     metrics: List[Metric] = field(default_factory=list)
     output_dir: Path = field(default_factory=lambda: Path("outputs"))
 
-    # Optional references for cleanup
+    # Optional references for cleanup and metadata
     _model: Optional[LanguageModel] = field(default=None, repr=False)
+    _spec: Optional["ExperimentSpec"] = field(default=None, repr=False)
 
     # Runtime state (not serialized)
     _state: Optional[ExperimentState] = field(default=None, repr=False)
@@ -537,6 +543,61 @@ class Experiment:
     @classmethod
     def from_spec(
         cls,
+        spec: "ExperimentSpec",
+        output_dir: Union[str, Path],
+        limit: Optional[int] = None,
+        judge_model: Any = None,
+    ) -> "Experiment":
+        """Create a fully-configured Experiment from an ExperimentSpec.
+        
+        This is the preferred way to create experiments as it handles all
+        component creation automatically based on the spec.
+
+        Args:
+            spec: Experiment specification with all configuration
+            output_dir: Base output directory (experiment creates subdir)
+            limit: Optional limit on dataset examples
+            judge_model: Optional LLM judge model for metrics
+
+        Returns:
+            Fully configured Experiment ready to run
+            
+        Example:
+            >>> from ragicamp.spec import ExperimentSpec
+            >>> spec = ExperimentSpec.from_dict({...})
+            >>> exp = Experiment.from_spec(spec, "outputs/")
+            >>> result = exp.run()
+        """
+        from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ModelFactory
+        from ragicamp.spec import ExperimentSpec
+        
+        # Create model
+        model_config = ModelFactory.parse_spec(spec.model, quantization=spec.quant)
+        model = ModelFactory.create(model_config)
+        
+        # Create dataset
+        dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
+        dataset = DatasetFactory.create(dataset_config)
+        
+        # Create agent (AgentFactory.from_spec handles all the wiring)
+        agent = AgentFactory.from_spec(spec, model)
+        
+        # Create metrics
+        metrics = MetricFactory.create(spec.metrics, judge_model=judge_model)
+        
+        return cls(
+            name=spec.name,
+            agent=agent,
+            dataset=dataset,
+            metrics=metrics,
+            output_dir=Path(output_dir),
+            _model=model,
+            _spec=spec,
+        )
+    
+    @classmethod
+    def from_components(
+        cls,
         name: str,
         model: LanguageModel,
         agent: RAGAgent,
@@ -544,7 +605,10 @@ class Experiment:
         metrics: List[Metric],
         output_dir: Union[str, Path] = "outputs",
     ) -> "Experiment":
-        """Create experiment from components.
+        """Create experiment from pre-built components.
+        
+        Use this when you've already created components manually.
+        For most cases, prefer from_spec().
 
         Args:
             name: Experiment name

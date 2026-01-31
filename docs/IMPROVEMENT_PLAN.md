@@ -11,331 +11,242 @@
 | Capability | Implementation | Config Exposure | Blocking Experiments |
 |------------|----------------|-----------------|---------------------|
 | Grid Search | ✅ Complete | ✅ Working | - |
-| Singleton Experiments | ❌ Missing | ❌ Missing | Phase H (agent comparison) |
-| Agent Types | ⚠️ Only 2 types | ⚠️ Hardcoded | Phase H (advanced agents) |
-| Chunking Strategy | ✅ **Implemented** | ❌ Not wired | Phase C (chunk strategies) |
-| Fetch-K (rerank pool) | ✅ **Implemented** | ❌ Not wired | Phase E, G (reranking) |
+| Singleton Experiments | ✅ Complete | ✅ Working | - |
+| Agent Types | ✅ 5 types (direct, vanilla_rag, pipeline_rag, iterative_rag, self_rag) | ✅ Working | - |
+| Chunking Strategy | ✅ Complete | ✅ Wired | - |
+| Fetch-K (rerank pool) | ✅ Complete | ✅ Wired | - |
 | Query Transform | ✅ Complete | ✅ Working | - |
 | Reranking | ✅ Complete | ✅ Working | - |
-| Hybrid/Hierarchical | ✅ Complete | ✅ Working | Phase D |
+| Hybrid/Hierarchical | ✅ Complete | ✅ Working | - |
+| **AgentFactory.from_spec()** | ✅ Complete | ✅ Working | - |
+| **Experiment.from_spec()** | ✅ Complete | ✅ Working | - |
+| **ExperimentIO utility** | ✅ Complete | ✅ Working | - |
 
-**Key Insight**: Several capabilities are already implemented but not exposed in config. These are quick wins.
+### Completed Tasks
 
----
+- ✅ **Task 1.1**: Wired `chunking_strategy` from retriever config to index builder
+- ✅ **Task 1.2**: Wired `fetch_k` from config to ExperimentSpec and agents
+- ✅ **Task 2.1**: Added singleton experiment parsing (`experiments` list)
+- ✅ **Task 3.1**: Extended AgentType enum with new agent types
+- ✅ **Task 3.2**: Created VanillaRAGAgent with @AgentFactory.register
+- ✅ **Task 3.3**: Added `pipeline_rag` and `direct` aliases to AgentFactory
+- ✅ **Task R.1**: Added `AgentFactory.from_spec()` for spec-based agent creation
+- ✅ **Task R.2**: Added `Experiment.from_spec()` for full component creation from spec
+- ✅ **Task R.3**: Simplified `run_generation()` to use `Experiment.from_spec()`
+- ✅ **Task R.4**: Created `ExperimentIO` utility for centralized file I/O
+- ✅ **Task R.5**: Updated `run_metrics_only()` to use `ExperimentIO`
 
-## Part 1: Existing Patterns to Follow
+### Remaining Tasks
 
-Before implementing anything, understand the patterns already in use.
-
-### 1.1 Factory Pattern with Registry
-
-```python
-# factory/agents.py - existing pattern
-class AgentFactory:
-    _custom_agents: Dict[str, type] = {}
-
-    @classmethod
-    def register(cls, name: str):
-        """Decorator to register custom agents."""
-        def decorator(agent_class: type) -> type:
-            cls._custom_agents[name] = agent_class
-            return agent_class
-        return decorator
-
-    @classmethod
-    def create(cls, config: Dict, model: LanguageModel, retriever: Optional[Retriever] = None):
-        ...
-```
-
-**Use this pattern** for new agents. Don't create a separate registry module.
-
-### 1.2 Pydantic Config Schemas
-
-```python
-# config/schemas.py - ChunkingConfig already exists!
-class ChunkingConfig(BaseModel):
-    strategy: str = Field(default="recursive", ...)
-    chunk_size: int = Field(default=512, ...)
-    chunk_overlap: int = Field(default=50, ...)
-
-class RetrieverConfig(BaseModel):
-    chunking: Optional[ChunkingConfig] = Field(default=None, ...)
-```
-
-**Use existing schemas**. Extend, don't duplicate.
-
-### 1.3 Core Data Schemas
-
-```python
-# core/schemas.py - AgentType enum
-class AgentType(str, Enum):
-    DIRECT_LLM = "direct_llm"
-    FIXED_RAG = "fixed_rag"
-    # Add new agent types here
-```
-
-**Extend the enum** when adding new agent types.
-
-### 1.4 RAGPipeline Already Has Fetch-K
-
-```python
-# rag/pipeline.py - already implemented!
-class RAGPipeline:
-    def __init__(
-        self,
-        retriever: "Retriever",
-        top_k_retrieve: int = 20,  # ← This is fetch_k!
-        top_k_final: int = 5,      # ← This is top_k after reranking
-        ...
-    ):
-```
-
-**Just wire to config**. No new implementation needed.
-
-### 1.5 Chunking Already Implemented
-
-```python
-# corpus/chunking.py - all strategies exist!
-def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
-    strategies = {
-        "fixed": FixedSizeChunker,
-        "sentence": SentenceChunker,
-        "paragraph": ParagraphChunker,
-        "recursive": RecursiveChunker,
-    }
-    return strategies[config.strategy](config)
-```
-
-**Just wire to index builder**. The chunking code is complete.
+- ✅ **Task 3.4**: IterativeRAGAgent (multi-turn refinement) - COMPLETED
+- ✅ **Task 3.5**: SelfRAGAgent (retrieval decision) - COMPLETED
+- ⏳ **Task 4.1**: Cache predictions across execution phases
+- ⏳ **Task 4.2**: Parallelize CPU-only metrics
 
 ---
 
-## Part 2: Implementation Tasks
+## Part 1: Architecture Health Assessment
 
-### Phase 1: Configuration Wiring (Quick Wins)
+### 1.1 File Size Distribution
 
-These tasks expose existing functionality in config. Minimal new code.
+| Lines | Files | Assessment |
+|-------|-------|------------|
+| 0-200 | Most files | ✅ Good |
+| 200-400 | ~15 files | ✅ Acceptable |
+| 400-500 | 4 files | ⚠️ Monitor |
+| 500+ | 3 files | ⚠️ Review needed |
 
-#### Task 1.1: Wire chunking_strategy to index builder ⭐ QUICK WIN
+**Largest files:**
+- `experiment.py` (614 lines) - Experiment facade class
+- `analysis/visualization.py` (565 lines) - Plotting utilities
+- `execution/runner.py` (500 lines) - Experiment execution
+- `cli/main.py` (495 lines) - CLI entry points
 
-**Current state**: 
-- `ChunkingConfig` exists in `config/schemas.py`
-- `get_chunker()` factory exists in `corpus/chunking.py`
-- Index builder uses hardcoded `RecursiveChunker`
+### 1.2 Identified Concerns
 
-**Goal**: Parse `chunking_strategy` from retriever config and pass to index builder.
+#### Concern 1: Three Entry Points for Running Experiments ✅ RESOLVED
 
-**Files to modify**:
-- `indexes/builders/embedding_builder.py` - accept `ChunkConfig`
-- `indexes/builder.py` - parse chunking from retriever config
-- `cli/study.py` - pass chunking config through
+~~There are 3 different ways to run experiments:~~
 
-**Config format** (already supported by `RetrieverConfig`):
-```yaml
-retrievers:
-  - type: dense
-    name: dense_paragraph
-    embedding_model: BAAI/bge-large-en-v1.5
-    chunk_size: 1024
-    chunking_strategy: paragraph  # NEW - now wired!
+| Entry Point | File | Purpose | Status |
+|-------------|------|---------|--------|
+| `run_study()` | `cli/study.py` | CLI orchestration, loads config, builds specs | Orchestration only |
+| `run_spec()` | `execution/runner.py` | Dispatch to generation or metrics-only | Thin wrapper |
+| `Experiment.from_spec().run()` | `experiment.py` | **Single source of truth** | ✅ Primary API |
+
+**Resolution**: `Experiment.from_spec()` now creates all components. `run_generation()` is now a thin wrapper:
+```python
+exp = Experiment.from_spec(spec, output_dir, limit, judge_model)
+result = exp.run(batch_size=spec.batch_size, ...)
 ```
 
-**Acceptance criteria**:
-- [ ] `chunking_strategy` parsed from retriever config
-- [ ] `ChunkConfig` created and passed to `get_chunker()`
-- [ ] Index builder uses configured strategy instead of hardcoded recursive
-- [ ] Backwards compatible (default = recursive)
+**Current flow** (clean):
+```
+cli/study.py:run_study()
+  → spec/builder.py:build_specs()
+  → execution/runner.py:run_spec()  # Dispatch only
+    → run_generation() uses Experiment.from_spec()
+    → OR run_metrics_only() for metrics-only path
+```
+
+#### Concern 2: `execution/runner.py` Does Too Much ✅ PARTIALLY RESOLVED
+
+After refactoring, this file now contains:
+- `run_spec()` - 80 lines, **dispatch only** (no component creation)
+- `run_spec_subprocess()` - 120 lines, subprocess orchestration
+- `run_generation()` - **40 lines** (down from 100+), uses `Experiment.from_spec()`
+- `run_metrics_only()` - 80 lines, uses `ExperimentIO`
+
+**Status**: Much improved. `run_generation()` reduced by 60%. Component creation logic moved to factories.
+
+#### Concern 3: `spec/builder.py` Growing
+
+After our changes, this file has:
+- `build_specs()` - 50 lines
+- `_build_direct_specs()` - 40 lines
+- `_build_rag_specs()` - 90 lines
+- `_build_singleton_specs()` - 100 lines
+
+**Total**: 329 lines. Not critical, but if more builders are added, consider a `builders/` subpackage.
+
+### 1.3 What's Good
+
+1. **Clean layer separation**: `agents/`, `retrievers/`, `models/`, `metrics/` are well-isolated
+2. **Factory pattern consistency**: All factories follow `create()` + `@register` pattern
+3. **Frozen specs**: `ExperimentSpec` is immutable - prevents mutation bugs
+4. **Focused agents**: `VanillaRAGAgent` (180 lines), `DirectLLMAgent` (~80 lines)
+5. **No God objects**: Nothing is doing "everything"
+6. **Proper abstraction**: `RAGPipeline` composes retriever + transformer + reranker
 
 ---
 
-#### Task 1.2: Wire fetch_k to ExperimentSpec and agents ⭐ QUICK WIN
+## Part 2: Technical Debt & Refactoring Tasks
+
+### Completed Refactoring (2026-01-31)
+
+These refactoring tasks have been completed to simplify adding new agent types:
+
+#### ✅ Task R.1: Added `AgentFactory.from_spec()`
+
+**Goal**: Enable spec-based agent creation with automatic component wiring.
+
+**What was done**:
+- Added `AgentFactory.from_spec(spec, model, retriever)` method
+- Automatically creates query transformers, rerankers, and prompt builders from spec
+- Handles agent-specific params via `spec.agent_params`
+- Extracted `_create_instance()` for code reuse
+
+**Files modified**:
+- `factory/agents.py` - added `from_spec()` and refactored internals
+
+**Impact**: Adding new agents now only requires `@AgentFactory.register("name")` decorator.
+
+---
+
+#### ✅ Task R.2: Enhanced `Experiment.from_spec()`
+
+**Goal**: Create fully-configured experiments from ExperimentSpec.
+
+**What was done**:
+- Added `Experiment.from_spec(spec, output_dir, limit, judge_model)` 
+- Creates model, dataset, agent, and metrics automatically
+- Uses `AgentFactory.from_spec()` for agent creation
+- Stores spec reference for metadata
+- Added `Experiment.from_components()` for manual component creation
+
+**Files modified**:
+- `experiment.py` - enhanced `from_spec()`, added `_spec` field
+
+**Impact**: Single line to create a complete experiment from config.
+
+---
+
+#### ✅ Task R.3: Simplified `run_generation()`
+
+**Goal**: Remove duplicated component creation logic.
+
+**What was done**:
+- Reduced from 100+ lines to ~40 lines
+- Now uses `Experiment.from_spec()` for all component creation
+- Uses `ExperimentIO` for metadata saving
+
+**Files modified**:
+- `execution/runner.py` - simplified `run_generation()`
+
+**Impact**: No more `if spec.exp_type == "direct" ... else ...` branches in runner.
+
+---
+
+#### ✅ Task R.4: Created `ExperimentIO` Utility
+
+**Goal**: Centralize file I/O with consistent atomic writes.
+
+**What was done**:
+- Created `utils/experiment_io.py` with `ExperimentIO` class
+- Methods: `save_predictions()`, `load_predictions()`, `save_result()`, etc.
+- All writes use atomic pattern (write to temp, then rename)
+- Standalone functions for backward compatibility
+
+**Files created**:
+- NEW `utils/experiment_io.py`
+
+**Files modified**:
+- `utils/__init__.py` - export `ExperimentIO`
+- `execution/runner.py` - use `ExperimentIO`
+- `execution/phases/generation.py` - use `ExperimentIO`
+
+**Impact**: Consistent I/O patterns, reduced crash corruption risk.
+
+---
+
+### Remaining Refactoring (Optional, Low Priority)
+
+#### Task R.5: Consider `spec/builders/` Subpackage
+
+**Goal**: Split spec builders if more are added.
+
+**When to do this**: If we add more than 4 builder functions.
+
+**Proposed structure**:
+```
+spec/
+  __init__.py
+  experiment.py
+  naming.py
+  builders/
+    __init__.py
+    direct.py      # _build_direct_specs()
+    rag.py         # _build_rag_specs()
+    singleton.py   # _build_singleton_specs()
+```
+
+**Effort**: Low
+**Impact**: Easier navigation, but only if file grows further
+
+---
+
+#### Task R.6: Remove Re-exports from `cli/study.py`
+
+**Goal**: Clean up backward-compatibility re-exports.
 
 **Current state**:
-- `RAGPipeline` has `top_k_retrieve` (fetch_k) and `top_k_final` (top_k)
-- `FixedRAGAgent` calculates `top_k_retrieve = top_k * 4` if reranker present
-- Not configurable from YAML
+- `cli/study.py` lines 25-54 re-export from other modules
+- Creates maintenance burden and import confusion
 
-**Goal**: Allow explicit `fetch_k` in config.
+**Proposed change**:
+- Remove re-exports, fix callers to import from correct modules
+- Or add deprecation warnings
 
-**Files to modify**:
-- `spec/experiment.py` - add `fetch_k: Optional[int]` field
-- `spec/builder.py` - parse `fetch_k` from config
-- `cli/study.py` - pass `fetch_k` to agent creation
-- `agents/fixed_rag.py` - use explicit `top_k_retrieve` when provided
-
-**Config format**:
-```yaml
-# Grid search
-rag:
-  top_k_values: [3, 5]
-  fetch_k_multiplier: 4  # Optional: fetch_k = top_k * multiplier
-
-# Singleton (future)
-experiments:
-  - name: rerank_test
-    top_k: 3
-    fetch_k: 20  # Explicit: retrieve 20, rerank to 3
-```
-
-**Acceptance criteria**:
-- [ ] `fetch_k` field in `ExperimentSpec`
-- [ ] Grid search can specify `fetch_k_multiplier` or explicit `fetch_k_values`
-- [ ] `FixedRAGAgent` uses explicit `top_k_retrieve` when provided
-- [ ] Backwards compatible (default = `top_k * 4` when reranker present)
+**Effort**: Low
+**Impact**: Cleaner imports, reduced maintenance
 
 ---
 
-### Phase 2: Singleton Experiments
+## Part 3: Remaining Feature Tasks
 
-Enables hypothesis-driven research instead of just grid search.
+### Task 3.4: IterativeRAGAgent (Multi-turn Refinement)
 
-#### Task 2.1: Add singleton experiment parsing
-
-**Current state**:
-- `build_specs()` only handles `direct` and `rag` grid search blocks
-- No way to define individual experiments
-
-**Goal**: Support `experiments` list for individual experiment definitions.
-
-**Files to modify**:
-- `spec/experiment.py` - add optional fields: `agent_type`, `hypothesis`, `agent_params`
-- `spec/builder.py` - add `_build_singleton_specs()` function
-
-**Config format**:
-```yaml
-# Grid search (existing, still works)
-rag:
-  enabled: true
-  models: [...]
-  retrievers: [...]
-
-# Singleton experiments (NEW)
-experiments:
-  - name: baseline_vanilla
-    agent_type: vanilla_rag  # or fixed_rag, iterative_rag, etc.
-    model: hf:meta-llama/Llama-3.2-3B-Instruct
-    retriever: dense_bge_c512
-    dataset: nq
-    top_k: 5
-    prompt: concise
-    hypothesis: "Simple RAG baseline without enhancements"
-```
-
-**Changes to ExperimentSpec**:
-```python
-@dataclass(frozen=True)
-class ExperimentSpec:
-    # Existing fields...
-    
-    # NEW fields
-    agent_type: Optional[str] = None      # explicit agent type
-    fetch_k: Optional[int] = None         # from Task 1.2
-    hypothesis: Optional[str] = None      # documentation
-    agent_params: Dict[str, Any] = field(default_factory=dict)  # agent-specific config
-```
-
-**Acceptance criteria**:
-- [ ] `experiments` list parsed if present
-- [ ] Each experiment creates one `ExperimentSpec`
-- [ ] Can coexist with grid search blocks
-- [ ] `hypothesis` field is optional (for documentation)
-
----
-
-### Phase 3: Agent Hierarchy
-
-Build on existing factory pattern. Start simple, add complexity incrementally.
-
-#### Task 3.1: Extend AgentType enum
-
-**Files**: `core/schemas.py`
-
-```python
-class AgentType(str, Enum):
-    DIRECT_LLM = "direct_llm"
-    FIXED_RAG = "fixed_rag"
-    # NEW
-    VANILLA_RAG = "vanilla_rag"
-    PIPELINE_RAG = "pipeline_rag"  # alias for fixed_rag
-    ITERATIVE_RAG = "iterative_rag"
-    SELF_RAG = "self_rag"
-```
-
----
-
-#### Task 3.2: Create VanillaRAGAgent (minimal RAG baseline)
-
-**Purpose**: Simplest possible RAG - retrieve and generate. No query transform, no reranking.
-
-**Why it matters**: Clean baseline for ablation studies. Current `FixedRAGAgent` has optional pipeline complexity.
-
-**Files**: NEW `agents/vanilla_rag.py`
-
-**Implementation**:
-```python
-from ragicamp.factory.agents import AgentFactory
-
-@AgentFactory.register("vanilla_rag")  # Use existing decorator!
-class VanillaRAGAgent(RAGAgent):
-    """Simplest RAG: retrieve → generate."""
-    
-    def __init__(self, name, model, retriever, top_k=5, prompt_builder=None, **kwargs):
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.retriever = retriever
-        self.top_k = top_k
-        self.prompt_builder = prompt_builder or PromptBuilder()
-    
-    def answer(self, query: str, **kwargs) -> RAGResponse:
-        docs = self.retriever.retrieve(query, top_k=self.top_k)
-        context = ContextFormatter.format_numbered(docs)
-        prompt = self.prompt_builder.build_rag(query, context)
-        answer = self.model.generate(prompt, **kwargs)
-        return RAGResponse(answer=answer, context=RAGContext(query=query, retrieved_docs=docs), prompt=prompt)
-    
-    def batch_answer(self, queries: List[str], **kwargs) -> List[RAGResponse]:
-        # Use batch retrieval and batch generation
-        all_docs = self.retriever.batch_retrieve(queries, top_k=self.top_k)
-        prompts = [self.prompt_builder.build_rag(q, ContextFormatter.format_numbered(d)) 
-                   for q, d in zip(queries, all_docs)]
-        answers = self.model.generate(prompts, **kwargs)
-        return [RAGResponse(...) for ...]
-```
-
-**Acceptance criteria**:
-- [ ] Uses `@AgentFactory.register("vanilla_rag")` decorator
-- [ ] No pipeline, no query transform, no reranking
-- [ ] Supports batch processing
-- [ ] Works in singleton experiments with `agent_type: vanilla_rag`
-
----
-
-#### Task 3.3: Add pipeline_rag alias for fixed_rag
-
-**Purpose**: Clearer naming. "Fixed" is misleading since it supports dynamic pipeline features.
-
-**Files**: `factory/agents.py`
-
-```python
-@classmethod
-def create(cls, config, model, retriever=None):
-    agent_type = config["type"]
-    
-    # Resolve aliases
-    ALIASES = {"pipeline_rag": "fixed_rag"}
-    agent_type = ALIASES.get(agent_type, agent_type)
-    
-    # ... rest of existing logic
-```
-
-**Acceptance criteria**:
-- [ ] `agent_type: pipeline_rag` works in config
-- [ ] `agent_type: fixed_rag` still works (backwards compat)
-- [ ] Both create the same `FixedRAGAgent` class
-
----
-
-#### Task 3.4: IterativeRAGAgent (multi-turn refinement)
+**Status**: ✅ COMPLETED (2026-01-31)
 
 **Purpose**: Refine query based on initial retrieval results.
 
@@ -343,11 +254,11 @@ def create(cls, config, model, retriever=None):
 1. Retrieve with original query
 2. LLM evaluates: "Is context sufficient to answer?"
 3. If not sufficient: LLM generates refined query → retrieve again
-4. Merge documents (deduplicate by ID)
+4. Merge documents (deduplicate by content hash)
 5. Repeat until max_iterations or sufficient
 6. Generate final answer with accumulated context
 
-**Files**: NEW `agents/iterative_rag.py`
+**Files**: `agents/iterative_rag.py`
 
 **Config format**:
 ```yaml
@@ -356,20 +267,22 @@ experiments:
     agent_type: iterative_rag
     retriever: dense_bge
     top_k: 5
-    agent_params:
-      max_iterations: 2
-      stop_on_sufficient: true
+    max_iterations: 2        # Via agent_params
+    stop_on_sufficient: true
 ```
 
 **Acceptance criteria**:
-- [ ] Uses `@AgentFactory.register("iterative_rag")` decorator
-- [ ] Configurable `max_iterations` (default: 2)
-- [ ] Tracks iterations in response metadata
-- [ ] Works in singleton experiments
+- [x] Uses `@AgentFactory.register("iterative_rag")` decorator
+- [x] Configurable `max_iterations` (default: 2)
+- [x] Tracks iterations in response metadata (`context.intermediate_steps`)
+- [x] Works in singleton experiments via `AgentFactory.from_spec()`
+- [x] Unit tests passing
 
 ---
 
-#### Task 3.5: SelfRAGAgent (retrieval decision)
+### Task 3.5: SelfRAGAgent (Retrieval Decision)
+
+**Status**: ✅ COMPLETED (2026-01-31)
 
 **Purpose**: Model decides whether to use retrieval based on query.
 
@@ -378,8 +291,9 @@ experiments:
 2. If confident (above threshold): generate directly (no retrieval)
 3. If unsure: use RAG path
 4. Optionally verify answer is supported by context
+5. If not supported and fallback enabled: use direct answer
 
-**Files**: NEW `agents/self_rag.py`
+**Files**: `agents/self_rag.py`
 
 **Config format**:
 ```yaml
@@ -388,62 +302,35 @@ experiments:
     agent_type: self_rag
     retriever: dense_bge
     top_k: 5
-    agent_params:
-      retrieval_threshold: 0.5
-      verify_answer: true
-      fallback_to_direct: true
+    retrieval_threshold: 0.5   # Via agent_params
+    verify_answer: true
+    fallback_to_direct: true
 ```
 
 **Acceptance criteria**:
-- [ ] Uses `@AgentFactory.register("self_rag")` decorator
-- [ ] Tracks retrieval decision in response metadata
-- [ ] Configurable threshold and verification
-- [ ] Works in singleton experiments
+- [x] Uses `@AgentFactory.register("self_rag")` decorator
+- [x] Tracks retrieval decision in response metadata (`context.metadata.used_retrieval`)
+- [x] Configurable threshold and verification
+- [x] Works in singleton experiments via `AgentFactory.from_spec()`
+- [x] Unit tests passing
 
 ---
 
-### Phase 4: Optimizations (Low Priority)
+### Task 4.1: Cache Predictions Across Phases
 
-#### Task 4.1: Cache predictions across execution phases
+**Status**: ⏳ Pending (Low Priority)
 
 **Current**: Predictions written to JSON, then re-read by metrics phase.
 **Goal**: Keep predictions in `ExecutionContext` to avoid redundant I/O.
 
-#### Task 4.2: Parallelize CPU-only metrics
+---
+
+### Task 4.2: Parallelize CPU-only Metrics
+
+**Status**: ⏳ Pending (Low Priority)
 
 **Current**: Metrics run sequentially.
 **Goal**: Run CPU-only metrics (exact_match, f1) in ThreadPoolExecutor while GPU metrics run.
-
----
-
-## Part 3: Implementation Order
-
-```
-Phase 1: Configuration Wiring (Quick Wins) ← START HERE
-  1.1 Wire chunking_strategy ──┐
-  1.2 Wire fetch_k ────────────┴──→ Unlocks: Phase C, E, G experiments
-
-Phase 2: Singleton Experiments
-  2.1 Add experiments list parsing ──→ Unlocks: hypothesis-driven research
-
-Phase 3: Agent Hierarchy (depends on Phase 2)
-  3.1 Extend AgentType enum ──┐
-  3.2 VanillaRAGAgent ────────┤
-  3.3 pipeline_rag alias ─────┴──→ 3.4 IterativeRAGAgent ──→ 3.5 SelfRAGAgent
-                                   └──→ Unlocks: Phase H experiments
-
-Phase 4: Optimizations (independent, low priority)
-  4.1 Cache predictions
-  4.2 Parallel metrics
-```
-
-**Recommended order**: 1.1 → 1.2 → 2.1 → 3.1 → 3.2 → 3.3 → 3.4 → 3.5
-
-**Rationale**:
-1. **Phase 1 first**: Quick wins that unblock experiments with minimal code
-2. **Phase 2 second**: Singleton experiments enable testing new agents
-3. **Phase 3 third**: Build agents incrementally (vanilla → advanced)
-4. **Phase 4 last**: Performance optimization is lower priority than features
 
 ---
 
@@ -453,58 +340,140 @@ Phase 4: Optimizations (independent, low priority)
 |-----------------|----------------|--------|
 | A: Baselines | None | ✅ Ready |
 | B: Embedding Models | None | ✅ Ready |
-| C: Chunk Size & Strategy | **1.1** | ⏳ Wire chunking_strategy |
+| C: Chunk Size & Strategy | 1.1 | ✅ Ready |
 | D: Retrieval Strategies | None | ✅ Ready |
-| E: Top-K and Reranking | **1.2** | ⏳ Wire fetch_k |
+| E: Top-K and Reranking | 1.2 | ✅ Ready |
 | F: Query Transformation | None | ✅ Ready |
-| G: Reranker Comparison | **1.2** | ⏳ Wire fetch_k |
-| H: Agent Architectures | **2.1, 3.1-3.5** | ⏳ Full agent hierarchy |
+| G: Reranker Comparison | 1.2 | ✅ Ready |
+| H: Agent Architectures | 3.4, 3.5 | ✅ Ready (IterativeRAG, SelfRAG implemented) |
 | I: Prompt Engineering | None | ✅ Ready |
 
 ---
 
-## Part 5: Design Checklist
+## Part 5: Existing Patterns to Follow
 
-Before implementing, verify each task:
+### 5.1 Factory Pattern with Registry
+
+```python
+# factory/agents.py - use this pattern for new agents
+class AgentFactory:
+    _custom_agents: Dict[str, type] = {}
+    _aliases: Dict[str, str] = {"pipeline_rag": "fixed_rag", "direct": "direct_llm"}
+
+    @classmethod
+    def register(cls, name: str):
+        def decorator(agent_class: type) -> type:
+            cls._custom_agents[name] = agent_class
+            return agent_class
+        return decorator
+```
+
+### 5.2 Agent Implementation Pattern (Updated)
+
+After the refactoring, adding a new agent is simple:
+
+```python
+# agents/iterative_rag.py
+from ragicamp.agents.base import RAGAgent, RAGResponse
+from ragicamp.factory import AgentFactory
+
+@AgentFactory.register("iterative_rag")
+class IterativeRAGAgent(RAGAgent):
+    """Multi-turn refinement RAG agent."""
+    
+    def __init__(
+        self,
+        name: str,
+        model,
+        retriever,
+        max_iterations: int = 2,
+        stop_on_sufficient: bool = True,
+        prompt_builder=None,
+        top_k: int = 5,
+        **kwargs,
+    ):
+        super().__init__(name, **kwargs)
+        self.model = model
+        self.retriever = retriever
+        self.max_iterations = max_iterations
+        self.stop_on_sufficient = stop_on_sufficient
+        self.prompt_builder = prompt_builder
+        self.top_k = top_k
+    
+    def answer(self, query: str, **kwargs) -> RAGResponse:
+        # Implementation: retrieve, evaluate, refine, repeat
+        pass
+    
+    def batch_answer(self, queries: List[str], **kwargs) -> List[RAGResponse]:
+        # Optimized batch implementation
+        return [self.answer(q, **kwargs) for q in queries]
+```
+
+**That's it!** No changes needed to:
+- `execution/runner.py` (uses `AgentFactory.from_spec()`)
+- `Experiment` class (uses `AgentFactory.from_spec()`)
+- Any CLI code
+
+Config usage:
+```yaml
+experiments:
+  - name: iterative_test
+    agent_type: iterative_rag
+    retriever: dense_bge
+    top_k: 5
+    max_iterations: 2      # Passed via agent_params
+    stop_on_sufficient: true
+```
+
+### 5.3 AgentType Enum (Current State)
+
+```python
+# core/schemas.py - extend when adding new agents
+class AgentType(str, Enum):
+    DIRECT_LLM = "direct_llm"
+    FIXED_RAG = "fixed_rag"
+    VANILLA_RAG = "vanilla_rag"
+    PIPELINE_RAG = "pipeline_rag"
+    ITERATIVE_RAG = "iterative_rag"  # Ready for implementation
+    SELF_RAG = "self_rag"            # Ready for implementation
+```
+
+---
+
+## Part 6: Design Checklist
+
+Before implementing any task:
 
 ### Compatibility
-
-- [ ] Uses existing factory pattern (`@AgentFactory.register` or `@RetrieverFactory.register`)
-- [ ] Extends existing Pydantic schemas (don't create parallel schemas)
-- [ ] Follows `to_dict()`/`from_dict()` pattern for serialization
-- [ ] Extends `AgentType` enum for new agent types
+- [ ] Uses `@AgentFactory.register` decorator
+- [ ] Extends `AgentType` enum if new agent
+- [ ] Follows `to_dict()`/`from_dict()` pattern
 
 ### Maintainability
-
 - [ ] Single responsibility (each class does one thing)
 - [ ] Dependency injection (pass components, don't create internally)
-- [ ] Configuration validated in spec layer, not in agent
 - [ ] Errors have helpful messages
 
 ### Performance
-
 - [ ] Supports batch operations (`batch_answer`, `batch_retrieve`)
-- [ ] GPU memory cleaned up after use (`ResourceManager.clear_gpu_memory()`)
-- [ ] Avoids redundant I/O (use in-memory caching where appropriate)
+- [ ] GPU memory cleaned up after use
 
 ### Backwards Compatibility
-
 - [ ] Old config formats still work
-- [ ] Aliases for renamed components
 - [ ] Default values match current behavior
 
 ---
 
 ## Appendix: File Reference
 
-| File | Purpose | Patterns |
-|------|---------|----------|
-| `factory/agents.py` | Agent factory with registry | `@register` decorator, `create()` method |
-| `factory/retrievers.py` | Retriever factory | Same pattern as agents |
-| `config/schemas.py` | Pydantic validation schemas | `ChunkingConfig`, `RetrieverConfig`, etc. |
-| `core/schemas.py` | Core data structures | `AgentType` enum, `RAGResponseMeta` |
-| `spec/experiment.py` | Immutable experiment spec | Frozen dataclass with `to_dict()` |
-| `spec/builder.py` | Build specs from YAML | `build_specs()`, `_build_rag_specs()` |
-| `corpus/chunking.py` | Chunking strategies | `get_chunker()` factory |
-| `rag/pipeline.py` | RAG pipeline orchestration | `top_k_retrieve`, `top_k_final` |
-| `indexes/builder.py` | Index building orchestration | `ensure_indexes_exist()` |
+| File | Lines | Purpose | Health |
+|------|-------|---------|--------|
+| `experiment.py` | ~650 | Experiment facade + `from_spec()` | ✅ Well-structured |
+| `execution/runner.py` | ~420 | Spec execution (simplified) | ✅ Improved |
+| `cli/main.py` | 495 | CLI commands | ✅ Fine for CLI |
+| `cli/study.py` | 236 | Study orchestration | ✅ Good |
+| `spec/builder.py` | 329 | Spec building | ✅ Monitor growth |
+| `agents/fixed_rag.py` | 300 | Pipeline RAG agent | ✅ Good |
+| `agents/vanilla_rag.py` | 180 | Simple RAG agent | ✅ Good |
+| `factory/agents.py` | ~200 | Agent factory + `from_spec()` | ✅ Good |
+| `utils/experiment_io.py` | ~230 | Centralized I/O | ✅ NEW |

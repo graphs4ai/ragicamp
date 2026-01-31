@@ -36,7 +36,11 @@ class AgentType(str, Enum):
     """Types of RAG agents."""
     DIRECT_LLM = "direct_llm"
     FIXED_RAG = "fixed_rag"
-    # Future: ADAPTIVE_RAG, MDP_RAG, etc.
+    # New agent types
+    VANILLA_RAG = "vanilla_rag"
+    PIPELINE_RAG = "pipeline_rag"  # Alias for fixed_rag with clearer naming
+    ITERATIVE_RAG = "iterative_rag"
+    SELF_RAG = "self_rag"
 
 
 class PromptStyle(str, Enum):

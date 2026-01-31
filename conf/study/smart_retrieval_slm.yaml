@@ -1,0 +1,347 @@
+# Smart Retrieval with Small Language Models
+# 
+# Run: uv run ragicamp run conf/study/smart_retrieval_slm.yaml --dry-run
+#
+# =============================================================================
+# HYPOTHESIS
+# =============================================================================
+# "High-quality retrieval can compensate for smaller, faster LLMs."
+#
+# We invest computational budget in retrieval (good embeddings, reranking,
+# advanced agents) rather than in large generators. This tests whether
+# RAG quality is bottlenecked by retrieval or generation.
+#
+# =============================================================================
+# DESIGN
+# =============================================================================
+# - Uses SINGLETON experiments (explicit, hypothesis-driven)
+# - Each experiment tests ONE specific configuration
+# - Premium embeddings: BGE-M3, BGE-large, Nomic
+# - Advanced retrieval: Hybrid, hierarchical, reranking
+# - Small generator: Llama 3.2 3B
+#
+# Hardware: Single GPU with 16GB+ VRAM
+# Expected runtime: 4-6 hours
+
+name: smart_retrieval_slm
+description: "Test if premium retrieval compensates for smaller generators"
+
+# Sample size
+num_questions: 200
+
+# Default dataset (used when experiments don't specify)
+datasets:
+  - nq
+
+# =============================================================================
+# Metrics
+# =============================================================================
+metrics:
+  - f1
+  - exact_match
+  - bertscore
+  - llm_judge_qa
+
+llm_judge:
+  model: openai:gpt-4o-mini
+  judgment_type: binary
+
+# =============================================================================
+# DirectLLM Baseline (grid search for comparison)
+# =============================================================================
+direct:
+  enabled: true
+  models:
+    - hf:meta-llama/Llama-3.2-3B-Instruct
+  prompts:
+    - concise
+  quantization:
+    - none
+
+# =============================================================================
+# RAG Configuration
+# =============================================================================
+# We set enabled: true so indexes get built, but don't specify models/top_k
+# so no grid search experiments are generated. Actual experiments come from
+# the 'experiments:' section below.
+
+rag:
+  enabled: true
+  
+  # Empty models list = no grid search experiments generated
+  models: []
+  
+  # --------------------------------------------------------------------------
+  # Corpus: Wikipedia
+  # --------------------------------------------------------------------------
+  corpus:
+    source: wikimedia/wikipedia
+    version: 20231101.en
+    max_docs: 200000
+  
+  # --------------------------------------------------------------------------
+  # Retriever Definitions (for index building)
+  # --------------------------------------------------------------------------
+  retrievers:
+    # Dense retrievers with different embeddings
+    - type: dense
+      name: dense_bge_large_512
+      embedding_model: BAAI/bge-large-en-v1.5
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+    
+    - type: dense
+      name: dense_bge_m3_512
+      embedding_model: BAAI/bge-m3
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+    
+    - type: dense
+      name: dense_nomic_512
+      embedding_model: nomic-ai/nomic-embed-text-v1.5
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+    
+    # Hybrid retrievers (dense + BM25)
+    - type: hybrid
+      name: hybrid_bge_large_05
+      embedding_model: BAAI/bge-large-en-v1.5
+      alpha: 0.5
+      chunk_size: 512
+      chunk_overlap: 50
+    
+    - type: hybrid
+      name: hybrid_bge_large_07
+      embedding_model: BAAI/bge-large-en-v1.5
+      alpha: 0.7
+      chunk_size: 512
+      chunk_overlap: 50
+    
+    # Hierarchical retrievers
+    - type: hierarchical
+      name: hierarchical_bge_2048_256
+      embedding_model: BAAI/bge-large-en-v1.5
+      parent_chunk_size: 2048
+      child_chunk_size: 256
+      parent_overlap: 200
+      child_overlap: 50
+    
+    - type: hierarchical
+      name: hierarchical_bge_4096_512
+      embedding_model: BAAI/bge-large-en-v1.5
+      parent_chunk_size: 4096
+      child_chunk_size: 512
+      parent_overlap: 400
+      child_overlap: 100
+
+# =============================================================================
+# SINGLETON EXPERIMENTS (hypothesis-driven)
+# =============================================================================
+# These are at TOP LEVEL, not under rag:
+# Each experiment is explicit and tests one hypothesis.
+
+experiments:
+  # ========================================================================
+  # GROUP A: Embedding Model Comparison
+  # ========================================================================
+  
+  - name: a1_bge_large_baseline
+    hypothesis: "BGE-large as dense baseline"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    top_k: 5
+    prompt: concise
+  
+  - name: a2_bge_m3_dense
+    hypothesis: "BGE-M3 captures richer semantics"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_m3_512
+    top_k: 5
+    prompt: concise
+  
+  - name: a3_nomic_embed
+    hypothesis: "Nomic-embed is efficient and competitive"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_nomic_512
+    top_k: 5
+    prompt: concise
+
+  # ========================================================================
+  # GROUP B: Hybrid Retrieval (Dense + Sparse)
+  # ========================================================================
+  
+  - name: b1_hybrid_balanced
+    hypothesis: "Hybrid catches keywords dense misses"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_05
+    top_k: 5
+    prompt: concise
+  
+  - name: b2_hybrid_dense_heavy
+    hypothesis: "70% dense, 30% sparse optimal balance"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_07
+    top_k: 5
+    prompt: concise
+
+  # ========================================================================
+  # GROUP C: Hierarchical Retrieval
+  # ========================================================================
+  
+  - name: c1_hierarchical_standard
+    hypothesis: "Search small chunks, return large context"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hierarchical_bge_2048_256
+    top_k: 3
+    prompt: concise
+  
+  - name: c2_hierarchical_wide
+    hypothesis: "Wider parent chunks for more context"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hierarchical_bge_4096_512
+    top_k: 2
+    prompt: concise
+
+  # ========================================================================
+  # GROUP D: Reranking (Two-Stage Retrieval)
+  # ========================================================================
+  
+  - name: d1_rerank_bge_top3
+    hypothesis: "Overfetch 20, rerank to 3 for precision"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    top_k: 3
+    fetch_k: 20
+    reranker: bge
+    prompt: concise
+  
+  - name: d2_rerank_bge_top5
+    hypothesis: "Overfetch 25, rerank to 5 for balance"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    top_k: 5
+    fetch_k: 25
+    reranker: bge
+    prompt: concise
+  
+  - name: d3_hybrid_rerank
+    hypothesis: "Hybrid + rerank = best of both worlds"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_05
+    top_k: 5
+    fetch_k: 20
+    reranker: bge
+    prompt: concise
+
+  # ========================================================================
+  # GROUP E: Query Transformation
+  # ========================================================================
+  
+  - name: e1_hyde
+    hypothesis: "HyDE helps match answer vocabulary"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    query_transform: hyde
+    top_k: 5
+    prompt: concise
+  
+  - name: e2_multiquery
+    hypothesis: "Multiple query variants improve recall"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    query_transform: multiquery
+    top_k: 5
+    prompt: concise
+  
+  - name: e3_hyde_rerank
+    hypothesis: "HyDE + rerank = transform then filter"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_bge_large_512
+    query_transform: hyde
+    top_k: 3
+    fetch_k: 15
+    reranker: bge
+    prompt: concise
+
+  # ========================================================================
+  # GROUP F: Advanced Agents
+  # ========================================================================
+  
+  - name: f1_iterative_1round
+    hypothesis: "One refinement round helps complex queries"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    agent_type: iterative_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    max_iterations: 1
+    stop_on_sufficient: true
+    prompt: concise
+  
+  - name: f2_iterative_2rounds
+    hypothesis: "Two refinement rounds for stubborn queries"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    agent_type: iterative_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    max_iterations: 2
+    stop_on_sufficient: true
+    prompt: concise
+  
+  - name: f3_selfrag_balanced
+    hypothesis: "Adaptive retrieval skips when unnecessary"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    agent_type: self_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    retrieval_threshold: 0.5
+    verify_answer: false
+    prompt: concise
+  
+  - name: f4_selfrag_verified
+    hypothesis: "Verification ensures grounding"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    agent_type: self_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    retrieval_threshold: 0.5
+    verify_answer: true
+    fallback_to_direct: true
+    prompt: concise
+
+  # ========================================================================
+  # GROUP G: Combined Best Practices
+  # ========================================================================
+  
+  - name: g1_premium_stack
+    hypothesis: "Best-in-class: hybrid + rerank + fewshot"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_07
+    top_k: 5
+    fetch_k: 25
+    reranker: bge
+    prompt: fewshot_3
+  
+  - name: g2_iterative_premium
+    hypothesis: "Iterative + hybrid + rerank"
+    model: hf:meta-llama/Llama-3.2-3B-Instruct
+    agent_type: iterative_rag
+    retriever: hybrid_bge_large_07
+    top_k: 5
+    fetch_k: 20
+    reranker: bge
+    max_iterations: 1
+    prompt: fewshot_3
+
+# =============================================================================
+# Output Configuration
+# =============================================================================
+output_dir: outputs/smart_retrieval_slm
+
+# =============================================================================
+# Execution Settings
+# =============================================================================
+batch_size: 32
+min_batch_size: 4

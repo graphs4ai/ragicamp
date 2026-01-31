@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Set, TYPE_CHECKING
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
 from ragicamp.experiment_state import ExperimentPhase, ExperimentState
+from ragicamp.utils.experiment_io import ExperimentIO
 
 if TYPE_CHECKING:
     from ragicamp.spec import ExperimentSpec
@@ -141,8 +142,6 @@ class GenerationHandler(PhaseHandler):
         return state
 
     def _save_predictions(self, data: Dict[str, Any], path: Path) -> None:
-        """Save predictions atomically."""
-        temp_path = path.with_suffix(".tmp")
-        with open(temp_path, "w") as f:
-            json.dump(data, f, indent=2)
-        temp_path.replace(path)
+        """Save predictions atomically using ExperimentIO."""
+        io = ExperimentIO(path.parent)
+        io.save_predictions(data)

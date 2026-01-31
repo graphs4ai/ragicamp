@@ -122,6 +122,78 @@ class TestGetEmbeddingIndexName:
 
         assert "simple_" in name
 
+    def test_default_chunking_strategy_not_in_name(self):
+        """Test that default chunking strategy (recursive) is not in name for backwards compat."""
+        name = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="recursive",
+        )
+
+        # Default strategy should not appear in name
+        assert "recursive" not in name.lower()
+        assert "rec" not in name.lower()
+
+    def test_non_default_chunking_strategy_in_name(self):
+        """Test that non-default chunking strategies are included in name."""
+        name_paragraph = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="paragraph",
+        )
+        name_sentence = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="sentence",
+        )
+        name_fixed = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="fixed",
+        )
+
+        # Non-default strategies should appear in name
+        assert "para" in name_paragraph
+        assert "sent" in name_sentence
+        assert "fix" in name_fixed
+
+    def test_different_chunking_strategy_different_name(self):
+        """Test that different chunking strategies produce different names."""
+        name_recursive = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="recursive",
+        )
+        name_paragraph = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="paragraph",
+        )
+        name_sentence = get_embedding_index_name(
+            embedding_model="BAAI/bge-large-en-v1.5",
+            chunk_size=512,
+            chunk_overlap=50,
+            corpus_version="20231101.en",
+            chunking_strategy="sentence",
+        )
+
+        # All should be different
+        assert name_recursive != name_paragraph
+        assert name_recursive != name_sentence
+        assert name_paragraph != name_sentence
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

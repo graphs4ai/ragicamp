@@ -24,6 +24,7 @@ def get_embedding_index_name(
     chunk_size: int,
     chunk_overlap: int,
     corpus_version: str,
+    chunking_strategy: str = "recursive",
 ) -> str:
     """Compute canonical name for a shared embedding index.
 
@@ -34,6 +35,7 @@ def get_embedding_index_name(
         chunk_size: Chunk size in characters
         chunk_overlap: Chunk overlap in characters
         corpus_version: Corpus version string
+        chunking_strategy: Chunking strategy (recursive, fixed, sentence, paragraph)
 
     Returns:
         Canonical index name
@@ -42,7 +44,16 @@ def get_embedding_index_name(
     model_short = embedding_model.split("/")[-1].replace("-", "_").lower()
     # Extract corpus short name (e.g., "20231101.en" -> "en")
     corpus_short = corpus_version.split(".")[-1] if "." in corpus_version else corpus_version
-    return f"{corpus_short}_{model_short}_c{chunk_size}_o{chunk_overlap}"
+    
+    # Only include strategy in name if not default (for backwards compatibility)
+    if chunking_strategy == "recursive":
+        return f"{corpus_short}_{model_short}_c{chunk_size}_o{chunk_overlap}"
+    else:
+        # Use short strategy name: recursive->rec, paragraph->para, sentence->sent, fixed->fix
+        strategy_short = {"paragraph": "para", "sentence": "sent", "fixed": "fix"}.get(
+            chunking_strategy, chunking_strategy[:3]
+        )
+        return f"{corpus_short}_{model_short}_c{chunk_size}_o{chunk_overlap}_{strategy_short}"
 
 
 def build_retriever_from_index(
@@ -144,6 +155,7 @@ def ensure_indexes_exist(
                 chunk_size=config.get("chunk_size", 512),
                 chunk_overlap=config.get("chunk_overlap", 50),
                 corpus_version=corpus_version,
+                chunking_strategy=config.get("chunking_strategy", "recursive"),
             )
 
         if index_name not in index_to_retrievers:
@@ -181,6 +193,7 @@ def ensure_indexes_exist(
                     chunk_size=first_retriever.get("chunk_size", 512),
                     chunk_overlap=first_retriever.get("chunk_overlap", 50),
                     corpus_config=corpus_config,
+                    chunking_strategy=first_retriever.get("chunking_strategy", "recursive"),
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()

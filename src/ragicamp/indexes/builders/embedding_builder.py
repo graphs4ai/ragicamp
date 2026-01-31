@@ -21,6 +21,7 @@ def build_embedding_index(
     chunk_size: int,
     chunk_overlap: int,
     corpus_config: Dict[str, Any],
+    chunking_strategy: str = "recursive",
     doc_batch_size: int = 5000,
 ) -> str:
     """Build a shared embedding index with batched processing.
@@ -34,6 +35,7 @@ def build_embedding_index(
         chunk_size: Chunk size in characters
         chunk_overlap: Chunk overlap in characters
         corpus_config: Corpus configuration
+        chunking_strategy: Chunking strategy ('recursive', 'fixed', 'sentence', 'paragraph')
         doc_batch_size: Documents to process per batch
 
     Returns:
@@ -51,6 +53,7 @@ def build_embedding_index(
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
+    print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Batch size: {doc_batch_size} docs")
     print(f"{'='*60}")
 
@@ -73,7 +76,7 @@ def build_embedding_index(
 
     # Chunking config
     chunk_config = ChunkConfig(
-        strategy="recursive",
+        strategy=chunking_strategy,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
@@ -167,6 +170,7 @@ def build_embedding_index(
         "index_type": "flat",
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
+        "chunking_strategy": chunking_strategy,
         "corpus_version": corpus_config.get("version"),
         "corpus_max_docs": corpus_config.get("max_docs"),
         "num_documents": total_chunks,

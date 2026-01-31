@@ -70,25 +70,24 @@ def run_metrics_only(
     from ragicamp.experiment_state import ExperimentPhase, detect_state
     from ragicamp.factory import ComponentFactory
     from ragicamp.metrics import compute_metrics_batched
+    from ragicamp.utils.experiment_io import ExperimentIO
 
     print(f"  📊 Metrics-only mode (no model loaded)")
 
-    predictions_path = output_path / "predictions.json"
-    if not predictions_path.exists():
-        print(f"  ❌ No predictions file found at {predictions_path}")
+    io = ExperimentIO(output_path)
+    
+    if not io.predictions_exist():
+        print(f"  ❌ No predictions file found at {io.predictions_path}")
         return "failed"
 
-    # Load predictions
-    with open(predictions_path) as f:
-        data = json.load(f)
-
+    # Load predictions using ExperimentIO
+    data = io.load_predictions()
     preds = data["predictions"]
     predictions = [p["prediction"] for p in preds]
     references = [p["expected"] for p in preds]
     questions = [p["question"] for p in preds]
 
     # Load state to track computed metrics
-    state_path = output_path / "state.json"
     state = detect_state(output_path, metrics)
 
     # Create metric objects
@@ -98,7 +97,7 @@ def run_metrics_only(
     def on_metric_complete(metric_name: str) -> None:
         if metric_name not in state.metrics_computed:
             state.metrics_computed.append(metric_name)
-            state.save(state_path)
+            state.save(io.state_path)
 
     # Use shared metrics computation
     aggregate_results, per_item_metrics, computed, failed = compute_metrics_batched(
@@ -123,9 +122,8 @@ def run_metrics_only(
     existing_metrics.update(aggregate_results)
     data["aggregate_metrics"] = existing_metrics
 
-    # Save updated predictions
-    with open(predictions_path, "w") as f:
-        json.dump(data, f, indent=2)
+    # Save updated predictions using atomic write
+    io.save_predictions(data)
 
     # Check if all metrics are done
     missing = set(metrics) - set(state.metrics_computed)
@@ -135,17 +133,15 @@ def run_metrics_only(
 
     # Mark complete
     state.phase = ExperimentPhase.COMPLETE
-    state.save(state_path)
+    state.save(io.state_path)
 
-    # Save results.json
-    results = {
+    # Save results using ExperimentIO
+    io.save_result_dict({
         "name": exp_name,
         "metrics": existing_metrics,
         "num_predictions": len(preds),
         "timestamp": datetime.now().isoformat(),
-    }
-    with open(output_path / "results.json", "w") as f:
-        json.dump(results, f, indent=2)
+    })
 
     print(f"  ✓ All metrics computed")
     return "ran"
@@ -160,7 +156,8 @@ def run_generation(
 ) -> str:
     """Run full experiment including generation.
 
-    This path loads the model and agent, runs generation, then metrics.
+    This is the simplified path that uses Experiment.from_spec() to create
+    all components automatically from the ExperimentSpec.
 
     Args:
         spec: Experiment specification
@@ -173,66 +170,27 @@ def run_generation(
         Status string
     """
     from ragicamp import Experiment
-    from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
-    from ragicamp.factory import ComponentFactory
-    from ragicamp.utils.prompts import PromptBuilder
-    from ragicamp.utils.resource_manager import ResourceManager
+    from ragicamp.utils.experiment_io import ExperimentIO
 
     exp_out = out / spec.name
-
     start = time.time()
 
-    # Note: GPU memory is cleared by parent before subprocess spawn (line ~302)
+    # Note: GPU memory is cleared by parent before subprocess spawn
     # No need to clear again here - subprocess starts with clean GPU state
 
-    # Create dataset
-    config = ComponentFactory.parse_dataset_spec(spec.dataset, limit=limit)
-    dataset = ComponentFactory.create_dataset(config)
-    print(f"  Dataset: {len(dataset)} examples")
-
-    # Create model
     print(f"  Loading model: {spec.model}")
-    model_config = ComponentFactory.parse_model_spec(spec.model, quantization=spec.quant)
-    model = ComponentFactory.create_model(model_config)
+    
+    # Create experiment from spec - handles all component creation
+    exp = Experiment.from_spec(
+        spec=spec,
+        output_dir=out,
+        limit=limit,
+        judge_model=judge_model,
+    )
+    
+    print(f"  Dataset: {len(exp.dataset)} examples")
 
-    # Get prompt builder
-    prompt_builder = PromptBuilder.from_config(spec.prompt, dataset=spec.dataset)
-
-    if spec.exp_type == "direct":
-        agent = DirectLLMAgent(name=spec.name, model=model, prompt_builder=prompt_builder)
-    else:
-        # Load retriever
-        from ragicamp.factory import load_retriever
-
-        retriever = load_retriever(spec.retriever)
-
-        # Create query transformer if specified
-        query_transformer = None
-        if spec.query_transform:
-            from ragicamp.factory import create_query_transformer
-
-            query_transformer = create_query_transformer(spec.query_transform, model)
-
-        # Create reranker if specified
-        reranker = None
-        if spec.reranker and spec.reranker_model:
-            from ragicamp.factory import create_reranker
-
-            reranker = create_reranker(spec.reranker_model)
-
-        agent = FixedRAGAgent(
-            spec.name,
-            model,
-            retriever,
-            spec.top_k,
-            prompt_builder=prompt_builder,
-            query_transformer=query_transformer,
-            reranker=reranker,
-        )
-
-    metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
-
-    exp = Experiment(spec.name, agent, dataset, metric_objs, out, _model=model)
+    # Run the experiment
     result = exp.run(
         batch_size=spec.batch_size,
         min_batch_size=spec.min_batch_size,
@@ -240,8 +198,9 @@ def run_generation(
         resume=True,
     )
 
-    # Save metadata
-    meta = {
+    # Save metadata using ExperimentIO
+    io = ExperimentIO(exp_out)
+    io.save_metadata({
         "name": spec.name,
         "type": spec.exp_type,
         "model": spec.model,
@@ -250,15 +209,14 @@ def run_generation(
         "quantization": spec.quant,
         "retriever": spec.retriever,
         "top_k": spec.top_k,
+        "fetch_k": spec.fetch_k,
         "query_transform": spec.query_transform,
         "reranker": spec.reranker,
         "reranker_model": spec.reranker_model,
+        "agent_type": spec.agent_type,
         "metrics": result.metrics,
         "duration": time.time() - start,
-        "timestamp": datetime.now().isoformat(),
-    }
-    with open(exp_out / "metadata.json", "w") as f:
-        json.dump(meta, f, indent=2)
+    })
 
     return "ran"
 
@@ -344,6 +302,7 @@ def run_spec_subprocess(
             "quant": spec.quant,
             "retriever": spec.retriever,
             "top_k": spec.top_k,
+            "fetch_k": spec.fetch_k,
             "query_transform": spec.query_transform,
             "reranker": spec.reranker,
             "reranker_model": spec.reranker_model,

@@ -16,6 +16,8 @@ def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
     Generates the full experiment matrix by combining:
     - Models x Datasets x Prompts x Quantizations (for direct)
     - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
+    
+    Also supports singleton experiments via the 'experiments' list for hypothesis-driven research.
 
     Args:
         config: Study configuration dict (loaded from YAML)
@@ -37,7 +39,7 @@ def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
     min_batch_size = config.get("min_batch_size", 1)
     metrics = config.get("metrics", ["f1", "exact_match"])
 
-    # Build direct experiment specs
+    # Build direct experiment specs (grid search)
     direct = config.get("direct", {})
     if direct.get("enabled"):
         specs.extend(
@@ -46,11 +48,20 @@ def build_specs(config: Dict[str, Any]) -> List[ExperimentSpec]:
             )
         )
 
-    # Build RAG experiment specs
+    # Build RAG experiment specs (grid search)
     rag = config.get("rag", {})
     if rag.get("enabled"):
         specs.extend(
             _build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics)
+        )
+
+    # Build singleton experiments (hypothesis-driven)
+    experiments = config.get("experiments", [])
+    if experiments:
+        specs.extend(
+            _build_singleton_specs(
+                experiments, config, batch_size, min_batch_size, metrics
+            )
         )
 
     return specs
@@ -112,6 +123,11 @@ def _build_rag_specs(
     prompts = rag_config.get("prompts", ["default"])
     quantizations = rag_config.get("quantization", ["4bit"])
 
+    # Fetch-K configuration: docs to retrieve before reranking
+    # Can be explicit value or multiplier of top_k
+    fetch_k_config = rag_config.get("fetch_k")
+    fetch_k_multiplier = rag_config.get("fetch_k_multiplier", 4)  # Default: 4x top_k
+
     # Query transform options
     query_transforms = rag_config.get("query_transform", ["none"])
     if not query_transforms:
@@ -162,6 +178,16 @@ def _build_rag_specs(
                                         qt,
                                         rr_name,
                                     )
+                                    
+                                    # Compute fetch_k: explicit > multiplier (if reranking) > None
+                                    has_reranker = rr_name != "none" and rr_cfg.get("enabled")
+                                    if fetch_k_config is not None:
+                                        fetch_k = fetch_k_config
+                                    elif has_reranker:
+                                        fetch_k = top_k * fetch_k_multiplier
+                                    else:
+                                        fetch_k = None
+                                    
                                     specs.append(
                                         ExperimentSpec(
                                             name=name,
@@ -172,6 +198,7 @@ def _build_rag_specs(
                                             quant=quant,
                                             retriever=ret_name,
                                             top_k=top_k,
+                                            fetch_k=fetch_k,
                                             query_transform=qt if qt != "none" else None,
                                             reranker=rr_name if rr_name != "none" else None,
                                             reranker_model=rr_model,
@@ -181,4 +208,122 @@ def _build_rag_specs(
                                         )
                                     )
 
+    return specs
+
+
+def _build_singleton_specs(
+    experiments: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    batch_size: int,
+    min_batch_size: int,
+    metrics: List[str],
+) -> List[ExperimentSpec]:
+    """Build specs from explicit singleton experiment definitions.
+    
+    This enables hypothesis-driven research where each experiment is
+    explicitly defined rather than generated from a grid search.
+    
+    Args:
+        experiments: List of experiment definition dicts
+        config: Full study config (for defaults)
+        batch_size: Default batch size
+        min_batch_size: Default min batch size
+        metrics: Default metrics list
+        
+    Returns:
+        List of ExperimentSpec objects
+    """
+    specs: List[ExperimentSpec] = []
+    
+    # Get defaults from config
+    default_model = config.get("models", {}).get("default")
+    default_dataset = config.get("datasets", ["nq"])[0] if config.get("datasets") else "nq"
+    default_prompt = "concise"
+    default_quant = "none"
+    
+    for exp in experiments:
+        # Required field
+        name = exp["name"]
+        
+        # Determine exp_type from agent_type or presence of retriever
+        agent_type = exp.get("agent_type")
+        has_retriever = exp.get("retriever") is not None
+        
+        if agent_type == "direct" or (not has_retriever and agent_type is None):
+            exp_type = "direct"
+        else:
+            exp_type = "rag"
+        
+        # Get experiment-specific or default values
+        model = exp.get("model", default_model)
+        if model is None:
+            raise ValueError(f"Experiment '{name}' requires a model")
+        
+        dataset = exp.get("dataset", default_dataset)
+        prompt = exp.get("prompt", default_prompt)
+        quant = exp.get("quant", exp.get("quantization", default_quant))
+        
+        # RAG-specific fields
+        retriever = exp.get("retriever")
+        top_k = exp.get("top_k", 5)
+        fetch_k = exp.get("fetch_k")
+        query_transform = exp.get("query_transform")
+        reranker = exp.get("reranker")
+        reranker_model = exp.get("reranker_model")
+        
+        # If reranker is specified as short name, map to model
+        if reranker and not reranker_model:
+            reranker_map = {
+                "bge": "bge",
+                "ms-marco": "ms-marco",
+            }
+            reranker_model = reranker_map.get(reranker, reranker)
+        
+        # Singleton-specific fields
+        hypothesis = exp.get("hypothesis")
+        
+        # Extract agent_params from agent-type-specific config blocks
+        agent_params = {}
+        if agent_type:
+            # Check for agent-specific config block (e.g., iterative_rag: {...})
+            agent_config_block = exp.get(agent_type, {})
+            agent_params.update(agent_config_block)
+        
+        # Also check common agent param names at top level
+        for param_name in ["max_iterations", "stop_on_sufficient", "retrieval_threshold", 
+                          "verify_answer", "fallback_to_direct"]:
+            if param_name in exp:
+                agent_params[param_name] = exp[param_name]
+        
+        # Convert agent_params dict to tuple for frozen dataclass
+        agent_params_tuple = tuple(agent_params.items())
+        
+        # Override batch settings if specified
+        exp_batch_size = exp.get("batch_size", batch_size)
+        exp_min_batch_size = exp.get("min_batch_size", min_batch_size)
+        exp_metrics = exp.get("metrics", metrics)
+        
+        specs.append(
+            ExperimentSpec(
+                name=name,
+                exp_type=exp_type,
+                model=model,
+                dataset=dataset,
+                prompt=prompt,
+                quant=quant,
+                retriever=retriever,
+                top_k=top_k,
+                fetch_k=fetch_k,
+                query_transform=query_transform,
+                reranker=reranker,
+                reranker_model=reranker_model,
+                batch_size=exp_batch_size,
+                min_batch_size=exp_min_batch_size,
+                metrics=exp_metrics,
+                agent_type=agent_type,
+                hypothesis=hypothesis,
+                agent_params=agent_params_tuple,
+            )
+        )
+    
     return specs
