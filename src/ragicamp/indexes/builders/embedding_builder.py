@@ -134,17 +134,12 @@ def build_embedding_index(
                         show_progress=True
                     )
                 else:
-                    # Sequential is faster when large datasets are in memory (fork overhead)
+                    # Sequential chunking - process docs one by one with progress
                     from tqdm import tqdm
                     batch_chunks = []
-                    for chunk in tqdm(
-                        chunker.chunk_documents(doc_batch, show_progress=False),
-                        desc="    Chunking",
-                        total=batch_size,  # Approximate (1 chunk per doc minimum)
-                        leave=False,
-                        ncols=80,
-                    ):
-                        batch_chunks.append(chunk)
+                    for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                        doc_chunks = list(chunker.strategy.chunk_document(doc))
+                        batch_chunks.extend(doc_chunks)
                 chunk_elapsed = time.time() - t_chunk
                 print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
                 
@@ -189,16 +184,12 @@ def build_embedding_index(
                     show_progress=True
                 )
             else:
+                # Sequential chunking - process docs one by one with progress
                 from tqdm import tqdm
                 batch_chunks = []
-                for chunk in tqdm(
-                    chunker.chunk_documents(doc_batch, show_progress=False),
-                    desc="    Chunking",
-                    total=batch_size,
-                    leave=False,
-                    ncols=80,
-                ):
-                    batch_chunks.append(chunk)
+                for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                    doc_chunks = list(chunker.strategy.chunk_document(doc))
+                    batch_chunks.extend(doc_chunks)
             chunk_elapsed = time.time() - t_chunk
             print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
             
