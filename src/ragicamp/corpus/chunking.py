@@ -275,11 +275,16 @@ class RecursiveChunker(ChunkingStrategy):
     """
     
     # Safety limits to prevent pathological cases
-    MAX_RECURSION_DEPTH = 10
-    MAX_CHUNKS_PER_DOC = 2000
+    MAX_RECURSION_DEPTH = 8
+    MAX_CHUNKS_PER_DOC = 1000
+    # If text is too large for separator-based splitting, just hard split
+    MAX_TEXT_FOR_SPLIT = 50_000
 
     def chunk(self, text: str) -> List[str]:
         """Recursively split text into chunks."""
+        # For very large texts, skip recursive splitting entirely
+        if len(text) > self.MAX_TEXT_FOR_SPLIT:
+            return self._hard_split(text)
         return self._recursive_split(text, self.config.separators, depth=0)
 
     def _recursive_split(
@@ -293,13 +298,19 @@ class RecursiveChunker(ChunkingStrategy):
         if len(text) <= self.config.chunk_size:
             return [text]
         
-        # Safety: bail out if recursion is too deep
-        if depth >= self.MAX_RECURSION_DEPTH:
+        # Safety: bail out if recursion is too deep or text too large
+        if depth >= self.MAX_RECURSION_DEPTH or len(text) > self.MAX_TEXT_FOR_SPLIT:
             return self._hard_split(text)
 
         # Try each separator in order
         for i, sep in enumerate(separators):
             if sep in text:
+                # Avoid creating huge lists - limit split count
+                # If separator is too frequent, skip to next separator
+                sep_count = text.count(sep)
+                if sep_count > 10_000:
+                    continue  # Skip this separator, try next one
+                
                 splits = text.split(sep)
 
                 # Build chunks from splits
