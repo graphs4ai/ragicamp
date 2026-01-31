@@ -38,120 +38,12 @@ PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.v
 log "Python version: $PYTHON_VERSION"
 
 # ============================================================================
-# Step 1b: CUDA toolkit for Flash Attention (optional but recommended)
+# Step 1b: Check for GPU
 # ============================================================================
-CUDA_MIN_VERSION="11.7"  # Minimum for flash-attn
-CUDA_TARGET_VERSION="12.4"  # Version to install from NVIDIA repo
-
-check_cuda_version() {
-    if command -v nvcc &> /dev/null; then
-        CUDA_VERSION=$(nvcc --version | grep "release" | sed 's/.*release //' | sed 's/,.*//')
-        CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
-        CUDA_MINOR=$(echo "$CUDA_VERSION" | cut -d. -f2)
-        echo "$CUDA_MAJOR.$CUDA_MINOR"
-    else
-        echo "0.0"
-    fi
-}
-
-is_cuda_sufficient() {
-    local version=$(check_cuda_version)
-    local major=$(echo "$version" | cut -d. -f1)
-    local minor=$(echo "$version" | cut -d. -f2)
-    [ "$major" -gt 11 ] || ([ "$major" -eq 11 ] && [ "$minor" -ge 7 ])
-}
-
-install_cuda_from_nvidia() {
-    log "Installing CUDA $CUDA_TARGET_VERSION from NVIDIA repository..."
-    
-    # Detect Ubuntu version
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        UBUNTU_VERSION="${VERSION_ID//./}"  # e.g., "2204" for 22.04
-    else
-        warn "Cannot detect Ubuntu version, assuming 22.04"
-        UBUNTU_VERSION="2204"
-    fi
-    
-    # Remove old apt-installed CUDA toolkit if present
-    if dpkg -l | grep -q nvidia-cuda-toolkit; then
-        log "Removing old nvidia-cuda-toolkit package..."
-        sudo apt remove --purge nvidia-cuda-toolkit -y 2>/dev/null || true
-    fi
-    
-    # Download and install CUDA keyring
-    local keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/x86_64/cuda-keyring_1.1-1_all.deb"
-    log "Adding NVIDIA CUDA repository..."
-    wget -q "$keyring_url" -O /tmp/cuda-keyring.deb
-    sudo dpkg -i /tmp/cuda-keyring.deb
-    rm /tmp/cuda-keyring.deb
-    sudo apt update -qq
-    
-    # Install CUDA toolkit
-    local cuda_pkg="cuda-toolkit-${CUDA_TARGET_VERSION//./-}"  # e.g., cuda-toolkit-12-4
-    log "Installing $cuda_pkg..."
-    sudo apt install -y "$cuda_pkg"
-    
-    # Set up environment
-    local cuda_path="/usr/local/cuda-$CUDA_TARGET_VERSION"
-    if [ -d "$cuda_path" ]; then
-        export PATH="$cuda_path/bin:$PATH"
-        export LD_LIBRARY_PATH="$cuda_path/lib64:$LD_LIBRARY_PATH"
-        export CUDA_HOME="$cuda_path"
-        
-        # Add to bashrc for future sessions
-        if ! grep -q "cuda-$CUDA_TARGET_VERSION" ~/.bashrc 2>/dev/null; then
-            echo "" >> ~/.bashrc
-            echo "# CUDA $CUDA_TARGET_VERSION" >> ~/.bashrc
-            echo "export PATH=$cuda_path/bin:\$PATH" >> ~/.bashrc
-            echo "export LD_LIBRARY_PATH=$cuda_path/lib64:\$LD_LIBRARY_PATH" >> ~/.bashrc
-            echo "export CUDA_HOME=$cuda_path" >> ~/.bashrc
-        fi
-        
-        log "CUDA $CUDA_TARGET_VERSION installed successfully"
-        return 0
-    else
-        warn "CUDA installation path not found: $cuda_path"
-        return 1
-    fi
-}
-
 if command -v nvidia-smi &> /dev/null; then
     log "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
-    
-    current_cuda=$(check_cuda_version)
-    
-    if [ "$current_cuda" = "0.0" ]; then
-        log "CUDA toolkit (nvcc) not found."
-        if command -v apt &> /dev/null; then
-            install_cuda_from_nvidia
-        else
-            warn "apt not available. Install CUDA toolkit manually for Flash Attention support."
-        fi
-    elif ! is_cuda_sufficient; then
-        log "CUDA $current_cuda is too old for Flash Attention (requires >= $CUDA_MIN_VERSION)"
-        if command -v apt &> /dev/null; then
-            install_cuda_from_nvidia
-        else
-            warn "apt not available. Upgrade CUDA manually for Flash Attention support."
-        fi
-    else
-        log "CUDA toolkit found: $current_cuda (sufficient for Flash Attention)"
-    fi
-    
-    # Set CUDA_HOME if not set
-    if [ -z "$CUDA_HOME" ]; then
-        if [ -d "/usr/local/cuda-$CUDA_TARGET_VERSION" ]; then
-            export CUDA_HOME="/usr/local/cuda-$CUDA_TARGET_VERSION"
-        elif [ -d "/usr/local/cuda" ]; then
-            export CUDA_HOME="/usr/local/cuda"
-        elif [ -d "/usr/lib/cuda" ]; then
-            export CUDA_HOME="/usr/lib/cuda"
-        fi
-        [ -n "$CUDA_HOME" ] && log "CUDA_HOME set to: $CUDA_HOME"
-    fi
 else
-    log "No GPU detected, skipping CUDA toolkit installation"
+    log "No GPU detected"
 fi
 
 # ============================================================================
@@ -203,19 +95,13 @@ EXTRAS="rag"
 if command -v nvidia-smi &> /dev/null; then
     EXTRAS="$EXTRAS,vllm"
     log "GPU detected, including vLLM for optimized inference"
-    
-    # Only try flash-attn if nvcc >= 11.7 is available
-    if command -v nvcc &> /dev/null && is_cuda_sufficient; then
-        EXTRAS="$EXTRAS,flash"
-        log "CUDA $(check_cuda_version) available, including Flash Attention"
-    else
-        warn "CUDA not sufficient for Flash Attention, skipping (embeddings will still work)"
-    fi
 fi
 
 # Install dependencies with appropriate extras
+# Note: flash-attn is NOT installed by default due to complex CUDA requirements
+# Install manually with: uv pip install flash-attn --no-build-isolation
 log "Installing dependencies with extras: [$EXTRAS]..."
-uv pip install -e ".[$EXTRAS]" --preview-features extra-build-dependencies
+uv pip install -e ".[$EXTRAS]"
 
 # ============================================================================
 # Step 5: Show system info
@@ -241,11 +127,6 @@ try:
 except ImportError:
     print('  - vLLM: ✗ not installed')
 
-try:
-    import flash_attn; print('  - Flash Attention: ✓ installed')
-except ImportError:
-    print('  - Flash Attention: ✗ not installed (optional)')
-
 import torch
 if torch.cuda.is_available():
     print(f'  - PyTorch CUDA: ✓ {torch.version.cuda}')
@@ -254,6 +135,11 @@ else:
 
 if hasattr(torch, 'compile'):
     print('  - torch.compile: ✓ available')
+
+try:
+    import flash_attn; print('  - Flash Attention: ✓ installed (optional)')
+except ImportError:
+    print('  - Flash Attention: ✗ not installed (optional, install manually if needed)')
 "
 
 # ============================================================================

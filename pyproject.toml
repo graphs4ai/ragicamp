@@ -66,14 +66,13 @@ vllm = [
     "vllm>=0.6.0",
 ]
 # FlashAttention-2 for memory-efficient attention (O(n) instead of O(n²))
-# Requires CUDA 11.8+ and compatible GPU
-flash = [
-    "flash-attn>=2.5.0",
-]
-# All GPU optimizations (vLLM + FlashAttention)
+# NOTE: flash-attn has complex build requirements (CUDA toolkit with nvcc >= 11.7)
+# Install manually if needed: pip install flash-attn --no-build-isolation
+# The code gracefully falls back to standard attention if not installed.
+#
+# All GPU optimizations (vLLM only - flash-attn excluded due to build complexity)
 gpu = [
     "vllm>=0.6.0",
-    "flash-attn>=2.5.0",
 ]
 # Advanced RAG features (reranking, BM25)
 # Note: Cross-encoders are included in sentence-transformers
@@ -121,7 +120,3 @@ disallow_untyped_defs = false
 
 [tool.uv.sources]
 bleurt = { git = "https://github.com/google-research/bleurt.git" }
-
-# flash-attn requires torch at build time but doesn't declare it
-[tool.uv.extra-build-dependencies]
-flash-attn = ["torch"]
