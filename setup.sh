@@ -122,10 +122,19 @@ if command -v nvidia-smi &> /dev/null; then
     EXTRAS="$EXTRAS,vllm"
     log "GPU detected, including vLLM for optimized inference"
     
-    # Only try flash-attn if nvcc is available
+    # Only try flash-attn if nvcc >= 11.7 is available
     if command -v nvcc &> /dev/null; then
-        EXTRAS="$EXTRAS,flash"
-        log "CUDA toolkit available, including Flash Attention"
+        CUDA_VERSION=$(nvcc --version | grep "release" | sed 's/.*release //' | sed 's/,.*//')
+        CUDA_MAJOR=$(echo "$CUDA_VERSION" | cut -d. -f1)
+        CUDA_MINOR=$(echo "$CUDA_VERSION" | cut -d. -f2)
+        
+        # flash-attn requires CUDA 11.7+
+        if [ "$CUDA_MAJOR" -gt 11 ] || ([ "$CUDA_MAJOR" -eq 11 ] && [ "$CUDA_MINOR" -ge 7 ]); then
+            EXTRAS="$EXTRAS,flash"
+            log "CUDA $CUDA_VERSION available, including Flash Attention"
+        else
+            warn "CUDA $CUDA_VERSION too old for Flash Attention (requires 11.7+), skipping"
+        fi
     else
         warn "nvcc not found, skipping Flash Attention (embeddings will still work)"
     fi
