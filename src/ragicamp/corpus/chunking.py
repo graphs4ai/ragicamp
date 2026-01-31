@@ -483,18 +483,17 @@ class DocumentChunker:
         if show_progress:
             print(f"      [Prep: {time.time() - t0:.1f}s]")
 
-        # Use multiprocessing.Pool with large chunksize to minimize IPC overhead
-        # Each worker gets doc_count/num_workers docs in one chunk
+        # Use multiprocessing.Pool - each worker gets doc_count/num_workers docs
         t1 = time.time()
-        chunksize = max(1, doc_count // num_workers)
+        docs_per_worker = max(1, doc_count // num_workers)
         if show_progress:
-            print(f"      [chunksize={chunksize}, processing...]", flush=True)
+            print(f"      [{docs_per_worker} docs/worker, processing...]", flush=True)
         
         all_chunk_dicts = []
         with mp.Pool(processes=num_workers) as pool:
-            # Use map (not imap) with large chunksize - sends all work upfront
+            # pool.map with large chunksize sends all work upfront, minimizing IPC
             # This blocks until all workers finish - watch CPU usage for progress
-            results = pool.map(_chunk_single_document, args, chunksize=chunksize)
+            results = pool.map(_chunk_single_document, args, chunksize=docs_per_worker)
             
             for chunk_dicts in results:
                 all_chunk_dicts.extend(chunk_dicts)
