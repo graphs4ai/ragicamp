@@ -336,8 +336,9 @@ class RecursiveChunker(ChunkingStrategy):
     # Safety limits to prevent pathological cases
     MAX_RECURSION_DEPTH = 8
     MAX_CHUNKS_PER_DOC = 1000
-    # If text is too large for separator-based splitting, just hard split
-    MAX_TEXT_FOR_SPLIT = 50_000
+    # Use recursive splitting up to the truncation limit (100K)
+    # Hard split is only a fallback when recursive fails or for very large texts
+    MAX_TEXT_FOR_SPLIT = 100_000
     
     # Debug mode - set to True to see step-by-step chunking
     DEBUG = False
