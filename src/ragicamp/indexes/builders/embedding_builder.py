@@ -104,18 +104,34 @@ def build_embedding_index(
     doc_batch = []
 
     print("Processing documents in batches...")
+    batch_num = 0
     try:
         for doc in corpus.load():
             doc_batch.append(doc)
 
             if len(doc_batch) >= doc_batch_size:
+                batch_num += 1
+                batch_size = len(doc_batch)
+                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
+                
+                # Chunking phase
+                print(f"    Chunking...", end=" ", flush=True)
                 batch_chunks = list(chunker.chunk_documents(iter(doc_batch), show_progress=False))
-                total_docs += len(doc_batch)
+                print(f"→ {len(batch_chunks)} chunks")
+                
+                total_docs += batch_size
                 total_chunks += len(batch_chunks)
 
                 if batch_chunks:
                     texts = [c.text for c in batch_chunks]
-                    embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=embedding_batch_size)
+                    
+                    # Embedding phase with progress
+                    print(f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})...")
+                    embeddings = encoder.encode(
+                        texts, 
+                        show_progress_bar=True,  # Show progress for large batches
+                        batch_size=embedding_batch_size
+                    )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
 
@@ -123,25 +139,38 @@ def build_embedding_index(
                     pickle.dump(batch_chunks, docs_file)
                     docs_file.flush()
 
-                print(f"  Processed {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
+                print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
                 doc_batch = []
                 del batch_chunks, texts, embeddings
                 gc.collect()
 
         # Process remaining docs
         if doc_batch:
+            batch_num += 1
+            batch_size = len(doc_batch)
+            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
+            
+            print(f"    Chunking...", end=" ", flush=True)
             batch_chunks = list(chunker.chunk_documents(iter(doc_batch), show_progress=False))
-            total_docs += len(doc_batch)
+            print(f"→ {len(batch_chunks)} chunks")
+            
+            total_docs += batch_size
             total_chunks += len(batch_chunks)
 
             if batch_chunks:
                 texts = [c.text for c in batch_chunks]
-                embeddings = encoder.encode(texts, show_progress_bar=False, batch_size=embedding_batch_size)
+                print(f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})...")
+                embeddings = encoder.encode(
+                    texts, 
+                    show_progress_bar=True,
+                    batch_size=embedding_batch_size
+                )
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
                 pickle.dump(batch_chunks, docs_file)
                 docs_file.flush()
 
+            print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
             del doc_batch, batch_chunks, texts, embeddings
             gc.collect()
     finally:

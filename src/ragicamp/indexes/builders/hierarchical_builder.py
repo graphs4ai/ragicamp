@@ -114,6 +114,7 @@ def build_hierarchical_index(
     doc_batch = []
     parent_count = 0
     child_count = 0
+    batch_num = 0
 
     try:
         for doc in corpus.load():
@@ -126,9 +127,15 @@ def build_hierarchical_index(
             total_docs += 1
 
             if len(doc_batch) >= doc_batch_size:
+                batch_num += 1
+                batch_size = len(doc_batch)
+                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
+                
+                print(f"    Chunking (hierarchical)...", end=" ", flush=True)
                 parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                     iter(doc_batch)
                 )
+                print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
 
                 pickle.dump(batch_child_to_parent, mapping_file)
                 mapping_file.flush()
@@ -136,7 +143,12 @@ def build_hierarchical_index(
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=embedding_batch_size)
+                    print(f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})...")
+                    embeddings = encoder.encode(
+                        child_texts, 
+                        show_progress_bar=True,
+                        batch_size=embedding_batch_size
+                    )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                     index.add(embeddings.astype("float32"))
 
@@ -156,22 +168,33 @@ def build_hierarchical_index(
                 gc.collect()
 
                 print(
-                    f"  Processed {total_docs} docs → {parent_count} parents, "
+                    f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
                     f"{child_count} children (index: {index.ntotal})"
                 )
                 doc_batch = []
 
         # Process remaining docs
         if doc_batch:
+            batch_num += 1
+            batch_size = len(doc_batch)
+            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
+            
+            print(f"    Chunking (hierarchical)...", end=" ", flush=True)
             parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                 iter(doc_batch)
             )
+            print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
 
             pickle.dump(batch_child_to_parent, mapping_file)
 
             if child_chunks:
                 child_texts = [c.text for c in child_chunks]
-                embeddings = encoder.encode(child_texts, show_progress_bar=False, batch_size=embedding_batch_size)
+                print(f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})...")
+                embeddings = encoder.encode(
+                    child_texts, 
+                    show_progress_bar=True,
+                    batch_size=embedding_batch_size
+                )
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
                 index.add(embeddings.astype("float32"))
                 pickle.dump(child_chunks, child_file)
@@ -181,6 +204,10 @@ def build_hierarchical_index(
             pickle.dump(parent_chunks, parent_file)
             parent_count += len(parent_chunks)
 
+            print(
+                f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
+                f"{child_count} children (index: {index.ntotal})"
+            )
             del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
 
         print(f"✓ Processing complete: {total_docs} docs → {parent_count} parents, {child_count} children")
