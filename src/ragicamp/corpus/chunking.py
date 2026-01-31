@@ -455,6 +455,7 @@ class DocumentChunker:
             List of chunked Document objects
         """
         import multiprocessing as mp
+        import time
 
         from tqdm import tqdm
 
@@ -466,6 +467,7 @@ class DocumentChunker:
             print(f"    Chunking {doc_count} docs with {num_workers} workers...")
 
         # Convert to dicts for pickling (dataclasses can have issues)
+        t0 = time.time()
         config_dict = {
             "strategy": self.config.strategy,
             "chunk_size": self.config.chunk_size,
@@ -478,8 +480,11 @@ class DocumentChunker:
             ({"id": doc.id, "text": doc.text, "metadata": doc.metadata}, config_dict)
             for doc in documents
         ]
+        if show_progress:
+            print(f"      [Prep: {time.time() - t0:.1f}s]")
 
         # Use multiprocessing.Pool with imap_unordered for best parallelism
+        t1 = time.time()
         all_chunk_dicts = []
         with mp.Pool(processes=num_workers) as pool:
             # imap_unordered processes results as they complete (no ordering overhead)
@@ -495,12 +500,18 @@ class DocumentChunker:
             
             for chunk_dicts in results:
                 all_chunk_dicts.extend(chunk_dicts)
+        
+        if show_progress:
+            print(f"      [Pool: {time.time() - t1:.1f}s]")
 
         # Convert dicts back to Document objects
+        t2 = time.time()
         all_chunks = [
             Document(id=cd["id"], text=cd["text"], metadata=cd["metadata"])
             for cd in all_chunk_dicts
         ]
+        if show_progress:
+            print(f"      [Convert: {time.time() - t2:.1f}s]")
 
         if show_progress:
             avg = len(all_chunks) / max(doc_count, 1)
