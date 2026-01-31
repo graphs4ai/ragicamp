@@ -18,10 +18,8 @@ from ragicamp.config.validation import (
     validate_config,
     validate_model_spec,
 )
-from ragicamp.execution.runner import (
-    build_specs,
-    run_spec,
-)
+from ragicamp.execution.runner import run_spec
+from ragicamp.spec.builder import build_specs
 from ragicamp.indexes.builder import (
     ensure_indexes_exist,
 )
