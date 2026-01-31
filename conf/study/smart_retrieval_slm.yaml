@@ -72,12 +72,16 @@ rag:
   models: []
   
   # --------------------------------------------------------------------------
-  # Corpus: Wikipedia
+  # Corpus: Wikipedia (filtered by importance)
   # --------------------------------------------------------------------------
+  # Using WikiRank to filter to top 200k most important articles.
+  # This ensures we index high-quality content (major topics, countries, etc.)
+  # instead of arbitrary first-200k articles from the dataset stream.
   corpus:
     source: wikimedia/wikipedia
     version: 20231101.en
     max_docs: 200000
+    wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)
