@@ -2366,16 +2366,6 @@ wheels = [
 ]
 
 [[package]]
-name = "flash-attn"
-version = "2.8.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops" },
-    { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/b2/8d76c41ad7974ee264754709c22963447f7f8134613fd9ce80984ed0dab7/flash_attn-2.8.3.tar.gz", hash = "sha256:1e71dd64a9e0280e0447b8a0c2541bad4bf6ac65bdeaa2f90e51a9e57de0370d", size = 8447812, upload-time = "2025-08-15T08:28:12.911Z" }
-
-[[package]]
 name = "flask"
 version = "3.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -8218,11 +8208,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-flash = [
-    { name = "flash-attn" },
-]
 gpu = [
-    { name = "flash-attn" },
     { name = "vllm" },
 ]
 rag = [
@@ -8247,8 +8233,6 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.42.39" },
     { name = "datasets", specifier = ">=2.10.0" },
     { name = "faiss-cpu", specifier = ">=1.7.4" },
-    { name = "flash-attn", marker = "extra == 'flash'", specifier = ">=2.5.0" },
-    { name = "flash-attn", marker = "extra == 'gpu'", specifier = ">=2.5.0" },
     { name = "hydra-core", specifier = ">=1.3.0" },
     { name = "ipykernel", specifier = ">=6.31.0" },
     { name = "keras", specifier = "<3" },
@@ -8282,7 +8266,7 @@ requires-dist = [
     { name = "vllm", marker = "extra == 'vllm'", specifier = ">=0.6.0" },
     { name = "wandb", marker = "extra == 'viz'", specifier = ">=0.15.0" },
 ]
-provides-extras = ["dev", "viz", "vllm", "flash", "gpu", "rag"]
+provides-extras = ["dev", "viz", "vllm", "gpu", "rag"]
 
 [[package]]
 name = "rank-bm25"
