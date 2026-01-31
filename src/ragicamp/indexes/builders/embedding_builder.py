@@ -136,10 +136,21 @@ def build_embedding_index(
                 else:
                     # Sequential chunking - process docs one by one with progress
                     from tqdm import tqdm
+                    from ragicamp.retrievers.base import Document
+                    MAX_DOC_CHARS = 100_000  # Truncate large docs to prevent slow chunking
                     batch_chunks = []
+                    truncated = 0
                     for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                        # Truncate oversized docs
+                        text = doc.text
+                        if len(text) > MAX_DOC_CHARS:
+                            text = text[:MAX_DOC_CHARS]
+                            truncated += 1
+                            doc = Document(id=doc.id, text=text, metadata=doc.metadata)
                         doc_chunks = list(chunker.strategy.chunk_document(doc))
                         batch_chunks.extend(doc_chunks)
+                    if truncated > 0:
+                        print(f"    (truncated {truncated} oversized docs)")
                 chunk_elapsed = time.time() - t_chunk
                 print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
                 
@@ -186,10 +197,20 @@ def build_embedding_index(
             else:
                 # Sequential chunking - process docs one by one with progress
                 from tqdm import tqdm
+                from ragicamp.retrievers.base import Document
+                MAX_DOC_CHARS = 100_000
                 batch_chunks = []
+                truncated = 0
                 for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                    text = doc.text
+                    if len(text) > MAX_DOC_CHARS:
+                        text = text[:MAX_DOC_CHARS]
+                        truncated += 1
+                        doc = Document(id=doc.id, text=text, metadata=doc.metadata)
                     doc_chunks = list(chunker.strategy.chunk_document(doc))
                     batch_chunks.extend(doc_chunks)
+                if truncated > 0:
+                    print(f"    (truncated {truncated} oversized docs)")
             chunk_elapsed = time.time() - t_chunk
             print(f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size/chunk_elapsed:.0f} docs/s)")
             
