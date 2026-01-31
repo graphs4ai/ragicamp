@@ -483,20 +483,31 @@ class DocumentChunker:
         if show_progress:
             print(f"      [Prep: {time.time() - t0:.1f}s]")
 
-        # Use multiprocessing.Pool - each worker gets doc_count/num_workers docs
-        t1 = time.time()
-        docs_per_worker = max(1, doc_count // num_workers)
-        if show_progress:
-            print(f"      [{docs_per_worker} docs/worker, processing...]", flush=True)
+        # For small batches, sequential is faster (IPC overhead > processing time)
+        # Threshold: ~1000 docs/worker makes IPC worthwhile
+        min_docs_for_parallel = num_workers * 1000
         
+        t1 = time.time()
         all_chunk_dicts = []
-        with mp.Pool(processes=num_workers) as pool:
-            # pool.map with large chunksize sends all work upfront, minimizing IPC
-            # This blocks until all workers finish - watch CPU usage for progress
-            results = pool.map(_chunk_single_document, args, chunksize=docs_per_worker)
-            
-            for chunk_dicts in results:
+        
+        if doc_count < min_docs_for_parallel:
+            # Sequential processing - faster for small batches
+            if show_progress:
+                print(f"      [Sequential mode - {doc_count} docs < {min_docs_for_parallel} threshold]", flush=True)
+            for doc_dict, cfg in tqdm(args, desc="      Chunking", disable=not show_progress):
+                chunk_dicts = _chunk_single_document((doc_dict, cfg))
                 all_chunk_dicts.extend(chunk_dicts)
+        else:
+            # Parallel processing - worth the IPC overhead for large batches
+            docs_per_worker = max(1, doc_count // num_workers)
+            if show_progress:
+                print(f"      [Parallel: {num_workers} workers, {docs_per_worker} docs/worker]", flush=True)
+            
+            with mp.Pool(processes=num_workers) as pool:
+                results = pool.map(_chunk_single_document, args, chunksize=docs_per_worker)
+                
+                for chunk_dicts in results:
+                    all_chunk_dicts.extend(chunk_dicts)
         
         if show_progress:
             print(f"      [Pool: {time.time() - t1:.1f}s]")
