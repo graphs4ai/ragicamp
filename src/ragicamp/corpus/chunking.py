@@ -356,11 +356,35 @@ def get_chunker(config: ChunkConfig) -> ChunkingStrategy:
     return strategies[config.strategy](config)
 
 
-def _chunk_single_document(args: tuple) -> List[Document]:
-    """Worker function for parallel chunking."""
-    doc, config = args
+def _chunk_single_document(args: tuple) -> List[dict]:
+    """Worker function for parallel chunking.
+    
+    Returns dicts instead of Document objects to avoid pickling issues.
+    """
+    doc_dict, config_dict = args
+    
+    # Reconstruct config from dict
+    config = ChunkConfig(
+        strategy=config_dict["strategy"],
+        chunk_size=config_dict["chunk_size"],
+        chunk_overlap=config_dict["chunk_overlap"],
+        min_chunk_size=config_dict["min_chunk_size"],
+        separators=config_dict.get("separators"),
+    )
+    
+    # Reconstruct document from dict
+    from ragicamp.retrievers.base import Document
+    doc = Document(
+        id=doc_dict["id"],
+        text=doc_dict["text"],
+        metadata=doc_dict["metadata"],
+    )
+    
     strategy = get_chunker(config)
-    return list(strategy.chunk_document(doc))
+    chunks = list(strategy.chunk_document(doc))
+    
+    # Return as dicts to avoid pickling issues
+    return [{"id": c.id, "text": c.text, "metadata": c.metadata} for c in chunks]
 
 
 class DocumentChunker:
@@ -430,36 +454,53 @@ class DocumentChunker:
         Returns:
             List of chunked Document objects
         """
-        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
 
         from tqdm import tqdm
 
         if num_workers is None:
-            num_workers = mp.cpu_count()
+            import os
+            num_workers = os.cpu_count() or 4
 
         doc_count = len(documents)
         if show_progress:
             print(f"    Chunking {doc_count} docs with {num_workers} workers...")
 
-        # Prepare args for worker function
-        args = [(doc, self.config) for doc in documents]
+        # Convert to dicts for pickling (dataclasses can have issues)
+        config_dict = {
+            "strategy": self.config.strategy,
+            "chunk_size": self.config.chunk_size,
+            "chunk_overlap": self.config.chunk_overlap,
+            "min_chunk_size": self.config.min_chunk_size,
+            "separators": self.config.separators,
+        }
+        
+        args = [
+            ({"id": doc.id, "text": doc.text, "metadata": doc.metadata}, config_dict)
+            for doc in documents
+        ]
 
         # Process in parallel with progress bar
         all_chunks = []
-        with mp.Pool(num_workers) as pool:
-            # Use imap for progress tracking instead of map
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
             if show_progress:
                 results = list(tqdm(
-                    pool.imap(_chunk_single_document, args, chunksize=100),
+                    executor.map(_chunk_single_document, args, chunksize=100),
                     total=doc_count,
                     desc="    Chunking",
                     unit="docs"
                 ))
             else:
-                results = pool.map(_chunk_single_document, args)
+                results = list(executor.map(_chunk_single_document, args, chunksize=100))
             
-            for doc_chunks in results:
-                all_chunks.extend(doc_chunks)
+            # Convert dicts back to Document objects
+            for chunk_dicts in results:
+                for cd in chunk_dicts:
+                    all_chunks.append(Document(
+                        id=cd["id"],
+                        text=cd["text"],
+                        metadata=cd["metadata"],
+                    ))
 
         if show_progress:
             avg = len(all_chunks) / max(doc_count, 1)
