@@ -538,12 +538,34 @@ class DocumentChunker:
         if show_progress:
             print(f"      [Parallel: {num_workers} workers, {docs_per_worker} docs/worker]", flush=True)
         
-        with mp.Pool(processes=num_workers) as pool:
-            # Only pass indices - actual data accessed via shared globals
-            results = pool.map(_chunk_by_index, range(doc_count), chunksize=docs_per_worker)
+        # Detailed profiling to diagnose bottleneck
+        t_pool_start = time.time()
+        pool = mp.Pool(processes=num_workers)
+        if show_progress:
+            print(f"      [Pool created: {time.time() - t_pool_start:.1f}s]", flush=True)
+        
+        try:
+            # Quick sanity check - process first doc to verify worker works
+            t_test = time.time()
+            test_result = pool.apply(_chunk_by_index, (0,))
+            if show_progress:
+                print(f"      [Worker test: {time.time() - t_test:.2f}s, got {len(test_result)} chunks]", flush=True)
             
-            for chunk_dicts in results:
+            # Use imap_unordered for progress visibility
+            t_map_start = time.time()
+            # Start from 1 since we already processed 0
+            results_iter = pool.imap_unordered(_chunk_by_index, range(1, doc_count), chunksize=docs_per_worker)
+            all_chunk_dicts.extend(test_result)  # Add the test result
+            
+            # Collect results with progress bar (doc_count - 1 since we did one test)
+            for chunk_dicts in tqdm(results_iter, total=doc_count - 1, desc="      Chunking", disable=not show_progress):
                 all_chunk_dicts.extend(chunk_dicts)
+            
+            if show_progress:
+                print(f"      [Map completed: {time.time() - t_map_start:.1f}s]", flush=True)
+        finally:
+            pool.close()
+            pool.join()
         
         # Clean up shared memory
         _SHARED_DOCS = None
