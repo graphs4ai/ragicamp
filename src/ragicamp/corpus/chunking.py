@@ -14,6 +14,46 @@ from typing import Any, Dict, Iterator, List, Optional
 from ragicamp.retrievers.base import Document
 
 
+# ============================================================================
+# Shared memory for parallel chunking (fork inherits these, no IPC needed)
+# ============================================================================
+_SHARED_DOCS: Optional[List[Dict]] = None
+_SHARED_CONFIG: Optional[Dict] = None
+
+
+def _chunk_by_index(idx: int) -> List[Dict]:
+    """Chunk a document by index from shared memory.
+    
+    This function is called by worker processes. With fork, workers inherit
+    _SHARED_DOCS and _SHARED_CONFIG from the parent process (copy-on-write),
+    so no pickling/IPC is needed for the actual data.
+    """
+    doc_dict = _SHARED_DOCS[idx]
+    config_dict = _SHARED_CONFIG
+    
+    # Reconstruct config from dict
+    config = ChunkConfig(
+        strategy=config_dict["strategy"],
+        chunk_size=config_dict["chunk_size"],
+        chunk_overlap=config_dict["chunk_overlap"],
+        min_chunk_size=config_dict["min_chunk_size"],
+        separators=config_dict.get("separators"),
+    )
+    
+    # Reconstruct document from dict
+    doc = Document(
+        id=doc_dict["id"],
+        text=doc_dict["text"],
+        metadata=doc_dict["metadata"],
+    )
+    
+    strategy = get_chunker(config)
+    chunks = list(strategy.chunk_document(doc))
+    
+    # Return as dicts
+    return [{"id": c.id, "text": c.text, "metadata": c.metadata} for c in chunks]
+
+
 @dataclass
 class ChunkConfig:
     """Configuration for document chunking.
@@ -446,6 +486,10 @@ class DocumentChunker:
     ) -> List[Document]:
         """Chunk multiple documents in parallel using multiprocessing.
 
+        Uses shared memory (via fork) to avoid IPC overhead. Documents are stored
+        in module-level globals before forking; workers inherit these via copy-on-write.
+        Only indices are passed through IPC, not the actual document data.
+
         Args:
             documents: List of documents to chunk (must be a list, not iterator)
             num_workers: Number of worker processes (default: CPU count)
@@ -454,6 +498,8 @@ class DocumentChunker:
         Returns:
             List of chunked Document objects
         """
+        global _SHARED_DOCS, _SHARED_CONFIG
+        
         import multiprocessing as mp
         import time
 
@@ -466,48 +512,42 @@ class DocumentChunker:
         if show_progress:
             print(f"    Chunking {doc_count} docs with {num_workers} workers...")
 
-        # Convert to dicts for pickling (dataclasses can have issues)
+        # Prepare shared data - store in globals BEFORE forking
+        # Workers will inherit these via fork (copy-on-write, no IPC overhead)
         t0 = time.time()
-        config_dict = {
+        _SHARED_CONFIG = {
             "strategy": self.config.strategy,
             "chunk_size": self.config.chunk_size,
             "chunk_overlap": self.config.chunk_overlap,
             "min_chunk_size": self.config.min_chunk_size,
             "separators": self.config.separators,
         }
-        
-        args = [
-            ({"id": doc.id, "text": doc.text, "metadata": doc.metadata}, config_dict)
+        _SHARED_DOCS = [
+            {"id": doc.id, "text": doc.text, "metadata": doc.metadata}
             for doc in documents
         ]
         if show_progress:
             print(f"      [Prep: {time.time() - t0:.1f}s]")
 
-        # For small batches, sequential is faster (IPC overhead > processing time)
-        # Threshold: ~1000 docs/worker makes IPC worthwhile
-        min_docs_for_parallel = num_workers * 1000
-        
         t1 = time.time()
         all_chunk_dicts = []
         
-        if doc_count < min_docs_for_parallel:
-            # Sequential processing - faster for small batches
-            if show_progress:
-                print(f"      [Sequential mode - {doc_count} docs < {min_docs_for_parallel} threshold]", flush=True)
-            for doc_dict, cfg in tqdm(args, desc="      Chunking", disable=not show_progress):
-                chunk_dicts = _chunk_single_document((doc_dict, cfg))
-                all_chunk_dicts.extend(chunk_dicts)
-        else:
-            # Parallel processing - worth the IPC overhead for large batches
-            docs_per_worker = max(1, doc_count // num_workers)
-            if show_progress:
-                print(f"      [Parallel: {num_workers} workers, {docs_per_worker} docs/worker]", flush=True)
+        # Use shared memory approach - pass only indices, not data
+        # Workers access _SHARED_DOCS directly (inherited via fork)
+        docs_per_worker = max(1, doc_count // num_workers)
+        if show_progress:
+            print(f"      [Parallel: {num_workers} workers, {docs_per_worker} docs/worker]", flush=True)
+        
+        with mp.Pool(processes=num_workers) as pool:
+            # Only pass indices - actual data accessed via shared globals
+            results = pool.map(_chunk_by_index, range(doc_count), chunksize=docs_per_worker)
             
-            with mp.Pool(processes=num_workers) as pool:
-                results = pool.map(_chunk_single_document, args, chunksize=docs_per_worker)
-                
-                for chunk_dicts in results:
-                    all_chunk_dicts.extend(chunk_dicts)
+            for chunk_dicts in results:
+                all_chunk_dicts.extend(chunk_dicts)
+        
+        # Clean up shared memory
+        _SHARED_DOCS = None
+        _SHARED_CONFIG = None
         
         if show_progress:
             print(f"      [Pool: {time.time() - t1:.1f}s]")
