@@ -1,15 +1,16 @@
 """RAGiCamp: A modular framework for experimenting with RAG approaches.
 
-Key modules:
-- experiment: Unified experiment abstraction
-- execution: Resilient batch execution with auto-recovery
+Key packages:
+- spec: Experiment specifications (ExperimentSpec, build_specs, naming)
+- state: State management (ExperimentState, ExperimentPhase, check_health)
+- factory: Component factories (ModelFactory, DatasetFactory, etc.)
+- execution: Batch execution (ResilientExecutor, phase handlers)
 - agents: RAG agents (DirectLLM, FixedRAG)
 - models: Language model interfaces (HuggingFace, OpenAI)
 - retrievers: Document retrieval (Dense, Sparse)
 - datasets: QA datasets (NQ, HotpotQA, TriviaQA)
 - metrics: Evaluation metrics (F1, EM, BERTScore, LLM-as-judge)
-- corpus: Document corpus and chunking
-- factory: Component creation from configs
+- indexes: Index building and management
 
 Quick start:
     from ragicamp import Experiment, ComponentFactory
@@ -24,7 +25,23 @@ Quick start:
     result = exp.run(batch_size=8)
 """
 
-__version__ = "0.3.0"
+# ============================================================================
+# CRITICAL: Configure TensorFlow BEFORE any library imports!
+#
+# TensorFlow is transitively imported by transformers/sentence-transformers.
+# By default, TF allocates ALL GPU memory on import, leaving no room for
+# PyTorch models like BERTScore or the main LLM.
+#
+# This MUST happen before any other imports to be effective.
+# ============================================================================
+import os as _os
+
+if "TF_FORCE_GPU_ALLOW_GROWTH" not in _os.environ:
+    _os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+if "TF_CPP_MIN_LOG_LEVEL" not in _os.environ:
+    _os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF info/warning logs
+
+__version__ = "0.4.0"
 
 from ragicamp.execution import ResilientExecutor
 from ragicamp.experiment import (
@@ -33,7 +50,8 @@ from ragicamp.experiment import (
     ExperimentResult,
     run_experiments,
 )
-from ragicamp.experiment_state import (
+# Import from canonical locations (state/ package)
+from ragicamp.state import (
     ExperimentHealth,
     ExperimentPhase,
     ExperimentState,

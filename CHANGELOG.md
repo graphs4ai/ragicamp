@@ -6,6 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] - 2026-01-30
+
+### 🏗️ Architecture Refactoring
+
+Major codebase restructuring for improved modularity and maintainability.
+
+#### New Packages
+- **Added** `spec/` package: Immutable experiment specifications
+  - `ExperimentSpec` dataclass for experiment configuration
+  - `build_specs()` for building specs from YAML configs
+  - Naming conventions (`name_direct()`, `name_rag()`)
+- **Added** `state/` package: Experiment state management
+  - `ExperimentState` and `ExperimentPhase` (moved from `experiment_state.py`)
+  - `ExperimentHealth` and `check_health()` for health checking
+- **Added** `factory/` package: Specialized component factories
+  - `ModelFactory`, `DatasetFactory`, `MetricFactory`, `RetrieverFactory`, `AgentFactory`
+  - Replaces monolithic `factory.py` (632 lines → 5 focused modules)
+- **Added** `execution/phases/` package: Pluggable phase handlers
+  - `PhaseHandler` ABC and `ExecutionContext` dataclass
+  - `InitHandler`, `GenerationHandler`, `MetricsHandler`
+- **Added** `indexes/builders/` package: Split index builders
+  - `build_embedding_index()`, `build_hierarchical_index()`
+
+#### Code Cleanup
+- **Deleted** ~1,200 lines of dead code:
+  - `core/protocols.py` (281 lines) - unused protocols
+  - `rag/chunking/semantic.py` (~200 lines) - unused chunker
+  - `utils/prediction_writer.py` (238 lines) - unused utility
+  - `metrics/ragas_adapter.py` (~150 lines) - unused adapter
+  - `analysis/mlflow_tracker.py` (304 lines) - unused tracker
+
+#### Improvements
+- **Refactored** `Experiment` class to use phase handlers (Strategy pattern)
+- **Improved** separation of concerns: specification ≠ state ≠ execution
+- **Added** backward compatibility shims for smooth migration
+- **Updated** all tests (124 passing)
+
+### 📦 Breaking Changes (Internal Only)
+
+Module paths changed (backward-compat shims provided):
+- `ragicamp.experiment_state` → `ragicamp.state`
+- `ragicamp.factory` (file) → `ragicamp.factory` (package)
+
+---
+
 ## [0.3.0] - 2025-12-30
 
 ### 🎉 Major Features

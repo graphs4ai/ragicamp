@@ -2,15 +2,12 @@
 
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.paths import ensure_dir, ensure_output_dirs, safe_write_json
-from ragicamp.utils.prediction_writer import PredictionWriter, create_prediction_from_result
 from ragicamp.utils.prompts import PromptBuilder
 from ragicamp.utils.resource_manager import ResourceManager, gpu_memory_scope, managed_model
 
 __all__ = [
     "ContextFormatter",
-    "PredictionWriter",
     "PromptBuilder",
-    "create_prediction_from_result",
     "ensure_dir",
     "ensure_output_dirs",
     "safe_write_json",

@@ -26,6 +26,20 @@ class QueryTransformer(ABC):
         """
         pass
 
+    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+        """Transform multiple queries at once.
+
+        Override this in subclasses for efficient batched implementations.
+        Default implementation calls transform() sequentially.
+
+        Args:
+            queries: List of original user queries
+
+        Returns:
+            List of query lists, one per input query
+        """
+        return [self.transform(q) for q in queries]
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"
 

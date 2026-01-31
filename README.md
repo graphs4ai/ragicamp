@@ -33,9 +33,27 @@ uv run ragicamp health outputs/comprehensive_baseline
 ```
 ragicamp/
 ├── src/ragicamp/          # Core library
-│   ├── experiment.py      # Phased Experiment class
-│   ├── experiment_state.py # State management (phases, health)
-│   ├── factory.py         # ComponentFactory
+│   ├── experiment.py      # Unified Experiment class (facade)
+│   ├── spec/              # Experiment specifications (immutable config)
+│   │   ├── experiment.py  # ExperimentSpec dataclass
+│   │   ├── builder.py     # build_specs() from YAML
+│   │   └── naming.py      # Naming conventions
+│   ├── state/             # State management (mutable, persistent)
+│   │   ├── experiment_state.py  # ExperimentState, ExperimentPhase
+│   │   └── health.py      # ExperimentHealth, check_health()
+│   ├── factory/           # Component factories
+│   │   ├── models.py      # ModelFactory
+│   │   ├── datasets.py    # DatasetFactory
+│   │   ├── metrics.py     # MetricFactory
+│   │   ├── retrievers.py  # RetrieverFactory
+│   │   └── agents.py      # AgentFactory
+│   ├── execution/         # Experiment execution
+│   │   ├── runner.py      # run_spec(), run_generation()
+│   │   ├── executor.py    # ResilientExecutor (batch processing)
+│   │   └── phases/        # Phase handlers (Init, Generation, Metrics)
+│   ├── indexes/           # Index management
+│   │   ├── builder.py     # ensure_indexes_exist() orchestration
+│   │   └── builders/      # Embedding & hierarchical index builders
 │   ├── agents/            # RAG agents (DirectLLM, FixedRAG)
 │   ├── models/            # LLM backends (HuggingFace, OpenAI)
 │   ├── retrievers/        # Dense retrieval (FAISS)

@@ -8,18 +8,46 @@ Usage:
     python run_single_experiment.py --spec-json '{"name": "...", ...}' --output-dir outputs/study
 """
 
+# ============================================================================
+# CRITICAL: Configure TensorFlow BEFORE any imports!
+# TensorFlow is transitively imported by transformers/sentence-transformers.
+# By default, TF allocates ALL GPU memory on import, causing OOM for other
+# models like BERTScore. This MUST be set before any library imports.
+# ============================================================================
+import os
+
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF info logs
+
 import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Optional
 
+
+def _log_gpu_mem(label: str) -> None:
+    """Log GPU memory usage for debugging."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            alloc = torch.cuda.memory_allocated() / 1024**3
+            if alloc > 0.1:  # Only log if significant
+                print(f"  [GPU] {label}: {alloc:.2f} GiB allocated")
+    except Exception:
+        pass
+
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+_log_gpu_mem("before imports")
 
 # Reuse existing abstractions - NO DUPLICATION
 from ragicamp.execution.runner import ExpSpec, run_spec
 from ragicamp.cli.study import create_judge_model
+
+_log_gpu_mem("after imports")
 
 
 def main():

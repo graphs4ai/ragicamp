@@ -1,8 +1,6 @@
 """Experiment execution runner.
 
-This module handles experiment specification and execution with phase-aware dispatching:
-- ExpSpec: Experiment specification dataclass
-- build_specs: Generate experiment matrix from config
+This module handles experiment execution with phase-aware dispatching:
 - run_spec: Dispatch to appropriate runner based on phase
 - run_generation: Run generation phase (needs model, GPU)
 - run_metrics_only: Run metrics phase (no model needed)
@@ -10,182 +8,43 @@ This module handles experiment specification and execution with phase-aware disp
 The phase-aware design ensures resources are only loaded when needed:
 - GENERATING phase: Loads model, agent, retriever
 - COMPUTING_METRICS phase: Only loads predictions file + metrics
+
+For experiment specification and building, see the spec/ package.
 """
 
 import json
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ragicamp.core.logging import get_logger
+from ragicamp.spec import ExperimentSpec, build_specs, name_direct, name_rag
 
 logger = get_logger(__name__)
 
 
-# =============================================================================
-# Experiment Specification
-# =============================================================================
-
-
-@dataclass
-class ExpSpec:
-    """Experiment specification."""
-
-    name: str
-    exp_type: str
-    model: str
-    dataset: str
-    prompt: str
-    quant: str = "4bit"
-    retriever: Optional[str] = None
-    top_k: int = 5
-    query_transform: Optional[str] = None
-    reranker: Optional[str] = None
-    reranker_model: Optional[str] = None
-    batch_size: int = 8
-    min_batch_size: int = 1
-
-
-# =============================================================================
-# Spec Building
-# =============================================================================
-
-
-def build_specs(config: Dict[str, Any]) -> List[ExpSpec]:
-    """Build experiment specs from config.
-
-    Args:
-        config: Study configuration dict
-
-    Returns:
-        List of ExpSpec objects for all experiments
-    """
-    specs = []
-    datasets = config.get("datasets", ["nq"])
-    batch = config.get("batch_size", 8)
-    min_batch = config.get("min_batch_size", 1)
-
-    # Direct experiments
-    direct = config.get("direct", {})
-    if direct.get("enabled"):
-        for model in direct.get("models", []):
-            for prompt in direct.get("prompts", ["default"]):
-                for quant in direct.get("quantization", ["4bit"]):
-                    if model.startswith("openai:") and quant != "4bit":
-                        continue
-                    for ds in datasets:
-                        name = _name_direct(model, prompt, ds, quant)
-                        specs.append(
-                            ExpSpec(
-                                name=name,
-                                exp_type="direct",
-                                model=model,
-                                dataset=ds,
-                                prompt=prompt,
-                                quant=quant,
-                                batch_size=batch,
-                                min_batch_size=min_batch,
-                            )
-                        )
-
-    # RAG experiments
-    rag = config.get("rag", {})
-    if rag.get("enabled"):
-        query_transforms = rag.get("query_transform", ["none"])
-        if not query_transforms:
-            query_transforms = ["none"]
-
-        reranker_cfgs = rag.get("reranker", {}).get(
-            "configs", [{"enabled": False, "name": "none"}]
-        )
-        if not reranker_cfgs:
-            reranker_cfgs = [{"enabled": False, "name": "none"}]
-
-        for model in rag.get("models", []):
-            for ret_config in rag.get("retrievers", []):
-                ret_name = (
-                    ret_config["name"] if isinstance(ret_config, dict) else ret_config
-                )
-                for k in rag.get("top_k_values", [5]):
-                    for prompt in rag.get("prompts", ["default"]):
-                        for quant in rag.get("quantization", ["4bit"]):
-                            if model.startswith("openai:") and quant != "4bit":
-                                continue
-                            for qt in query_transforms:
-                                for rr_cfg in reranker_cfgs:
-                                    rr_name = (
-                                        rr_cfg.get("name", "none")
-                                        if rr_cfg.get("enabled")
-                                        else "none"
-                                    )
-                                    rr_model = (
-                                        rr_cfg.get("model")
-                                        if rr_cfg.get("enabled")
-                                        else None
-                                    )
-                                    for ds in datasets:
-                                        name = _name_rag(
-                                            model, prompt, ds, quant, ret_name, k, qt, rr_name
-                                        )
-                                        specs.append(
-                                            ExpSpec(
-                                                name=name,
-                                                exp_type="rag",
-                                                model=model,
-                                                dataset=ds,
-                                                prompt=prompt,
-                                                quant=quant,
-                                                retriever=ret_name,
-                                                top_k=k,
-                                                query_transform=qt if qt != "none" else None,
-                                                reranker=rr_name if rr_name != "none" else None,
-                                                reranker_model=rr_model,
-                                                batch_size=batch,
-                                                min_batch_size=min_batch,
-                                            )
-                                        )
-
-    return specs
-
-
-def _name_direct(m: str, p: str, d: str, q: str) -> str:
-    """Generate experiment name for direct experiments."""
-    m = m.replace(":", "_").replace("/", "_").replace("-", "")
-    s = f"_{q}" if q != "4bit" else ""
-    return f"direct_{m}_{p}_{d}{s}"
-
-
-def _name_rag(
-    m: str, p: str, d: str, q: str, r: str, k: int, qt: str = "none", rr: str = "none"
-) -> str:
-    """Generate experiment name for RAG experiments."""
-    m = m.replace(":", "_").replace("/", "_").replace("-", "")
-    s = f"_{q}" if q != "4bit" else ""
-
-    parts = ["rag", m, r, f"k{k}"]
-
-    if qt and qt != "none":
-        parts.append(qt)
-
-    if rr and rr != "none":
-        parts.append(rr)
-
-    parts.extend([p, d])
-
-    name = "_".join(parts)
-    if s:
-        name += s
-
-    return name
+# Backward compatibility alias
+ExpSpec = ExperimentSpec
 
 
 # =============================================================================
 # Phase-Aware Runners
 # =============================================================================
+
+
+def _log_gpu_mem(label: str, always: bool = False) -> None:
+    """Log GPU memory usage for debugging."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            alloc = torch.cuda.memory_allocated() / 1024**3
+            if always or alloc > 0.1:  # Only log if significant
+                print(f"  [GPU] {label}: {alloc:.2f} GiB allocated")
+    except Exception:
+        pass
 
 
 def run_metrics_only(
@@ -208,9 +67,9 @@ def run_metrics_only(
     Returns:
         Status string
     """
-    from ragicamp.experiment_state import ExperimentPhase, ExperimentState, detect_state
+    from ragicamp.experiment_state import ExperimentPhase, detect_state
     from ragicamp.factory import ComponentFactory
-    from ragicamp.utils.resource_manager import ResourceManager
+    from ragicamp.metrics import compute_metrics_batched
 
     print(f"  📊 Metrics-only mode (no model loaded)")
 
@@ -235,46 +94,21 @@ def run_metrics_only(
     # Create metric objects
     metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
 
-    # Compute each metric
-    aggregate_results = {}
-    per_item_metrics: Dict[str, List[float]] = {}
-    computed = []
-    failed = []
-
-    for metric in metric_objs:
-        if metric.name in state.metrics_computed:
-            print(f"  ✓ {metric.name} (already computed)")
-            continue
-
-        try:
-            print(f"  Computing {metric.name}...")
-            ResourceManager.clear_gpu_memory()
-
-            if metric.name in ("llm_judge", "llm_judge_qa"):
-                scores = metric.compute(
-                    predictions=predictions, references=references, questions=questions
-                )
-            else:
-                scores = metric.compute(predictions=predictions, references=references)
-
-            aggregate_results.update(scores)
-
-            # Get per-item scores if available
-            if hasattr(metric, "get_per_item_scores"):
-                per_item = metric.get_per_item_scores()
-                if per_item:
-                    per_item_metrics[metric.name] = per_item
-
-            computed.append(metric.name)
-            state.metrics_computed.append(metric.name)
+    # Callback to save state after each metric
+    def on_metric_complete(metric_name: str) -> None:
+        if metric_name not in state.metrics_computed:
+            state.metrics_computed.append(metric_name)
             state.save(state_path)
 
-            ResourceManager.clear_gpu_memory()
-
-        except Exception as e:
-            print(f"  ⚠ {metric.name} failed: {e}")
-            failed.append(metric.name)
-            ResourceManager.clear_gpu_memory()
+    # Use shared metrics computation
+    aggregate_results, per_item_metrics, computed, failed = compute_metrics_batched(
+        metrics=metric_objs,
+        predictions=predictions,
+        references=references,
+        questions=questions,
+        already_computed=state.metrics_computed,
+        on_metric_complete=on_metric_complete,
+    )
 
     # Update predictions with per-item metrics
     for i, pred in enumerate(preds):
@@ -454,6 +288,19 @@ def run_spec_subprocess(
     Returns:
         Status string
     """
+    import os
+    
+    # Ensure TensorFlow doesn't grab all GPU memory in subprocess
+    # These are inherited by the subprocess
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+    
+    # CRITICAL: Clear GPU memory in parent process before spawning subprocess
+    # The parent may have loaded embedding models for index checking.
+    # If we don't clear, the subprocess will see a full GPU and OOM.
+    from ragicamp.utils.resource_manager import ResourceManager
+    ResourceManager.clear_gpu_memory()
+    
     from ragicamp.experiment_state import ExperimentPhase, check_health
 
     exp_out = out / spec.name
@@ -469,20 +316,8 @@ def run_spec_subprocess(
     if health.phase == ExperimentPhase.FAILED:
         print(f"⚠ {spec.name} (previously failed, retrying)")
 
-    # Determine action
-    if health.can_resume:
-        action = f"↻ Resuming from {health.resume_phase.value}"
-        if health.needs_generation:
-            action += f" ({health.predictions_complete}/{health.total_questions} predictions)"
-        if health.needs_metrics:
-            action += f" (missing: {', '.join(health.metrics_missing)})"
-    else:
-        action = "▶ Starting"
-
-    print(f"\n{'='*60}")
-    print(f"{spec.exp_type.upper()}: {spec.name}")
-    print(f"{action}")
-    print(f"{'='*60}")
+    # Note: Don't print header here - the subprocess will print it
+    # This avoids duplicate output
 
     script_path = (
         Path(__file__).parent.parent.parent.parent

@@ -143,7 +143,7 @@ metrics:
   - f1
   - exact_match
   - bertscore
-  - llm_judge
+  - llm_judge_qa
 
 # LLM Judge configuration
 llm_judge:

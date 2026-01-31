@@ -111,5 +111,57 @@ class CrossEncoderReranker(Reranker):
         sorted_docs = sorted(documents, key=lambda d: d.score, reverse=True)
         return sorted_docs[:top_k]
 
+    def batch_rerank(
+        self,
+        queries: List[str],
+        documents_list: List[List["Document"]],
+        top_k: int,
+    ) -> List[List["Document"]]:
+        """Rerank documents for multiple queries more efficiently.
+
+        Batches all (query, document) pairs together for faster scoring.
+
+        Args:
+            queries: List of search queries
+            documents_list: List of document lists, one per query
+            top_k: Number of top documents to return per query
+
+        Returns:
+            List of top-k reranked document lists
+        """
+        if not queries:
+            return []
+
+        # Build all pairs at once with indices to track which query each belongs to
+        all_pairs = []
+        pair_indices = []  # (query_idx, doc_idx_within_query)
+        
+        for q_idx, (query, docs) in enumerate(zip(queries, documents_list)):
+            for d_idx, doc in enumerate(docs):
+                all_pairs.append((query, doc.text))
+                pair_indices.append((q_idx, d_idx))
+
+        if not all_pairs:
+            return [[] for _ in queries]
+
+        # Score all pairs in one batch
+        scores = self.model.predict(
+            all_pairs,
+            batch_size=self.batch_size,
+            show_progress_bar=False,
+        )
+
+        # Assign scores back to documents
+        for (q_idx, d_idx), score in zip(pair_indices, scores):
+            documents_list[q_idx][d_idx].score = float(score)
+
+        # Sort and return top_k for each query
+        results = []
+        for docs in documents_list:
+            sorted_docs = sorted(docs, key=lambda d: d.score, reverse=True)
+            results.append(sorted_docs[:top_k])
+
+        return results
+
     def __repr__(self) -> str:
         return f"CrossEncoderReranker(model='{self.model_name}', device='{self.device}')"

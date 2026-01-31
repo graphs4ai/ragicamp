@@ -125,6 +125,51 @@ Alternative questions:"""
 
         return variations[: self.num_queries]  # Limit to requested number
 
+    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+        """Generate query variations for multiple queries in one batch call.
+
+        This is much faster than calling transform() sequentially because
+        it uses a single batched LLM call for all queries.
+
+        Args:
+            queries: List of original user queries
+
+        Returns:
+            List of query lists, one per input query
+        """
+        if not queries:
+            return []
+
+        # Build prompts for all queries
+        prompts = [
+            self.prompt_template.format(query=q, num_queries=self.num_queries)
+            for q in queries
+        ]
+
+        # Batch generate variations (single batched LLM call!)
+        responses = self.llm.generate(
+            prompts,
+            max_tokens=self.max_tokens,
+            temperature=0.7,
+        )
+
+        # Parse each response
+        results = []
+        for query, response in zip(queries, responses):
+            query_list = []
+            if self.include_original:
+                query_list.append(query)
+
+            variations = self._parse_variations(response)
+            for variation in variations:
+                variation = variation.strip()
+                if variation and variation.lower() != query.lower() and variation not in query_list:
+                    query_list.append(variation)
+
+            results.append(query_list)
+
+        return results
+
     def __repr__(self) -> str:
         return (
             f"MultiQueryTransformer(num_queries={self.num_queries}, "

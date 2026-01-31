@@ -91,6 +91,43 @@ Answer:"""
 
         return queries
 
+    def batch_transform(self, queries: List[str]) -> List[List[str]]:
+        """Generate hypothetical answers for multiple queries in one batch call.
+
+        This is much faster than calling transform() sequentially because
+        it uses a single batched LLM call for all queries.
+
+        Args:
+            queries: List of original user queries
+
+        Returns:
+            List of query lists, one per input query
+        """
+        if not queries:
+            return []
+
+        # Build prompts for all queries
+        prompts = [self.prompt_template.format(query=q) for q in queries]
+
+        # Batch generate hypothetical answers (single batched LLM call!)
+        hypotheticals = self.llm.generate(
+            prompts,
+            max_tokens=self.max_tokens,
+            temperature=0.7,
+        )
+
+        # Build result: for each query, return [original, hypothetical]
+        results = []
+        for query, hyp in zip(queries, hypotheticals):
+            query_list = []
+            if self.include_original:
+                query_list.append(query)
+            if hyp and hyp.strip():
+                query_list.append(hyp.strip())
+            results.append(query_list)
+
+        return results
+
     def __repr__(self) -> str:
         return (
             f"HyDETransformer(include_original={self.include_original}, "
