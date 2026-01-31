@@ -5,178 +5,75 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  # ============================================================================
-  # CHANGE DETECTION (runs first to enable conditional jobs)
-  # ============================================================================
-  
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
       src: ${{ steps.changes.outputs.src }}
-      tests: ${{ steps.changes.outputs.tests }}
-      configs: ${{ steps.changes.outputs.configs }}
       docs: ${{ steps.changes.outputs.docs }}
-      deps: ${{ steps.changes.outputs.deps }}
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Detect changes
-        id: changes
+      - uses: actions/checkout@v4
+      - id: changes
         uses: dorny/paths-filter@v3
         with:
           filters: |
             src:
               - 'src/**'
-            tests:
-              - 'tests/**'
-            configs:
-              - 'conf/**'
-              - 'experiments/configs/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
             docs:
               - 'docs/**'
               - '*.md'
-            deps:
-              - 'pyproject.toml'
-              - 'uv.lock'
 
-  # ============================================================================
-  # PR SIZE CHECK
-  # ============================================================================
-  
   pr-size:
     name: PR Size
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Check PR size
         run: |
-          # Get changed files
           CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
-          ADDED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $4}' || echo "0")
-          DELETED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | awk '{print $6}' || echo "0")
-          
-          echo "📊 PR Statistics:"
-          echo "  Files changed: $CHANGED"
-          echo "  Lines added: ${ADDED:-0}"
-          echo "  Lines deleted: ${DELETED:-0}"
-          
-          # Warn if PR is too large
+          echo "📊 Files changed: $CHANGED"
           if [ "$CHANGED" -gt 50 ]; then
-            echo ""
-            echo "⚠️  Large PR detected! Consider breaking into smaller PRs."
+            echo "⚠️ Large PR - consider breaking into smaller PRs"
           fi
 
-  # ============================================================================
-  # QUICK SMOKE TEST (only if src or deps changed)
-  # ============================================================================
-  
   smoke-test:
     name: Smoke Test
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.src == 'true' || needs.changes.outputs.deps == 'true'
-    
+    if: needs.changes.outputs.src == 'true'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-
-      - name: Install package
-        run: uv sync
-
+      - run: uv sync
       - name: Quick import test
         run: |
           uv run python -c "
-          from ragicamp import ComponentFactory
-          from ragicamp.core import get_logger, RAGiCampError
+          from ragicamp.corpus import DocumentChunker
+          from ragicamp.cli import app
           print('✅ Core imports work')
           "
 
-  # ============================================================================
-  # DOCS CHECK (only if docs changed)
-  # ============================================================================
-  
   docs-check:
     name: Docs Check
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.docs == 'true'
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Check markdown links
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: 'yes'
           config-file: '.github/markdown-link-check.json'
-        continue-on-error: true  # Don't fail on broken links, just warn
-
-      - name: Check for large files
-        run: |
-          # Find any docs over 500KB
-          find docs/ -type f -size +500k 2>/dev/null && \
-            echo "⚠️  Large documentation files found" || \
-            echo "✓ No large doc files"
-
-  # ============================================================================
-  # QUICK CONFIG CHECK (only if configs changed)
-  # ============================================================================
-  
-  config-check:
-    name: Config Check
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.configs == 'true'
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Install package
-        run: uv sync
-
-      - name: Validate changed configs
-        run: |
-          echo "Validating Hydra config..."
-          uv run python -c "
-          from hydra import compose, initialize_config_dir
-          from pathlib import Path
-          
-          conf_dir = Path('conf').absolute()
-          with initialize_config_dir(version_base=None, config_dir=str(conf_dir)):
-              cfg = compose(config_name='config')
-              print('✅ Hydra config valid')
-          "
+        continue-on-error: true
