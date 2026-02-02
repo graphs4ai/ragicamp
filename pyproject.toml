@@ -28,7 +28,7 @@ dependencies = [
     "accelerate>=0.20.0",
     "bitsandbytes>=0.41.0", # For 8-bit quantization
     "bert-score>=0.3.13",
-    "bleurt-pytorch>=0.0.2",  # PyTorch BLEURT (no TensorFlow dependency)
+    "bleurt-pytorch>=0.0.1",  # PyTorch BLEURT (no TensorFlow dependency)
     # Experiment tracking and optimization
     "mlflow>=2.8.0", # Experiment tracking and model registry
     "ragas>=0.1.0", # RAG-specific evaluation metrics
