@@ -174,13 +174,13 @@ class Defaults:
 
     # GPU Memory Partitioning (for vLLM + FAISS GPU coexistence)
     # These should sum to <= 1.0, leaving some headroom for PyTorch overhead
-    VLLM_GPU_MEMORY_FRACTION = 0.30  # 30% for vLLM (SLM inference)
-    FAISS_GPU_MEMORY_FRACTION = 0.65  # 65% for FAISS GPU index
+    VLLM_GPU_MEMORY_FRACTION = 0.40  # 40% for vLLM (~73GB on B200)
+    FAISS_GPU_MEMORY_FRACTION = 0.55  # 55% for FAISS GPU index (~100GB on B200)
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration
     FAISS_USE_GPU = True  # Enable GPU FAISS by default
-    FAISS_GPU_TEMP_MEMORY_MB = 4096  # Temporary memory for FAISS operations (4GB)
+    FAISS_GPU_TEMP_MEMORY_MB = 65536  # Temporary memory for FAISS operations (64GB for large index transfers)
     FAISS_INDEX_TYPE = "flat"  # Default index type: flat, ivf, ivfpq, hnsw
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)

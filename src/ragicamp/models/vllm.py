@@ -9,8 +9,8 @@ This is the recommended backend for running local models with long context
 without needing to quantize model weights.
 
 GPU Memory Partitioning:
-    When using with FAISS GPU, vLLM defaults to 30% GPU memory utilization
-    to leave room for large FAISS indexes. Adjust via gpu_memory_utilization param.
+    When using with FAISS GPU, vLLM defaults to 40% GPU memory utilization
+    to leave room for FAISS indexes. Adjust via gpu_memory_utilization param.
 """
 
 import gc
@@ -73,8 +73,8 @@ class VLLMModel(LanguageModel):
             quantization: Optional quantization method ('awq', 'gptq', 'squeezellm', None)
                          Default is None (no quantization - full precision).
             gpu_memory_utilization: Fraction of GPU memory to use (0.0-1.0).
-                                   Default is Defaults.VLLM_GPU_MEMORY_FRACTION (0.30)
-                                   to leave room for large FAISS GPU indexes.
+                                   Default is Defaults.VLLM_GPU_MEMORY_FRACTION (0.40)
+                                   to leave room for FAISS GPU indexes.
             max_model_len: Maximum context length. If None, uses model's default.
             tensor_parallel_size: Number of GPUs for tensor parallelism.
             trust_remote_code: Whether to trust remote code in model repos.
