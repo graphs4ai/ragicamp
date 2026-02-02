@@ -146,7 +146,16 @@ def run_metrics_only(
         }
     )
 
-    print("  ✓ All metrics computed")
+    # Print metric summary
+    metrics_parts = []
+    for key, val in existing_metrics.items():
+        if isinstance(val, float):
+            if key in ("f1", "exact_match", "bertscore_f1", "bleurt"):
+                metrics_parts.append(f"{key}={val * 100:.1f}%")
+            else:
+                metrics_parts.append(f"{key}={val:.3f}")
+    metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
+    print(f"  ✓ All metrics computed: {metrics_str}")
     return "ran"
 
 
