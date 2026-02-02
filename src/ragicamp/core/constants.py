@@ -179,11 +179,14 @@ class Defaults:
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration
-    FAISS_USE_GPU = True  # Enable GPU FAISS by default
+    # NOTE: GPU FAISS disabled by default - B200 (Blackwell) not yet supported by faiss-gpu-cu12.
+    # Enable once faiss adds Blackwell kernels, or build from source.
+    FAISS_USE_GPU = False  # Disable GPU FAISS until Blackwell support added
     FAISS_GPU_TEMP_MEMORY_MB = 65536  # Temporary memory for FAISS operations (64GB for large index transfers)
     FAISS_INDEX_TYPE = "flat"  # Default index type: flat, ivf, ivfpq, hnsw
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
+    FAISS_CPU_THREADS = 32  # Number of threads for CPU FAISS (set to number of cores)
 
 
 # === Prompt Templates ===

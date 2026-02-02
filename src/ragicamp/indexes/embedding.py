@@ -20,6 +20,13 @@ from ragicamp.utils.artifacts import get_artifact_manager
 
 logger = get_logger(__name__)
 
+# Set FAISS CPU threads for better performance
+try:
+    faiss.omp_set_num_threads(Defaults.FAISS_CPU_THREADS)
+    logger.debug("Set FAISS CPU threads to %d", Defaults.FAISS_CPU_THREADS)
+except Exception:
+    pass  # omp_set_num_threads may not be available
+
 # Track FAISS GPU resources globally to avoid re-initialization
 _faiss_gpu_resources: Optional["faiss.StandardGpuResources"] = None
 _faiss_gpu_available: Optional[bool] = None
