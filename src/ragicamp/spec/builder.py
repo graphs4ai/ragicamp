@@ -207,6 +207,9 @@ def _build_singleton_specs(
     This enables hypothesis-driven research where each experiment is
     explicitly defined rather than generated from a grid search.
 
+    If an experiment doesn't specify a dataset, it will be expanded
+    across all datasets in the config (like grid search).
+
     Args:
         experiments: List of experiment definition dicts
         config: Full study config (for defaults)
@@ -221,13 +224,13 @@ def _build_singleton_specs(
 
     # Get defaults from config
     default_model = config.get("models", {}).get("default")
-    default_dataset = config.get("datasets", ["nq"])[0] if config.get("datasets") else "nq"
+    default_datasets = config.get("datasets", ["nq"])
     default_prompt = "concise"
     default_quant = "none"
 
     for exp in experiments:
         # Required field
-        name = exp["name"]
+        base_name = exp["name"]
 
         # Determine exp_type from agent_type or presence of retriever
         agent_type = exp.get("agent_type")
@@ -241,9 +244,12 @@ def _build_singleton_specs(
         # Get experiment-specific or default values
         model = exp.get("model", default_model)
         if model is None:
-            raise ValueError(f"Experiment '{name}' requires a model")
+            raise ValueError(f"Experiment '{base_name}' requires a model")
 
-        dataset = exp.get("dataset", default_dataset)
+        # If experiment specifies dataset, use only that one
+        # Otherwise, expand across all default datasets
+        exp_datasets = [exp["dataset"]] if "dataset" in exp else default_datasets
+
         prompt = exp.get("prompt", default_prompt)
         quant = exp.get("quant", exp.get("quantization", default_quant))
 
@@ -292,27 +298,35 @@ def _build_singleton_specs(
         exp_min_batch_size = exp.get("min_batch_size", min_batch_size)
         exp_metrics = exp.get("metrics", metrics)
 
-        specs.append(
-            ExperimentSpec(
-                name=name,
-                exp_type=exp_type,
-                model=model,
-                dataset=dataset,
-                prompt=prompt,
-                quant=quant,
-                retriever=retriever,
-                top_k=top_k,
-                fetch_k=fetch_k,
-                query_transform=query_transform,
-                reranker=reranker,
-                reranker_model=reranker_model,
-                batch_size=exp_batch_size,
-                min_batch_size=exp_min_batch_size,
-                metrics=exp_metrics,
-                agent_type=agent_type,
-                hypothesis=hypothesis,
-                agent_params=agent_params_tuple,
+        # Create one spec per dataset
+        for dataset in exp_datasets:
+            # Add dataset suffix to name if expanding across multiple datasets
+            if len(exp_datasets) > 1:
+                name = f"{base_name}_{dataset}"
+            else:
+                name = base_name
+
+            specs.append(
+                ExperimentSpec(
+                    name=name,
+                    exp_type=exp_type,
+                    model=model,
+                    dataset=dataset,
+                    prompt=prompt,
+                    quant=quant,
+                    retriever=retriever,
+                    top_k=top_k,
+                    fetch_k=fetch_k,
+                    query_transform=query_transform,
+                    reranker=reranker,
+                    reranker_model=reranker_model,
+                    batch_size=exp_batch_size,
+                    min_batch_size=exp_min_batch_size,
+                    metrics=exp_metrics,
+                    agent_type=agent_type,
+                    hypothesis=hypothesis,
+                    agent_params=agent_params_tuple,
+                )
             )
-        )
 
     return specs

@@ -65,30 +65,41 @@ class BLEURTMetric(Metric):
 
         print(f"  📥 Loading BLEURT model: {self.checkpoint}")
 
-        # Try to load checkpoint, download if needed
+        # Check cache first before trying anything else
+        cache_path = Path.home() / ".cache" / "bleurt" / self.checkpoint
+        if cache_path.exists():
+            self._checkpoint_path = str(cache_path)
+            self._scorer = bleurt_score.BleurtScorer(self._checkpoint_path)
+            print("  ✓ Loaded from cache")
+            return
+
+        # Try to load checkpoint by name (might work if installed via pip)
         try:
             self._scorer = bleurt_score.BleurtScorer(self.checkpoint)
+            return
         except Exception:
-            # Try to download checkpoint
-            print(f"  BLEURT checkpoint '{self.checkpoint}' not found locally.")
-            print("  Attempting to download...")
+            pass
 
-            try:
-                self._checkpoint_path = self._download_checkpoint(self.checkpoint)
-                self._scorer = bleurt_score.BleurtScorer(self._checkpoint_path)
-                print("  ✓ BLEURT checkpoint loaded successfully")
-            except Exception as download_error:
-                raise RuntimeError(
-                    f"Failed to load/download BLEURT checkpoint '{self.checkpoint}'.\n"
-                    f"Error: {download_error}\n\n"
-                    f"Available checkpoints: {', '.join(BLEURT_CHECKPOINTS.keys())}\n"
-                    f"Try using a smaller checkpoint: BLEURT-20-D3 (fastest)\n\n"
-                    f"Manual download:\n"
-                    f"  mkdir -p ~/.cache/bleurt\n"
-                    f"  cd ~/.cache/bleurt\n"
-                    f"  wget {BLEURT_CHECKPOINTS.get(self.checkpoint, 'URL_NOT_FOUND')}\n"
-                    f"  unzip {self.checkpoint}.zip"
-                ) from download_error
+        # Download checkpoint
+        print(f"  BLEURT checkpoint '{self.checkpoint}' not found locally.")
+        print("  Downloading (this only happens once)...")
+
+        try:
+            self._checkpoint_path = self._download_checkpoint(self.checkpoint)
+            self._scorer = bleurt_score.BleurtScorer(self._checkpoint_path)
+            print("  ✓ BLEURT checkpoint loaded successfully")
+        except Exception as download_error:
+            raise RuntimeError(
+                f"Failed to load/download BLEURT checkpoint '{self.checkpoint}'.\n"
+                f"Error: {download_error}\n\n"
+                f"Available checkpoints: {', '.join(BLEURT_CHECKPOINTS.keys())}\n"
+                f"Try using a smaller checkpoint: BLEURT-20-D3 (fastest)\n\n"
+                f"Manual download:\n"
+                f"  mkdir -p ~/.cache/bleurt\n"
+                f"  cd ~/.cache/bleurt\n"
+                f"  wget {BLEURT_CHECKPOINTS.get(self.checkpoint, 'URL_NOT_FOUND')}\n"
+                f"  unzip {self.checkpoint}.zip"
+            ) from download_error
 
     def _unload_scorer(self) -> None:
         """Unload the BLEURT model to free GPU memory."""
@@ -169,7 +180,7 @@ class BLEURTMetric(Metric):
     ) -> dict[str, float]:
         """Compute BLEURT scores (1-to-1).
 
-        Loads model, computes scores, then unloads to free GPU memory.
+        Loads model, computes scores in batches, then unloads to free GPU memory.
 
         Args:
             predictions: List of predicted answers
@@ -182,14 +193,21 @@ class BLEURTMetric(Metric):
             # Load model (lazy)
             self._load_scorer()
 
-            # Compute BLEURT scores
-            scores = self._scorer.score(references=references, candidates=predictions)
+            # Compute BLEURT scores in batches to manage memory
+            batch_size = 64  # BLEURT is memory-efficient, can handle larger batches
+            all_scores = []
+
+            for i in range(0, len(predictions), batch_size):
+                batch_preds = predictions[i : i + batch_size]
+                batch_refs = references[i : i + batch_size]
+                batch_scores = self._scorer.score(references=batch_refs, candidates=batch_preds)
+                all_scores.extend(batch_scores)
 
             # Store per-item scores for detailed analysis
-            self._last_scores = list(scores)
+            self._last_scores = list(all_scores)
 
             # Only return the mean score (not individual scores)
-            return {"bleurt": float(sum(scores) / len(scores)) if scores else 0.0}
+            return {"bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0}
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()

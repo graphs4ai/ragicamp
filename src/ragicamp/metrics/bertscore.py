@@ -126,6 +126,8 @@ class BERTScoreMetric(Metric):
         For deberta-xlarge-mnli:
         - Model base: ~2.5 GB
         - Each batch item with long text can use 0.5-1 GB
+        
+        With B200 GPU (80GB+ VRAM), we can use larger batches.
         """
 
         if not predictions:
@@ -135,16 +137,15 @@ class BERTScoreMetric(Metric):
         avg_len = sum(len(p) for p in predictions) / len(predictions)
         max_len = max(len(p) for p in predictions)
 
-        # Very conservative batch sizing based on text length
-        # Long texts (like RAG predictions with context) need very small batches
+        # Batch sizing based on text length (optimized for high-VRAM GPUs)
         if max_len > 3000 or avg_len > 1000:
-            batch_size = 2  # Very long texts - minimal batch
+            batch_size = 8  # Very long texts
         elif max_len > 1500 or avg_len > 500:
-            batch_size = 4  # Long texts
+            batch_size = 16  # Long texts
         elif max_len > 500 or avg_len > 200:
-            batch_size = 8  # Medium texts
+            batch_size = 32  # Medium texts
         else:
-            batch_size = 16  # Short texts
+            batch_size = 64  # Short texts (QA answers are typically short)
 
         # Cap at total predictions
         batch_size = min(batch_size, len(predictions))
