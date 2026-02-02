@@ -41,7 +41,6 @@ datasets:
 metrics:
   - f1
   - exact_match
-  - llm_judge_qa
   - bertscore
   - bleurt
 
