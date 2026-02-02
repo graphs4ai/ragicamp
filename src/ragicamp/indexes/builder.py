@@ -93,7 +93,7 @@ def build_retriever_from_index(
         "embedding_model": index_config["embedding_model"],
         "embedding_dim": index_config["embedding_dim"],
         "num_documents": index_config["num_documents"],
-        "index_type": "flat",
+        "index_type": index_config.get("index_type", "flat"),
     }
 
     if retriever_type == "hybrid":
@@ -204,6 +204,7 @@ def ensure_indexes_exist(
                     chunking_strategy=first_retriever.get("chunking_strategy", "recursive"),
                     doc_batch_size=corpus_config.get("doc_batch_size", 5000),
                     embedding_batch_size=corpus_config.get("embedding_batch_size", 64),
+                    index_type=first_retriever.get("index_type"),  # Pass index_type from config
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()
