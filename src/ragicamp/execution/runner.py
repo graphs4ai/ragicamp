@@ -271,8 +271,11 @@ def run_spec_subprocess(
     exp_out = out / spec.name
     exp_out.mkdir(parents=True, exist_ok=True)
 
+    # Use spec's metrics if available, otherwise fall back to parameter
+    check_metrics = list(spec.metrics) if spec.metrics else metrics
+
     # Check health before running
-    health = check_health(exp_out, metrics)
+    health = check_health(exp_out, check_metrics)
 
     if health.is_complete:
         print(f"✓ {spec.name} (complete)")
@@ -398,7 +401,10 @@ def run_spec(
     exp_out = out / spec.name
     exp_out.mkdir(parents=True, exist_ok=True)
 
-    health = check_health(exp_out, metrics)
+    # Use spec's metrics if available, otherwise fall back to parameter
+    check_metrics = list(spec.metrics) if spec.metrics else metrics
+
+    health = check_health(exp_out, check_metrics)
 
     if health.is_complete and not force:
         print(f"✓ {spec.name} (complete)")

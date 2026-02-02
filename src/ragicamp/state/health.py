@@ -307,9 +307,19 @@ def check_health(
     metrics_computed = state.metrics_computed
     metrics_missing = [m for m in requested_metrics if m not in metrics_computed]
 
+    # Experiment is only complete if:
+    # 1. Phase is COMPLETE
+    # 2. No missing predictions
+    # 3. All requested metrics are computed
+    is_complete = (
+        state.phase == ExperimentPhase.COMPLETE
+        and len(missing_predictions) == 0
+        and len(metrics_missing) == 0
+    )
+
     return ExperimentHealth(
         phase=state.phase,
-        is_complete=state.phase == ExperimentPhase.COMPLETE,
+        is_complete=is_complete,
         is_healthy=state.error is None and state.phase != ExperimentPhase.FAILED,
         total_questions=total_questions,
         predictions_complete=predictions_complete,
