@@ -9,15 +9,18 @@ Usage:
 """
 
 # ============================================================================
-# CRITICAL: Configure TensorFlow BEFORE any imports!
-# TensorFlow is transitively imported by transformers/sentence-transformers.
-# By default, TF allocates ALL GPU memory on import, causing OOM for other
-# models like BERTScore. This MUST be set before any library imports.
+# CRITICAL: Configure environment BEFORE any imports!
 # ============================================================================
 import os
 
+# TensorFlow: Prevent grabbing all GPU memory on import
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF info logs
+
+# vLLM: Use 'spawn' for multiprocessing to avoid CUDA fork issues
+# See: https://github.com/vllm-project/vllm/issues/6152
+if "VLLM_WORKER_MULTIPROC_METHOD" not in os.environ:
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import argparse
 import json

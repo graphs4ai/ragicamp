@@ -27,11 +27,13 @@ name: smart_retrieval_slm
 description: "Test if premium retrieval compensates for smaller generators"
 
 # Sample size
-num_questions: 200
+num_questions: 1000
 
 # Default dataset (used when experiments don't specify)
 datasets:
   - nq
+  - trivia_qa
+  - hotpot_qa
 
 # =============================================================================
 # Metrics
@@ -39,8 +41,9 @@ datasets:
 metrics:
   - f1
   - exact_match
-  - bertscore
   - llm_judge_qa
+  - bertscore
+  - bleurt
 
 llm_judge:
   model: openai:gpt-4o-mini

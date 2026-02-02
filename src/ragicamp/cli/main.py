@@ -11,16 +11,20 @@ Commands:
 """
 
 # ============================================================================
-# CRITICAL: Configure TensorFlow BEFORE any library imports!
-# TensorFlow is transitively imported by transformers/sentence-transformers.
-# By default, TF allocates ALL GPU memory on import, causing OOM.
+# CRITICAL: Configure environment BEFORE any library imports!
 # ============================================================================
 import os
 
+# TensorFlow: Prevent grabbing all GPU memory on import
 if "TF_FORCE_GPU_ALLOW_GROWTH" not in os.environ:
     os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 if "TF_CPP_MIN_LOG_LEVEL" not in os.environ:
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+# vLLM: Use 'spawn' for multiprocessing to avoid CUDA fork issues
+# See: https://github.com/vllm-project/vllm/issues/6152
+if "VLLM_WORKER_MULTIPROC_METHOD" not in os.environ:
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 import argparse
 import sys
