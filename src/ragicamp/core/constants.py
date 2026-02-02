@@ -186,7 +186,7 @@ class Defaults:
     FAISS_INDEX_TYPE = "flat"  # Default index type: flat, ivf, ivfpq, hnsw
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
-    FAISS_CPU_THREADS = 128  # Number of threads for CPU FAISS (set to number of cores)
+    FAISS_CPU_THREADS = 0  # 0 = auto-detect (use all available cores)
 
 
 # === Prompt Templates ===
