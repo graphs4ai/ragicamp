@@ -174,8 +174,8 @@ class Defaults:
 
     # GPU Memory Partitioning (for vLLM + FAISS GPU coexistence)
     # These should sum to <= 1.0, leaving some headroom for PyTorch overhead
-    VLLM_GPU_MEMORY_FRACTION = 0.60  # 60% for vLLM (LLM inference)
-    FAISS_GPU_MEMORY_FRACTION = 0.35  # 35% for FAISS GPU index (~67GB on B200)
+    VLLM_GPU_MEMORY_FRACTION = 0.40  # 40% for vLLM (SLM inference)
+    FAISS_GPU_MEMORY_FRACTION = 0.55  # 55% for FAISS GPU index (~105GB on B200)
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration
