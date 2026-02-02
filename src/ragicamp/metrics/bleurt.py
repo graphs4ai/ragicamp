@@ -63,13 +63,25 @@ class BLEURTMetric(Metric):
                 "Install with: uv sync (already included in dependencies)"
             ) from e
 
-        # Check if TensorFlow can see GPU
+        # Check if TensorFlow can see GPU and configure it
         try:
             import tensorflow as tf
+            
+            # List physical GPUs
             gpus = tf.config.list_physical_devices("GPU")
-            device_info = f"GPU: {len(gpus)}" if gpus else "CPU"
-        except Exception:
-            device_info = "unknown"
+            if gpus:
+                # Enable memory growth to avoid allocating all GPU memory
+                for gpu in gpus:
+                    try:
+                        tf.config.experimental.set_memory_growth(gpu, True)
+                    except RuntimeError:
+                        pass  # Already configured
+                device_info = f"GPU: {len(gpus)}"
+            else:
+                # Check why no GPUs - could be TF version issue
+                device_info = "CPU (no GPU detected by TensorFlow)"
+        except Exception as e:
+            device_info = f"CPU (error: {e})"
 
         print(f"  📥 Loading BLEURT model: {self.checkpoint} (device={device_info})")
 
