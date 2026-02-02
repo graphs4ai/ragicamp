@@ -1,6 +1,7 @@
 """Embedding index builder.
 
 Builds dense vector indexes for semantic search using sentence transformers.
+Supports GPU FAISS for accelerated similarity search.
 """
 
 import gc
@@ -10,6 +11,7 @@ import tempfile
 import time
 from typing import Any
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
 
@@ -29,6 +31,10 @@ def build_embedding_index(
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 64,
     chunk_workers: int = None,  # Kept for API compatibility, not used
+    index_type: str = None,
+    use_gpu: bool = None,
+    nlist: int = None,
+    nprobe: int = None,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -45,10 +51,19 @@ def build_embedding_index(
         doc_batch_size: Documents to process per batch (default 5000)
         embedding_batch_size: Texts to embed per GPU batch (default 64, increase for more VRAM)
         chunk_workers: Deprecated, kept for API compatibility
+        index_type: FAISS index type ('flat', 'ivf', 'ivfpq', 'hnsw'). Default: Defaults.FAISS_INDEX_TYPE
+        use_gpu: Whether to use GPU FAISS. Default: Defaults.FAISS_USE_GPU
+        nlist: Number of clusters for IVF indexes. Default: Defaults.FAISS_IVF_NLIST
+        nprobe: Number of clusters to search. Default: Defaults.FAISS_IVF_NPROBE
 
     Returns:
         Path to the saved index
     """
+    # Apply defaults
+    index_type = index_type or Defaults.FAISS_INDEX_TYPE
+    use_gpu = use_gpu if use_gpu is not None else Defaults.FAISS_USE_GPU
+    nlist = nlist or Defaults.FAISS_IVF_NLIST
+    nprobe = nprobe or Defaults.FAISS_IVF_NPROBE
     import faiss
     import numpy as np
     from sentence_transformers import SentenceTransformer
@@ -65,6 +80,9 @@ def build_embedding_index(
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
     print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
+    print(f"  FAISS index type: {index_type}, GPU: {use_gpu}")
+    if index_type in ("ivf", "ivfpq"):
+        print(f"  IVF params: nlist={nlist}, nprobe={nprobe}")
     print(f"{'=' * 60}")
 
     # Initialize corpus
@@ -117,8 +135,25 @@ def build_embedding_index(
     except Exception as e:
         print(f"  torch.compile() not applied: {e}")
 
-    # Initialize FAISS index
-    index = faiss.IndexFlatIP(embedding_dim)
+    # Initialize FAISS index (we'll build on CPU first, then optionally move to GPU after all vectors are added)
+    # This is more efficient than adding vectors to GPU index incrementally
+    if index_type == "flat":
+        cpu_index = faiss.IndexFlatIP(embedding_dim)
+    elif index_type == "ivf":
+        quantizer = faiss.IndexFlatIP(embedding_dim)
+        cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist)
+    elif index_type == "ivfpq":
+        quantizer = faiss.IndexFlatIP(embedding_dim)
+        m = min(32, embedding_dim // 4)
+        cpu_index = faiss.IndexIVFPQ(quantizer, embedding_dim, nlist, m, 8)
+    elif index_type == "hnsw":
+        cpu_index = faiss.IndexHNSWFlat(embedding_dim, 32)
+        cpu_index.hnsw.efConstruction = 200
+    else:
+        raise ValueError(f"Unknown index type: {index_type}")
+
+    index = cpu_index
+    is_trained = (index_type == "flat" or index_type == "hnsw")  # These don't need training
 
     # Chunking config
     chunk_config = ChunkConfig(
@@ -186,7 +221,15 @@ def build_embedding_index(
                         texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
                     embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                    index.add(embeddings.astype("float32"))
+                    embeddings = embeddings.astype("float32")
+
+                    # Train IVF index on first batch if needed
+                    if not is_trained and index_type in ("ivf", "ivfpq"):
+                        print(f"    Training IVF index on {len(embeddings)} vectors...")
+                        index.train(embeddings)
+                        is_trained = True
+
+                    index.add(embeddings)
 
                     # Save chunks incrementally to disk
                     pickle.dump(batch_chunks, docs_file)
@@ -234,7 +277,15 @@ def build_embedding_index(
                     texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
                 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                index.add(embeddings.astype("float32"))
+                embeddings = embeddings.astype("float32")
+
+                # Train IVF index if not yet trained
+                if not is_trained and index_type in ("ivf", "ivfpq"):
+                    print(f"    Training IVF index on {len(embeddings)} vectors...")
+                    index.train(embeddings)
+                    is_trained = True
+
+                index.add(embeddings)
                 pickle.dump(batch_chunks, docs_file)
                 docs_file.flush()
 
@@ -246,9 +297,15 @@ def build_embedding_index(
 
     print(f"✓ Embedding complete: {total_docs} docs → {total_chunks} chunks")
 
+    # Set nprobe for IVF indexes
+    if index_type in ("ivf", "ivfpq") and hasattr(index, 'nprobe'):
+        index.nprobe = nprobe
+        print(f"  Set nprobe={nprobe} for IVF index")
+
     # Save to shared indexes directory
     artifact_path = manager.get_embedding_index_path(index_name)
 
+    # Save FAISS index (always save CPU version for portability)
     faiss.write_index(index, str(artifact_path / "index.faiss"))
 
     # Combine all batches into single pickle file
@@ -273,7 +330,7 @@ def build_embedding_index(
         "name": index_name,
         "type": "embedding",
         "embedding_model": embedding_model,
-        "index_type": "flat",
+        "index_type": index_type,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
         "chunking_strategy": chunking_strategy,
@@ -281,6 +338,10 @@ def build_embedding_index(
         "corpus_max_docs": corpus_config.get("max_docs"),
         "num_documents": total_chunks,
         "embedding_dim": embedding_dim,
+        # GPU FAISS settings (used when loading)
+        "use_gpu": use_gpu,
+        "nlist": nlist,
+        "nprobe": nprobe,
     }
     manager.save_json(config, artifact_path / "config.json")
 
@@ -288,4 +349,6 @@ def build_embedding_index(
     gc.collect()
 
     print(f"✓ Saved to: {artifact_path}")
+    if use_gpu:
+        print(f"  Index will be loaded to GPU on next use (use_gpu={use_gpu})")
     return str(artifact_path)

@@ -8,6 +8,12 @@ Example:
         model = load_model()
         results = model.generate(...)
     # Model automatically cleaned up, GPU memory freed
+
+GPU Memory Partitioning:
+    When using vLLM + FAISS GPU together, memory is partitioned:
+    - vLLM: 60% (configurable via Defaults.VLLM_GPU_MEMORY_FRACTION)
+    - FAISS: 35% (configurable via Defaults.FAISS_GPU_MEMORY_FRACTION)
+    - Overhead: 5% for PyTorch, embeddings, etc.
 """
 
 import gc
@@ -50,6 +56,18 @@ class ResourceManager:
             gc.collect()
 
     @staticmethod
+    def clear_faiss_gpu_resources():
+        """Release FAISS GPU resources to free memory.
+
+        Call this before loading a large LLM if FAISS was using GPU.
+        """
+        try:
+            from ragicamp.indexes.embedding import release_faiss_gpu_resources
+            release_faiss_gpu_resources()
+        except ImportError:
+            pass
+
+    @staticmethod
     def print_memory_status(phase: str = ""):
         """Print current memory status."""
         info = ResourceManager.get_gpu_memory_info()
@@ -59,6 +77,20 @@ class ResourceManager:
                 f"🧠 {prefix}GPU: {info['allocated_gb']:.1f}/{info['total_gb']:.1f} GiB "
                 f"(free: {info['free_gb']:.1f} GiB)"
             )
+
+    @staticmethod
+    def print_memory_partitioning():
+        """Print recommended GPU memory partitioning."""
+        from ragicamp.core.constants import Defaults
+
+        info = ResourceManager.get_gpu_memory_info()
+        if info["available"]:
+            total = info["total_gb"]
+            vllm_gb = total * Defaults.VLLM_GPU_MEMORY_FRACTION
+            faiss_gb = total * Defaults.FAISS_GPU_MEMORY_FRACTION
+            print(f"📊 GPU Memory Partitioning (total: {total:.1f} GiB):")
+            print(f"   vLLM:  {vllm_gb:.1f} GiB ({Defaults.VLLM_GPU_MEMORY_FRACTION*100:.0f}%)")
+            print(f"   FAISS: {faiss_gb:.1f} GiB ({Defaults.FAISS_GPU_MEMORY_FRACTION*100:.0f}%)")
 
 
 @contextmanager

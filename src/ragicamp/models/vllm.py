@@ -7,11 +7,16 @@ vLLM provides:
 
 This is the recommended backend for running local models with long context
 without needing to quantize model weights.
+
+GPU Memory Partitioning:
+    When using with FAISS GPU, vLLM defaults to 60% GPU memory utilization
+    to leave room for FAISS indexes. Adjust via gpu_memory_utilization param.
 """
 
 import gc
 from typing import Any, Optional, Union
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
 
@@ -50,7 +55,7 @@ class VLLMModel(LanguageModel):
         model_name: str,
         dtype: str = "bfloat16",
         quantization: Optional[str] = None,
-        gpu_memory_utilization: float = 0.90,
+        gpu_memory_utilization: Optional[float] = None,
         max_model_len: Optional[int] = None,
         tensor_parallel_size: int = 1,
         trust_remote_code: bool = True,
@@ -68,7 +73,8 @@ class VLLMModel(LanguageModel):
             quantization: Optional quantization method ('awq', 'gptq', 'squeezellm', None)
                          Default is None (no quantization - full precision).
             gpu_memory_utilization: Fraction of GPU memory to use (0.0-1.0).
-                                   Default 0.90 leaves 10% headroom.
+                                   Default is Defaults.VLLM_GPU_MEMORY_FRACTION (0.60)
+                                   to leave room for FAISS GPU indexes.
             max_model_len: Maximum context length. If None, uses model's default.
             tensor_parallel_size: Number of GPUs for tensor parallelism.
             trust_remote_code: Whether to trust remote code in model repos.
@@ -78,6 +84,9 @@ class VLLMModel(LanguageModel):
             enable_prefix_caching: Enable automatic prefix caching for efficiency.
             **kwargs: Additional vLLM engine arguments.
         """
+        # Use default memory fraction if not specified (leaves room for FAISS GPU)
+        if gpu_memory_utilization is None:
+            gpu_memory_utilization = Defaults.VLLM_GPU_MEMORY_FRACTION
         super().__init__(model_name, **kwargs)
 
         if not _check_vllm_available():
