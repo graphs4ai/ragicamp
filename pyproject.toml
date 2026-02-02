@@ -43,7 +43,17 @@ dependencies = [
     "boto3>=1.42.39",
     "awscli>=1.30.0",  # For B2 backup download script
     "vllm>=0.6.0",  # PagedAttention for efficient LLM inference
+    # Visualization
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+    "wandb>=0.15.0",
+    # RAG features
+    "rank-bm25>=0.2.2",  # BM25 for hybrid retrieval
 ]
+# NOTE: For CUDA 11.x, manually swap faiss-gpu packages:
+#   uv pip uninstall faiss-gpu-cu12 && uv pip install faiss-gpu-cu11>=1.7.4
+# NOTE: flash-attn has complex build requirements - install manually if needed:
+#   pip install flash-attn --no-build-isolation
 
 [project.scripts]
 ragicamp = "ragicamp.cli.main:main"
@@ -52,25 +62,7 @@ ragicamp = "ragicamp.cli.main:main"
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "ruff>=0.4.0",
     "mypy>=1.0.0",
-]
-viz = [
-    "matplotlib>=3.5.0",
-    "seaborn>=0.12.0",
-    "wandb>=0.15.0",
-]
-# FlashAttention-2 for memory-efficient attention (O(n) instead of O(n²))
-# NOTE: flash-attn has complex build requirements (CUDA toolkit with nvcc >= 11.7)
-# Install manually if needed: pip install flash-attn --no-build-isolation
-# The code gracefully falls back to standard attention if not installed.
-#
-# NOTE: For CUDA 11.x, manually swap faiss-gpu packages:
-#   uv pip uninstall faiss-gpu-cu12 && uv pip install faiss-gpu-cu11>=1.7.4
-# Advanced RAG features (reranking, BM25)
-# Note: Cross-encoders are included in sentence-transformers
-rag = [
-    "rank-bm25>=0.2.2",  # Proper BM25 implementation for hybrid retrieval
 ]
 
 [tool.hatch.metadata]
