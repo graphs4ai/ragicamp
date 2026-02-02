@@ -104,6 +104,7 @@ rag:
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
+      index_type: hnsw  # Fast CPU search (50-100x faster than flat)
     
     - type: dense
       name: dense_bge_m3_512
@@ -111,6 +112,7 @@ rag:
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
+      index_type: hnsw
     
     # --- COMMENTED: Not built yet ---
     # - type: dense
@@ -119,6 +121,7 @@ rag:
     #   chunk_size: 512
     #   chunk_overlap: 50
     #   chunking_strategy: recursive
+    #   index_type: hnsw
     
     # # Small chunk retrievers (more precise matching, retrieve more)
     # - type: dense
@@ -127,6 +130,7 @@ rag:
     #   chunk_size: 256
     #   chunk_overlap: 25
     #   chunking_strategy: recursive
+    #   index_type: hnsw
     
     # - type: hybrid
     #   name: hybrid_bge_large_256
@@ -134,6 +138,7 @@ rag:
     #   alpha: 0.5
     #   chunk_size: 256
     #   chunk_overlap: 25
+    #   index_type: hnsw
     
     # # Hybrid retrievers (dense + BM25)
     # - type: hybrid
@@ -142,6 +147,7 @@ rag:
     #   alpha: 0.5
     #   chunk_size: 512
     #   chunk_overlap: 50
+    #   index_type: hnsw
     
     # - type: hybrid
     #   name: hybrid_bge_large_07
@@ -149,6 +155,7 @@ rag:
     #   alpha: 0.7
     #   chunk_size: 512
     #   chunk_overlap: 50
+    #   index_type: hnsw
     
     # # Hierarchical retrievers
     # - type: hierarchical
@@ -158,6 +165,7 @@ rag:
     #   child_chunk_size: 256
     #   parent_overlap: 200
     #   child_overlap: 50
+    #   index_type: hnsw
     
     # - type: hierarchical
     #   name: hierarchical_bge_4096_512
@@ -166,6 +174,7 @@ rag:
     #   child_chunk_size: 512
     #   parent_overlap: 400
     #   child_overlap: 100
+    #   index_type: hnsw
 
 # =============================================================================
 # SINGLETON EXPERIMENTS (hypothesis-driven)
