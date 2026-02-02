@@ -75,6 +75,13 @@ def main():
         judge_model = create_judge_model(llm_judge_config)
     
     # Convert dict back to ExpSpec dataclass
+    # Use metrics from spec_dict (passed from parent) or fall back to CLI arg
+    spec_metrics = spec_dict.get("metrics", metrics)
+    
+    # Convert agent_params dict to tuple for frozen dataclass
+    agent_params = spec_dict.get("agent_params", {})
+    agent_params_tuple = tuple(agent_params.items()) if agent_params else ()
+    
     spec = ExpSpec(
         name=spec_dict["name"],
         exp_type=spec_dict["exp_type"],
@@ -84,11 +91,15 @@ def main():
         quant=spec_dict.get("quant", "4bit"),
         retriever=spec_dict.get("retriever"),
         top_k=spec_dict.get("top_k", 5),
+        fetch_k=spec_dict.get("fetch_k"),
         query_transform=spec_dict.get("query_transform"),
         reranker=spec_dict.get("reranker"),
         reranker_model=spec_dict.get("reranker_model"),
         batch_size=spec_dict.get("batch_size", 8),
         min_batch_size=spec_dict.get("min_batch_size", 1),
+        metrics=spec_metrics,
+        agent_type=spec_dict.get("agent_type"),
+        agent_params=agent_params_tuple,
     )
     
     # Reuse the existing run_spec function with subprocess disabled

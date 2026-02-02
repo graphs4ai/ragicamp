@@ -314,6 +314,9 @@ def run_spec_subprocess(
             "reranker_model": spec.reranker_model,
             "batch_size": current_batch_size,
             "min_batch_size": min_batch_size,
+            "metrics": list(spec.metrics) if spec.metrics else metrics,
+            "agent_type": spec.agent_type,
+            "agent_params": dict(spec.agent_params) if spec.agent_params else {},
         }
 
         cmd = [
