@@ -32,8 +32,8 @@ num_questions: 1000
 # Default dataset (used when experiments don't specify)
 datasets:
   - nq
-  - trivia_qa
-  - hotpot_qa
+  - triviaqa
+  - hotpotqa
 
 # =============================================================================
 # Metrics

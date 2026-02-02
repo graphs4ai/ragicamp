@@ -194,8 +194,8 @@ class BLEURTMetric(Metric):
             # Load model (lazy)
             self._load_scorer()
 
-            # Start with batch_size=64, halve on OOM
-            batch_size = 64
+            # Start with batch_size=128, halve on OOM
+            batch_size = 128
             min_batch_size = 1
 
             while batch_size >= min_batch_size:
