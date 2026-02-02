@@ -70,9 +70,9 @@ vllm = [
 # The code gracefully falls back to standard attention if not installed.
 #
 # All GPU optimizations (vLLM only - flash-attn excluded due to build complexity)
-# NOTE: For GPU FAISS, manually replace faiss-cpu with faiss-gpu:
-#   pip uninstall faiss-cpu -y && pip install faiss-gpu-cu12
-# (or faiss-gpu-cu11 for CUDA 11.x)
+# NOTE: For GPU FAISS (10-100x faster similarity search), replace faiss-cpu:
+#   uv pip uninstall faiss-cpu && uv pip install faiss-gpu-cu12>=1.7.4
+# (or faiss-gpu-cu11>=1.7.4 for CUDA 11.x)
 gpu = [
     "vllm>=0.6.0",
 ]
