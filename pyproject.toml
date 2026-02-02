@@ -17,7 +17,7 @@ dependencies = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "datasets>=2.10.0",
-    "faiss-cpu>=1.7.4",
+    "faiss-gpu-cu12>=1.7.4",  # GPU FAISS for 10-100x faster similarity search
     "sentence-transformers>=2.2.0",
     "openai>=1.0.0",
     "tiktoken>=0.5.0",
@@ -70,9 +70,8 @@ vllm = [
 # The code gracefully falls back to standard attention if not installed.
 #
 # All GPU optimizations (vLLM only - flash-attn excluded due to build complexity)
-# NOTE: For GPU FAISS (10-100x faster similarity search), replace faiss-cpu:
-#   uv pip uninstall faiss-cpu && uv pip install faiss-gpu-cu12>=1.7.4
-# (or faiss-gpu-cu11>=1.7.4 for CUDA 11.x)
+# NOTE: faiss-gpu-cu12 is now the default. For CUDA 11.x, manually install:
+#   uv pip uninstall faiss-gpu-cu12 && uv pip install faiss-gpu-cu11>=1.7.4
 gpu = [
     "vllm>=0.6.0",
 ]
