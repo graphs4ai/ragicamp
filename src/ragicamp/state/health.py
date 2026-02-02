@@ -107,6 +107,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     results_path = exp_dir / "results.json"
 
     original_phase = state.phase
+    original_metrics = list(state.metrics_computed)
 
     # COMPLETE phase requires results.json
     if state.phase == ExperimentPhase.COMPLETE:
@@ -145,6 +146,27 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
         if not questions_path.exists():
             state.phase = ExperimentPhase.INIT
             state.predictions_complete = 0
+
+    # Validate that metrics_computed actually exist in predictions file
+    # This catches cases where state.json claims metrics but predictions file doesn't have them
+    if predictions_path.exists() and state.metrics_computed:
+        try:
+            with open(predictions_path) as f:
+                data = json.load(f)
+            actual_metrics = set(data.get("aggregate_metrics", {}).keys())
+            # Only keep metrics that actually exist in the predictions file
+            validated_metrics = [m for m in state.metrics_computed if m in actual_metrics]
+            if len(validated_metrics) != len(state.metrics_computed):
+                removed = set(state.metrics_computed) - set(validated_metrics)
+                logger.warning(
+                    "Metrics mismatch: state.json claims %s but predictions file missing: %s",
+                    state.metrics_computed,
+                    list(removed),
+                )
+                state.metrics_computed = validated_metrics
+        except Exception:
+            # If we can't read predictions, assume no metrics computed
+            state.metrics_computed = []
 
     # Log if we adjusted the phase
     if state.phase != original_phase:
