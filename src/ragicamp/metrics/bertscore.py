@@ -36,10 +36,13 @@ class BERTScoreMetric(Metric):
             return
 
         try:
+            import torch
             from bert_score import BERTScorer
 
-            print(f"  📥 Loading BERTScore model: {self.model_type}")
-            self._scorer = BERTScorer(model_type=self.model_type, lang="en")
+            # Use GPU if available
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"  📥 Loading BERTScore model: {self.model_type} (device={device})")
+            self._scorer = BERTScorer(model_type=self.model_type, lang="en", device=device)
         except ImportError as e:
             raise ImportError(
                 "bert-score is required for BERTScoreMetric. Install with: pip install bert-score"

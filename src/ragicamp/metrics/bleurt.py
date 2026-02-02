@@ -63,7 +63,15 @@ class BLEURTMetric(Metric):
                 "Install with: uv sync (already included in dependencies)"
             ) from e
 
-        print(f"  📥 Loading BLEURT model: {self.checkpoint}")
+        # Check if TensorFlow can see GPU
+        try:
+            import tensorflow as tf
+            gpus = tf.config.list_physical_devices("GPU")
+            device_info = f"GPU: {len(gpus)}" if gpus else "CPU"
+        except Exception:
+            device_info = "unknown"
+
+        print(f"  📥 Loading BLEURT model: {self.checkpoint} (device={device_info})")
 
         # Check cache first before trying anything else
         cache_path = Path.home() / ".cache" / "bleurt" / self.checkpoint
