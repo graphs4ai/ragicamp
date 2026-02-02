@@ -160,7 +160,7 @@ class IterativeRAGAgent(RAGAgent):
     def _evaluate_sufficiency(self, query: str, context: str) -> bool:
         """Evaluate if the context is sufficient to answer the question."""
         prompt = SUFFICIENCY_PROMPT.format(context=context, query=query)
-        response = self.model.generate(prompt, max_new_tokens=100)
+        response = self.model.generate(prompt, max_tokens=100)
 
         # Parse response - look for SUFFICIENT/INSUFFICIENT
         response_upper = response.upper()
@@ -176,7 +176,7 @@ class IterativeRAGAgent(RAGAgent):
             previous_query=previous_query,
             context=context[:2000],  # Limit context in prompt
         )
-        refined = self.model.generate(prompt, max_new_tokens=100)
+        refined = self.model.generate(prompt, max_tokens=100)
 
         # Clean up the response
         refined = refined.strip()

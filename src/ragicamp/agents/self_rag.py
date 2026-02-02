@@ -161,7 +161,7 @@ class SelfRAGAgent(RAGAgent):
             Higher = more confident, less likely to retrieve.
         """
         prompt = RETRIEVAL_DECISION_PROMPT.format(query=query)
-        response = self.model.generate(prompt, max_new_tokens=150)
+        response = self.model.generate(prompt, max_tokens=150)
 
         # Parse confidence from response
         confidence = 0.3  # Default to "uncertain, should retrieve"
@@ -218,7 +218,7 @@ class SelfRAGAgent(RAGAgent):
             query=query,
             answer=answer,
         )
-        response = self.model.generate(prompt, max_new_tokens=100)
+        response = self.model.generate(prompt, max_tokens=100)
 
         # Parse verification result
         response_upper = response.upper()
