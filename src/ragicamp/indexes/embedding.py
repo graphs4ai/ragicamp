@@ -541,3 +541,86 @@ class EmbeddingIndex(Index):
 
         logger.info("Loaded embedding index: %s (%d docs, GPU=%s)", name, len(index.documents), index._is_gpu_index)
         return index
+
+    def convert_to(self, new_index_type: str, save: bool = True) -> "EmbeddingIndex":
+        """Convert index to a different type without re-embedding.
+
+        This extracts vectors from the current index and builds a new index
+        with the specified type. Much faster than rebuilding from scratch.
+
+        Args:
+            new_index_type: Target index type ('flat', 'ivf', 'hnsw')
+            save: Whether to save the converted index (overwrites existing)
+
+        Returns:
+            Self with converted index
+        """
+        if self.index is None:
+            raise ValueError("No index to convert")
+
+        old_type = self.index_type
+        n_vectors = self.index.ntotal
+        dim = self._embedding_dim
+
+        logger.info("Converting index from %s to %s (%d vectors)...", old_type, new_index_type, n_vectors)
+
+        # Extract all vectors from current index
+        # For flat index, we can reconstruct directly
+        if hasattr(self.index, 'reconstruct_n'):
+            vectors = np.zeros((n_vectors, dim), dtype='float32')
+            self.index.reconstruct_n(0, n_vectors, vectors)
+        else:
+            # Fallback: search for each vector by ID (slower)
+            logger.warning("Index type doesn't support reconstruct_n, using slower method")
+            vectors = np.zeros((n_vectors, dim), dtype='float32')
+            for i in range(n_vectors):
+                vectors[i] = self.index.reconstruct(i)
+
+        # Create new index
+        self.index_type = new_index_type
+        self.index = self._create_faiss_index(num_vectors=n_vectors)
+
+        # Train if needed (IVF)
+        if new_index_type in ("ivf", "ivfpq"):
+            logger.info("Training %s index...", new_index_type)
+            self.index.train(vectors)
+
+        # Add vectors to new index
+        logger.info("Adding %d vectors to new %s index...", n_vectors, new_index_type)
+        self.index.add(vectors)
+
+        # Set search parameters
+        self._set_search_params()
+
+        logger.info("Conversion complete: %s -> %s", old_type, new_index_type)
+
+        if save:
+            self.save()
+            logger.info("Saved converted index")
+
+        return self
+
+    @classmethod
+    def convert_existing(
+        cls,
+        name: str,
+        new_index_type: str,
+        path: Optional[Path] = None,
+    ) -> "EmbeddingIndex":
+        """Load an existing index, convert it to a new type, and save.
+
+        Args:
+            name: Index name
+            new_index_type: Target index type ('flat', 'ivf', 'hnsw')
+            path: Optional custom path
+
+        Returns:
+            Converted EmbeddingIndex
+
+        Example:
+            >>> EmbeddingIndex.convert_existing("en_bge_m3_c512_o50", "hnsw")
+        """
+        # Load with GPU disabled (conversion happens on CPU)
+        index = cls.load(name, path=path, use_gpu=False)
+        index.convert_to(new_index_type, save=True)
+        return index
