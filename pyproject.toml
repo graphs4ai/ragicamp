@@ -42,6 +42,7 @@ dependencies = [
     "pytest>=8.4.2",
     "boto3>=1.42.39",
     "awscli>=1.30.0",  # For B2 backup download script
+    "vllm>=0.6.0",  # PagedAttention for efficient LLM inference
 ]
 
 [project.scripts]
@@ -59,22 +60,13 @@ viz = [
     "seaborn>=0.12.0",
     "wandb>=0.15.0",
 ]
-# vLLM backend for efficient inference with PagedAttention
-# Recommended for long context without weight quantization
-vllm = [
-    "vllm>=0.6.0",
-]
 # FlashAttention-2 for memory-efficient attention (O(n) instead of O(n²))
 # NOTE: flash-attn has complex build requirements (CUDA toolkit with nvcc >= 11.7)
 # Install manually if needed: pip install flash-attn --no-build-isolation
 # The code gracefully falls back to standard attention if not installed.
 #
-# All GPU optimizations (vLLM only - flash-attn excluded due to build complexity)
-# NOTE: faiss-gpu-cu12 is now the default. For CUDA 11.x, manually install:
+# NOTE: For CUDA 11.x, manually swap faiss-gpu packages:
 #   uv pip uninstall faiss-gpu-cu12 && uv pip install faiss-gpu-cu11>=1.7.4
-gpu = [
-    "vllm>=0.6.0",
-]
 # Advanced RAG features (reranking, BM25)
 # Note: Cross-encoders are included in sentence-transformers
 rag = [
