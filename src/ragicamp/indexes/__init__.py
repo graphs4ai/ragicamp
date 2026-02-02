@@ -4,6 +4,7 @@ Indexes are the reusable, expensive-to-build artifacts that store:
 - Document chunks
 - Embeddings
 - FAISS indices
+- Sparse (TF-IDF/BM25) indices
 
 Retrievers are cheap strategy wrappers that use indexes.
 
@@ -20,15 +21,19 @@ from ragicamp.indexes.builder import (
 )
 from ragicamp.indexes.embedding import EmbeddingIndex
 from ragicamp.indexes.hierarchical import HierarchicalIndex
+from ragicamp.indexes.sparse import SparseIndex, SparseMethod, get_sparse_index_name
 
 __all__ = [
     "Index",
     "EmbeddingIndex",
     "HierarchicalIndex",
+    "SparseIndex",
+    "SparseMethod",
     # Builder utilities
     "build_embedding_index",
     "build_hierarchical_index",
     "build_retriever_from_index",
     "ensure_indexes_exist",
     "get_embedding_index_name",
+    "get_sparse_index_name",
 ]

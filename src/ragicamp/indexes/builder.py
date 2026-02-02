@@ -13,6 +13,7 @@ from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
+from ragicamp.indexes.sparse import SparseIndex, get_sparse_index_name
 from ragicamp.utils.artifacts import get_artifact_manager
 from ragicamp.utils.resource_manager import ResourceManager
 
@@ -59,15 +60,17 @@ def get_embedding_index_name(
 def build_retriever_from_index(
     retriever_config: dict[str, Any],
     embedding_index_name: str,
+    shared_sparse_indexes: dict[str, str] | None = None,
 ) -> str:
     """Build a retriever config that uses a shared embedding index.
 
     For dense retrievers, this just creates a config pointing to the index.
-    For hybrid retrievers, this also builds the BM25 sparse index.
+    For hybrid retrievers, this references a shared sparse index.
 
     Args:
         retriever_config: Retriever configuration
         embedding_index_name: Name of the shared embedding index to use
+        shared_sparse_indexes: Dict mapping embedding_index+method to sparse index name
 
     Returns:
         Retriever name
@@ -98,24 +101,45 @@ def build_retriever_from_index(
 
     if retriever_type == "hybrid":
         retriever_cfg["alpha"] = retriever_config.get("alpha", 0.5)
-        # For hybrid, we need to build the BM25 index
-        print("    Building BM25 index for hybrid retriever...")
-        with open(index_path / "documents.pkl", "rb") as f:
-            documents = pickle.load(f)
+        sparse_method = retriever_config.get("sparse_method", "tfidf")
+        retriever_cfg["sparse_method"] = sparse_method
 
-        from ragicamp.retrievers.sparse import SparseRetriever
+        # Reference the shared sparse index
+        sparse_index_name = get_sparse_index_name(embedding_index_name, sparse_method)
+        retriever_cfg["sparse_index"] = sparse_index_name
 
-        sparse = SparseRetriever(name=f"{retriever_name}_sparse")
-        sparse.index_documents(documents)
+        # Build shared sparse index if not already built
+        if shared_sparse_indexes is not None:
+            cache_key = f"{embedding_index_name}_{sparse_method}"
+            if cache_key not in shared_sparse_indexes:
+                print(f"    Building shared sparse index ({sparse_method})...")
+                with open(index_path / "documents.pkl", "rb") as f:
+                    documents = pickle.load(f)
 
-        # Save sparse index components
-        with open(retriever_path / "sparse_vectorizer.pkl", "wb") as f:
-            pickle.dump(sparse.vectorizer, f)
-        with open(retriever_path / "sparse_matrix.pkl", "wb") as f:
-            pickle.dump(sparse.doc_vectors, f)
+                sparse_index = SparseIndex(
+                    name=sparse_index_name,
+                    method=sparse_method,
+                )
+                sparse_index.build(documents)
+                sparse_index.save()
 
-        retriever_cfg["has_sparse"] = True
-        del documents, sparse
+                shared_sparse_indexes[cache_key] = sparse_index_name
+                del documents, sparse_index
+            else:
+                print(f"    Reusing shared sparse index: {sparse_index_name}")
+        elif not manager.sparse_index_exists(sparse_index_name):
+            # Fallback: build if no cache provided
+            print(f"    Building sparse index ({sparse_method})...")
+            with open(index_path / "documents.pkl", "rb") as f:
+                documents = pickle.load(f)
+
+            sparse_index = SparseIndex(
+                name=sparse_index_name,
+                method=sparse_method,
+            )
+            sparse_index.build(documents)
+            sparse_index.save()
+            del documents, sparse_index
 
     manager.save_json(retriever_cfg, retriever_path / "config.json")
 
@@ -212,6 +236,9 @@ def ensure_indexes_exist(
                 raise FileNotFoundError(f"Missing embedding index: {index_name}")
 
     # Step 3: Create retriever configs that reference the shared indexes
+    # Track built sparse indexes to avoid rebuilding
+    shared_sparse_indexes: dict[str, str] = {}
+
     ready_retrievers = []
     for index_name, retrievers in index_to_retrievers.items():
         first_retriever = retrievers[0]
@@ -222,7 +249,7 @@ def ensure_indexes_exist(
         else:
             for config in retrievers:
                 if not manager.index_exists(config["name"]):
-                    build_retriever_from_index(config, index_name)
+                    build_retriever_from_index(config, index_name, shared_sparse_indexes)
                 ready_retrievers.append(config["name"])
 
     return ready_retrievers

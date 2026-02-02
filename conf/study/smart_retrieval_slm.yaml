@@ -135,19 +135,46 @@ rag:
     #   chunking_strategy: recursive
     #   index_type: hnsw
     
-    # Hybrid retrievers (dense + TF-IDF sparse) - reuses BGE-large embeddings
+    # -------------------------------------------------------------------------
+    # Hybrid retrievers (dense + sparse) - reuses BGE-large embeddings
+    # -------------------------------------------------------------------------
+    # sparse_method: 'tfidf' (default) or 'bm25'
+    # Multiple hybrid retrievers with same embedding_model share sparse index
+    
+    # TF-IDF hybrids
     - type: hybrid
-      name: hybrid_bge_large_05
+      name: hybrid_bge_large_tfidf_05
       embedding_model: BAAI/bge-large-en-v1.5
-      alpha: 0.5  # 50% dense, 50% sparse (TF-IDF)
+      sparse_method: tfidf
+      alpha: 0.5  # 50% dense, 50% sparse
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
     
     - type: hybrid
-      name: hybrid_bge_large_07
+      name: hybrid_bge_large_tfidf_07
       embedding_model: BAAI/bge-large-en-v1.5
-      alpha: 0.7  # 70% dense, 30% sparse (TF-IDF)
+      sparse_method: tfidf
+      alpha: 0.7  # 70% dense, 30% sparse
+      chunk_size: 512
+      chunk_overlap: 50
+      index_type: hnsw
+    
+    # BM25 hybrids (more sophisticated sparse ranking)
+    - type: hybrid
+      name: hybrid_bge_large_bm25_05
+      embedding_model: BAAI/bge-large-en-v1.5
+      sparse_method: bm25
+      alpha: 0.5  # 50% dense, 50% sparse
+      chunk_size: 512
+      chunk_overlap: 50
+      index_type: hnsw
+    
+    - type: hybrid
+      name: hybrid_bge_large_bm25_07
+      embedding_model: BAAI/bge-large-en-v1.5
+      sparse_method: bm25
+      alpha: 0.7  # 70% dense, 30% sparse
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
@@ -193,20 +220,37 @@ experiments:
   #   prompt: concise
 
   # ========================================================================
-  # GROUP B: Hybrid Retrieval (Dense + TF-IDF Sparse)
+  # GROUP B: Hybrid Retrieval (Dense + Sparse)
   # ========================================================================
+  # Tests TF-IDF vs BM25 sparse methods with different alpha blends
   
-  - name: b1_hybrid_balanced
-    hypothesis: "50/50 dense+sparse catches keywords dense misses"
+  # B1-B2: TF-IDF sparse (simpler, faster)
+  - name: b1_hybrid_tfidf_balanced
+    hypothesis: "TF-IDF 50/50 catches keywords dense misses"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_05
+    retriever: hybrid_bge_large_tfidf_05
     top_k: 5
     prompt: concise
   
-  - name: b2_hybrid_dense_heavy
-    hypothesis: "70/30 dense-heavy hybrid for semantic priority"
+  - name: b2_hybrid_tfidf_dense
+    hypothesis: "TF-IDF 70/30 dense-heavy for semantic priority"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_07
+    retriever: hybrid_bge_large_tfidf_07
+    top_k: 5
+    prompt: concise
+  
+  # B3-B4: BM25 sparse (more sophisticated probabilistic ranking)
+  - name: b3_hybrid_bm25_balanced
+    hypothesis: "BM25 50/50 - better sparse ranking than TF-IDF"
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_bm25_05
+    top_k: 5
+    prompt: concise
+  
+  - name: b4_hybrid_bm25_dense
+    hypothesis: "BM25 70/30 - best of both worlds?"
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_bm25_07
     top_k: 5
     prompt: concise
 
@@ -233,9 +277,9 @@ experiments:
     prompt: concise
   
   - name: d3_hybrid_rerank
-    hypothesis: "Hybrid + rerank = best of both worlds"
+    hypothesis: "Hybrid (BM25) + rerank = best of both worlds"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_05
+    retriever: hybrid_bge_large_bm25_05
     top_k: 5
     fetch_k: 20
     reranker: bge
@@ -343,19 +387,19 @@ experiments:
   # ========================================================================
   
   - name: g1_premium_stack
-    hypothesis: "Best-in-class: hybrid + rerank"
+    hypothesis: "Best-in-class: hybrid (BM25) + rerank"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_07
+    retriever: hybrid_bge_large_bm25_07
     top_k: 5
     fetch_k: 25
     reranker: bge
     prompt: concise
   
   - name: g2_iterative_premium
-    hypothesis: "Iterative + hybrid + rerank"
+    hypothesis: "Iterative + hybrid (BM25) + rerank"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
-    retriever: hybrid_bge_large_07
+    retriever: hybrid_bge_large_bm25_07
     top_k: 5
     fetch_k: 20
     reranker: bge

@@ -131,10 +131,16 @@ class ArtifactManager:
             return False
 
         if retriever_type == "hybrid":
-            # Hybrid needs BM25 sparse index
-            return (path / "sparse_matrix.pkl").exists() and (
-                path / "sparse_vectorizer.pkl"
-            ).exists()
+            # Hybrid needs sparse index reference (new format) or legacy inline sparse
+            sparse_index_name = config.get("sparse_index")
+            if sparse_index_name:
+                # New format: references shared sparse index
+                return self.sparse_index_exists(sparse_index_name)
+            else:
+                # Legacy format: sparse stored with retriever
+                return (path / "sparse_matrix.pkl").exists() and (
+                    path / "sparse_vectorizer.pkl"
+                ).exists()
         else:
             # Dense/hierarchical just need config with index reference
             has_index_ref = (
@@ -205,6 +211,53 @@ class ArtifactManager:
         if not self.indexes_dir.exists():
             return []
         return [d.name for d in self.indexes_dir.iterdir() if d.is_dir()]
+
+    # =========================================================================
+    # Shared sparse indexes
+    # =========================================================================
+
+    def get_sparse_index_path(self, name: str) -> Path:
+        """Get path for a shared sparse index.
+
+        Sparse indexes are stored in indexes/ alongside embedding indexes.
+
+        Args:
+            name: Sparse index name (e.g., 'en_bge_large_c512_sparse_tfidf')
+
+        Returns:
+            Path to sparse index directory
+        """
+        path = self.indexes_dir / name
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def sparse_index_exists(self, name: str) -> bool:
+        """Check if a sparse index exists.
+
+        Args:
+            name: Sparse index name
+
+        Returns:
+            True if sparse index exists with required files
+        """
+        path = self.indexes_dir / name
+        if not path.exists():
+            return False
+
+        config_path = path / "config.json"
+        if not config_path.exists():
+            return False
+
+        try:
+            config = self.load_json(config_path)
+            method = config.get("method", "tfidf")
+        except Exception:
+            return False
+
+        if method == "tfidf":
+            return (path / "vectorizer.pkl").exists() and (path / "doc_vectors.pkl").exists()
+        else:  # bm25
+            return (path / "bm25.pkl").exists()
 
     @staticmethod
     def compute_index_name(

@@ -1,8 +1,8 @@
-"""Hybrid retriever combining dense and sparse (TF-IDF) search.
+"""Hybrid retriever combining dense and sparse search.
 
 Hybrid retrieval combines the strengths of:
 - Dense retrieval (semantic understanding, handles synonyms)
-- Sparse retrieval (TF-IDF, exact keyword matching, handles rare terms)
+- Sparse retrieval (TF-IDF or BM25, exact keyword matching, handles rare terms)
 
 This is especially useful when documents contain:
 - Technical jargon
@@ -17,15 +17,15 @@ from typing import Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.embedding import EmbeddingIndex
+from ragicamp.indexes.sparse import SparseIndex, SparseMethod, get_sparse_index_name
 from ragicamp.retrievers.base import Document, Retriever
-from ragicamp.retrievers.sparse import SparseRetriever
 from ragicamp.utils.artifacts import get_artifact_manager
 
 logger = get_logger(__name__)
 
 
 class HybridRetriever(Retriever):
-    """Combines dense (semantic) and sparse (TF-IDF) retrieval.
+    """Combines dense (semantic) and sparse (TF-IDF/BM25) retrieval.
 
     Uses Reciprocal Rank Fusion (RRF) to merge results from both
     retrievers. RRF is robust and doesn't require score normalization.
@@ -33,14 +33,17 @@ class HybridRetriever(Retriever):
     RRF formula: score(d) = Σ 1/(k + rank(d))
     where k is a constant (typically 60) and rank is 1-indexed.
 
-    This is a thin wrapper around an EmbeddingIndex + TF-IDF sparse index.
+    Uses shared SparseIndex for efficiency - multiple hybrid retrievers
+    with different alphas share the same sparse index.
     """
 
     def __init__(
         self,
         name: str,
         index: Optional[EmbeddingIndex] = None,
+        sparse_index: Optional[SparseIndex] = None,
         embedding_model: str = "BAAI/bge-large-en-v1.5",
+        sparse_method: str | SparseMethod = SparseMethod.TFIDF,
         alpha: float = 0.5,
         rrf_k: int = 60,
         **kwargs: Any,
@@ -50,7 +53,9 @@ class HybridRetriever(Retriever):
         Args:
             name: Retriever identifier
             index: Pre-built EmbeddingIndex to use (preferred)
+            sparse_index: Pre-built SparseIndex to use (preferred)
             embedding_model: Model name (used if building index)
+            sparse_method: Sparse method ('tfidf' or 'bm25')
             alpha: Weight for dense vs sparse (0=sparse only, 1=dense only)
             rrf_k: RRF constant (higher = more weight to lower ranks)
             **kwargs: Additional configuration
@@ -58,24 +63,36 @@ class HybridRetriever(Retriever):
         super().__init__(name, **kwargs)
 
         self.index = index
+        self._sparse_index = sparse_index
         self.embedding_model_name = embedding_model
+        self.sparse_method = (
+            SparseMethod(sparse_method) if isinstance(sparse_method, str) else sparse_method
+        )
         self.alpha = alpha
         self.rrf_k = rrf_k
 
-        # Sparse retriever (BM25) - built on demand
-        self._sparse: Optional[SparseRetriever] = None
-
     @property
-    def sparse(self) -> SparseRetriever:
-        """Get or create sparse retriever."""
-        if self._sparse is None:
-            self._sparse = SparseRetriever(name=f"{self.name}_sparse")
-            # Index with current documents if available
+    def sparse(self) -> SparseIndex:
+        """Get or create sparse index."""
+        if self._sparse_index is None:
+            # Build sparse index on demand if not provided
+            sparse_name = get_sparse_index_name(
+                self.index.name if self.index else self.name,
+                self.sparse_method.value,
+            )
+            self._sparse_index = SparseIndex(
+                name=sparse_name,
+                method=self.sparse_method,
+            )
             if self.index and len(self.index) > 0:
-                logger.info("Building sparse index for hybrid retriever: %s", self.name)
-                self._sparse.index_documents(self.index.documents)
+                logger.info(
+                    "Building sparse index (%s) for hybrid retriever: %s",
+                    self.sparse_method.value,
+                    self.name,
+                )
+                self._sparse_index.build(self.index.documents)
                 logger.info("Sparse index ready for hybrid retriever: %s", self.name)
-        return self._sparse
+        return self._sparse_index
 
     @property
     def documents(self) -> list[Document]:
@@ -132,8 +149,16 @@ class HybridRetriever(Retriever):
                 )
                 dense_results.append(result)
 
-        # Sparse search
-        sparse_results = self.sparse.retrieve(query, top_k=candidates)
+        # Sparse search (using SparseIndex)
+        sparse_hits = self.sparse.search(query, top_k=candidates)
+        sparse_results = []
+        for idx, score in sparse_hits:
+            doc = self.index.get_document(idx)
+            if doc:
+                result = Document(
+                    id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score
+                )
+                sparse_results.append(result)
 
         # Compute RRF scores
         rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
@@ -175,8 +200,8 @@ class HybridRetriever(Retriever):
         # Batch search for dense results
         all_dense_hits = self.index.batch_search(query_embeddings, top_k=candidates)
 
-        # Batch sparse search (also batched now!)
-        all_sparse_results = self.sparse.batch_retrieve(queries, top_k=candidates)
+        # Batch sparse search (using SparseIndex)
+        all_sparse_hits = self.sparse.batch_search(queries, top_k=candidates)
 
         # Process each query - combine dense and sparse results
         all_results = []
@@ -191,7 +216,15 @@ class HybridRetriever(Retriever):
                     )
                     dense_results.append(result)
 
-            sparse_results = all_sparse_results[i]
+            # Convert sparse hits to documents
+            sparse_results = []
+            for idx, score in all_sparse_hits[i]:
+                doc = self.index.get_document(idx)
+                if doc:
+                    result = Document(
+                        id=doc.id, text=doc.text, metadata=doc.metadata.copy(), score=score
+                    )
+                    sparse_results.append(result)
 
             # Compute RRF scores
             rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
@@ -249,7 +282,7 @@ class HybridRetriever(Retriever):
         return None
 
     def save(self, artifact_name: str) -> str:
-        """Save retriever config and sparse index if built.
+        """Save retriever config (sparse index is saved separately).
 
         Args:
             artifact_name: Name for this retriever artifact
@@ -257,32 +290,36 @@ class HybridRetriever(Retriever):
         Returns:
             Path where saved
         """
-        import pickle
-
         manager = get_artifact_manager()
         artifact_path = manager.get_retriever_path(artifact_name)
 
-        # Check if sparse index is built
-        has_sparse = self._sparse is not None and self._sparse.doc_vectors is not None
+        # Get sparse index name for reference
+        sparse_index_name = None
+        if self._sparse_index is not None:
+            sparse_index_name = self._sparse_index.name
+        elif self.index:
+            sparse_index_name = get_sparse_index_name(
+                self.index.name, self.sparse_method.value
+            )
 
         config = {
             "name": self.name,
             "type": "hybrid",
             "embedding_index": self.index.name if self.index else None,
+            "sparse_index": sparse_index_name,
             "embedding_model": self.embedding_model_name,
+            "sparse_method": self.sparse_method.value,
             "alpha": self.alpha,
             "rrf_k": self.rrf_k,
             "num_documents": len(self.index) if self.index else 0,
-            "has_sparse": has_sparse,
         }
 
-        # Save sparse index components if built
-        if has_sparse:
-            logger.info("Saving sparse index components for: %s", artifact_name)
-            with open(artifact_path / "sparse_vectorizer.pkl", "wb") as f:
-                pickle.dump(self._sparse.vectorizer, f)
-            with open(artifact_path / "sparse_matrix.pkl", "wb") as f:
-                pickle.dump(self._sparse.doc_vectors, f)
+        # Save sparse index if built and not yet saved
+        if self._sparse_index is not None:
+            sparse_path = manager.get_sparse_index_path(self._sparse_index.name)
+            if not (sparse_path / "config.json").exists():
+                logger.info("Saving shared sparse index: %s", self._sparse_index.name)
+                self._sparse_index.save()
 
         manager.save_json(config, artifact_path / "config.json")
 
@@ -294,12 +331,14 @@ class HybridRetriever(Retriever):
         cls,
         artifact_name: str,
         index: Optional[EmbeddingIndex] = None,
+        sparse_index: Optional[SparseIndex] = None,
     ) -> "HybridRetriever":
         """Load a hybrid retriever.
 
         Args:
             artifact_name: Name of the retriever artifact
-            index: Optional pre-loaded index
+            index: Optional pre-loaded embedding index
+            sparse_index: Optional pre-loaded sparse index (for sharing)
 
         Returns:
             Loaded HybridRetriever
@@ -310,11 +349,11 @@ class HybridRetriever(Retriever):
         # Load config
         config = manager.load_json(artifact_path / "config.json")
 
-        # Load index if not provided
+        # Load embedding index if not provided
         if index is None:
             index_name = config.get("embedding_index")
             if index_name:
-                logger.info("Loading index: %s", index_name)
+                logger.info("Loading embedding index: %s", index_name)
                 index = EmbeddingIndex.load(index_name)
             else:
                 # Legacy format - need to rebuild from documents.pkl
@@ -331,43 +370,48 @@ class HybridRetriever(Retriever):
                     )
                     index.build(documents)
 
+        sparse_method = config.get("sparse_method", "tfidf")
+
+        # Load sparse index if not provided
+        if sparse_index is None:
+            sparse_index_name = config.get("sparse_index")
+            if sparse_index_name and manager.sparse_index_exists(sparse_index_name):
+                logger.info("Loading shared sparse index: %s", sparse_index_name)
+                sparse_index = SparseIndex.load(
+                    sparse_index_name,
+                    documents=index.documents if index else None,
+                )
+            # Check for legacy format (sparse stored with retriever)
+            elif (artifact_path / "sparse_vectorizer.pkl").exists():
+                import pickle
+
+                logger.info("Loading legacy sparse index from retriever artifact")
+                sparse_index = SparseIndex(
+                    name=f"{artifact_name}_sparse",
+                    method="tfidf",
+                )
+                with open(artifact_path / "sparse_vectorizer.pkl", "rb") as f:
+                    sparse_index._vectorizer = pickle.load(f)
+                with open(artifact_path / "sparse_matrix.pkl", "rb") as f:
+                    sparse_index._doc_vectors = pickle.load(f)
+                if index:
+                    sparse_index.documents = index.documents
+
         retriever = cls(
             name=config["name"],
             index=index,
+            sparse_index=sparse_index,
             embedding_model=config.get("embedding_model", "BAAI/bge-large-en-v1.5"),
+            sparse_method=sparse_method,
             alpha=config.get("alpha", 0.5),
             rrf_k=config.get("rrf_k", 60),
         )
 
-        # Load pre-built sparse index if available
-        if config.get("has_sparse"):
-            sparse_vectorizer_path = artifact_path / "sparse_vectorizer.pkl"
-            sparse_matrix_path = artifact_path / "sparse_matrix.pkl"
-
-            if sparse_vectorizer_path.exists() and sparse_matrix_path.exists():
-                import pickle
-
-                logger.info("Loading pre-built sparse index for: %s", artifact_name)
-                sparse = SparseRetriever(name=f"{artifact_name}_sparse")
-
-                with open(sparse_vectorizer_path, "rb") as f:
-                    sparse.vectorizer = pickle.load(f)
-                with open(sparse_matrix_path, "rb") as f:
-                    sparse.doc_vectors = pickle.load(f)
-
-                # Link documents from the dense index
-                if index:
-                    sparse.documents = index.documents
-
-                retriever._sparse = sparse
-                logger.info("Loaded sparse index: %d documents", len(sparse.documents))
-            else:
-                logger.warning(
-                    "Sparse index files not found for %s, will rebuild on first query",
-                    artifact_name,
-                )
-
         logger.info(
-            "Loaded hybrid retriever: %s (%d docs)", artifact_name, len(index) if index else 0
+            "Loaded hybrid retriever: %s (%s, alpha=%.2f, %d docs)",
+            artifact_name,
+            sparse_method,
+            retriever.alpha,
+            len(index) if index else 0,
         )
         return retriever
