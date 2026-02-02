@@ -145,7 +145,7 @@ class EmbeddingIndex(Index):
 
         # Storage
         self.documents: list[Document] = []
-        self.index: Optional[faiss.Index] = None
+        self.index: Optional[Any] = None  # faiss.Index (Any for compatibility)
 
     @property
     def encoder(self) -> SentenceTransformer:
@@ -187,7 +187,7 @@ class EmbeddingIndex(Index):
             _ = self.encoder  # Force load
         return self._embedding_dim
 
-    def _create_faiss_index(self, num_vectors: int = 0) -> faiss.Index:
+    def _create_faiss_index(self, num_vectors: int = 0) -> Any:
         """Create a new FAISS index based on index_type.
 
         Args:
