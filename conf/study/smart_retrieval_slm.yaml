@@ -407,5 +407,5 @@ output_dir: outputs/smart_retrieval_slm
 # =============================================================================
 # Execution Settings
 # =============================================================================
-batch_size: 32
-min_batch_size: 4
+batch_size: 128
+min_batch_size: 1
