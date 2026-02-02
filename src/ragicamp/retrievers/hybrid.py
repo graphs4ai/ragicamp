@@ -72,7 +72,9 @@ class HybridRetriever(Retriever):
             self._sparse = SparseRetriever(name=f"{self.name}_sparse")
             # Index with current documents if available
             if self.index and len(self.index) > 0:
+                logger.info("Building sparse index for hybrid retriever: %s", self.name)
                 self._sparse.index_documents(self.index.documents)
+                logger.info("Sparse index ready for hybrid retriever: %s", self.name)
         return self._sparse
 
     @property

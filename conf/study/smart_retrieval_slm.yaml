@@ -114,7 +114,10 @@ rag:
       chunking_strategy: recursive
       index_type: hnsw
     
-    # --- COMMENTED: Not built yet ---
+    # -------------------------------------------------------------------------
+    # FUTURE: Additional embedding models (uncomment to build)
+    # -------------------------------------------------------------------------
+    # Nomic: 137M params - tests if smaller model is sufficient
     # - type: dense
     #   name: dense_nomic_512
     #   embedding_model: nomic-ai/nomic-embed-text-v1.5
@@ -123,21 +126,13 @@ rag:
     #   chunking_strategy: recursive
     #   index_type: hnsw
     
-    # # Small chunk retrievers (more precise matching, retrieve more)
+    # Stella: 1.5B params - tests if bigger model improves quality
     # - type: dense
-    #   name: dense_bge_large_256
-    #   embedding_model: BAAI/bge-large-en-v1.5
-    #   chunk_size: 256
-    #   chunk_overlap: 25
+    #   name: dense_stella_512
+    #   embedding_model: dunzhang/stella_en_1.5B_v5
+    #   chunk_size: 512
+    #   chunk_overlap: 50
     #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # - type: hybrid
-    #   name: hybrid_bge_large_256
-    #   embedding_model: BAAI/bge-large-en-v1.5
-    #   alpha: 0.5
-    #   chunk_size: 256
-    #   chunk_overlap: 25
     #   index_type: hnsw
     
     # Hybrid retrievers (dense + BM25) - uses existing BGE-large embeddings
@@ -156,25 +151,6 @@ rag:
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
-    
-    # # Hierarchical retrievers
-    # - type: hierarchical
-    #   name: hierarchical_bge_2048_256
-    #   embedding_model: BAAI/bge-large-en-v1.5
-    #   parent_chunk_size: 2048
-    #   child_chunk_size: 256
-    #   parent_overlap: 200
-    #   child_overlap: 50
-    #   index_type: hnsw
-    
-    # - type: hierarchical
-    #   name: hierarchical_bge_4096_512
-    #   embedding_model: BAAI/bge-large-en-v1.5
-    #   parent_chunk_size: 4096
-    #   child_chunk_size: 512
-    #   parent_overlap: 400
-    #   child_overlap: 100
-    #   index_type: hnsw
 
 # =============================================================================
 # SINGLETON EXPERIMENTS (hypothesis-driven)
@@ -201,41 +177,19 @@ experiments:
     top_k: 5
     prompt: concise
   
-  # COMMENTED: Requires dense_nomic_512 index (not built yet)
+  # FUTURE: Additional embedding models (uncomment when indexes are built)
   # - name: a3_nomic_embed
-  #   hypothesis: "Nomic-embed is efficient and competitive"
+  #   hypothesis: "Nomic (137M) tests if smaller model is sufficient"
   #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
   #   retriever: dense_nomic_512
   #   top_k: 5
   #   prompt: concise
   
-  # ========================================================================
-  # GROUP A2: Small Chunks with More Retrieval
-  # ========================================================================
-  # Hypothesis: Smaller chunks = more precise matching, retrieve more to compensate
-  # COMMENTED: Requires 256-chunk indexes (not built yet)
-  
-  # - name: a4_small_chunks_dense
-  #   hypothesis: "256-char chunks with top_k=10 for precise matching"
+  # - name: a4_stella_embed
+  #   hypothesis: "Stella (1.5B) tests if bigger model improves quality"
   #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
-  #   retriever: dense_bge_large_256
-  #   top_k: 10
-  #   prompt: concise
-  
-  # - name: a5_small_chunks_hybrid
-  #   hypothesis: "Small chunks + hybrid catches more relevant snippets"
-  #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
-  #   retriever: hybrid_bge_large_256
-  #   top_k: 10
-  #   prompt: concise
-  
-  # - name: a6_small_chunks_rerank
-  #   hypothesis: "Small chunks + rerank for precision at scale"
-  #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
-  #   retriever: dense_bge_large_256
-  #   top_k: 8
-  #   fetch_k: 30
-  #   reranker: bge
+  #   retriever: dense_stella_512
+  #   top_k: 5
   #   prompt: concise
 
   # ========================================================================
@@ -255,25 +209,6 @@ experiments:
     retriever: hybrid_bge_large_07
     top_k: 5
     prompt: concise
-
-  # ========================================================================
-  # GROUP C: Hierarchical Retrieval
-  # ========================================================================
-  # COMMENTED: Requires hierarchical indexes (not built yet)
-  
-  # - name: c1_hierarchical_standard
-  #   hypothesis: "Search small chunks, return large context"
-  #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
-  #   retriever: hierarchical_bge_2048_256
-  #   top_k: 3
-  #   prompt: concise
-  
-  # - name: c2_hierarchical_wide
-  #   hypothesis: "Wider parent chunks for more context"
-  #   model: vllm:meta-llama/Llama-3.2-3B-Instruct
-  #   retriever: hierarchical_bge_4096_512
-  #   top_k: 2
-  #   prompt: concise
 
   # ========================================================================
   # GROUP D: Reranking (Two-Stage Retrieval)
