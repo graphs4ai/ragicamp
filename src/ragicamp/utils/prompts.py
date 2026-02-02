@@ -95,27 +95,27 @@ class PromptBuilder:
         """
         parts = []
 
-        # Task instruction - encourage using both context AND own knowledge
-        task = "Answer the question based on the context below."
+        # Task instruction - encourage using the retrieved passages
+        task = "Answer the question based on the retrieved passages below."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
         else:
-            # Default: encourage finding the answer in context
-            task += " The answer is in the context - find and extract it."
+            # Default: encourage finding the answer in passages
+            task += " The answer is in one of the passages - find and extract it."
         if self.config.style:
             task += f" {self.config.style}"
         if self.config.stop_instruction:
             task += f" {self.config.stop_instruction}"
         # Softer fallback - only use Unknown as last resort
-        task += " Only answer 'Unknown' if the answer is truly not in the context."
+        task += " Only answer 'Unknown' if the answer is truly not in the passages."
         parts.append(task)
 
         # Examples section (if any)
         if self.config.examples:
             parts.append(self._format_examples())
 
-        # Context and question
-        parts.append(f"Context:\n{context}")
+        # Retrieved passages and question
+        parts.append(f"Retrieved Passages:\n{context}")
         parts.append(f"Question: {query}\nAnswer:")
 
         return "\n\n".join(parts)
@@ -167,7 +167,7 @@ class PromptBuilder:
             return cls(
                 PromptConfig(
                     style="Give only the answer, no explanations.",
-                    knowledge_instruction="Read the context carefully to find the answer.",
+                    knowledge_instruction="Read the passages carefully to find the answer.",
                 )
             )
 
@@ -175,7 +175,7 @@ class PromptBuilder:
             return cls(
                 PromptConfig(
                     style="Reply with just the answer.",
-                    knowledge_instruction="The answer can be found in the context.",
+                    knowledge_instruction="The answer can be found in the passages.",
                 )
             )
 

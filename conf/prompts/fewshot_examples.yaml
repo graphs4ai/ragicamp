@@ -10,7 +10,7 @@ nq:
   description: "Real Google search queries with Wikipedia answers"
   style: "Give ONLY the answer - a single entity, date, or number. Do NOT add extra questions or explanations."
   stop_instruction: "IMPORTANT: Give only ONE short answer. Stop immediately after answering. Do NOT generate additional questions."
-  knowledge_instruction: "Use the context if helpful, but you may also use your own knowledge to answer correctly."
+  knowledge_instruction: "Use the passages to find the answer."
   examples:
     - question: "who got the first nobel prize in physics"
       answer: "Wilhelm Conrad Röntgen"
@@ -30,7 +30,7 @@ triviaqa:
   description: "Trivia questions from quiz leagues and trivia websites"
   style: "Give ONLY the answer - the exact entity, name, or term. No explanations."
   stop_instruction: "IMPORTANT: Give only ONE short answer. Stop immediately after answering. Do NOT generate additional questions."
-  knowledge_instruction: "Use the context if helpful, but you may also use your own knowledge to answer correctly."
+  knowledge_instruction: "Use the passages to find the answer."
   examples:
     - question: "Who was the first American in space?"
       answer: "Alan Shepard"
@@ -50,7 +50,7 @@ hotpotqa:
   description: "Questions requiring reasoning over multiple facts"
   style: "Give ONLY the final answer - a name, date, yes/no, or short phrase. No reasoning steps."
   stop_instruction: "IMPORTANT: Give only ONE short answer. Stop immediately after answering. Do NOT generate additional questions."
-  knowledge_instruction: "Use the context if helpful, but you may also use your own knowledge to answer correctly."
+  knowledge_instruction: "Use the passages to find the answer. You may need to combine information from multiple passages."
   examples:
     - question: "What government position was held by the woman who portrayed Nadia in the film The Survey?"
       answer: "Deputy Prime Minister of Israel"

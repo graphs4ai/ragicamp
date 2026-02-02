@@ -98,18 +98,25 @@ class ContextFormatter:
 
     @staticmethod
     def format_numbered(docs: list[Document]) -> str:
-        """Simple numbered format (default).
+        """Format documents as clearly labeled retrieved passages.
 
         Args:
             docs: List of Document objects
 
         Returns:
-            Numbered list of documents
+            Numbered list of documents with clear passage labels
 
         Example:
-            '[1] First document\\n\\n[2] Second document'
+            '--- Passage 1 ---\\nFirst document\\n\\n--- Passage 2 ---\\nSecond document'
         """
-        return ContextFormatter.format_documents(docs)
+        if not docs:
+            return "No relevant passages found."
+
+        formatted = []
+        for i, doc in enumerate(docs, 1):
+            formatted.append(f"--- Passage {i} ---\n{doc.text}")
+
+        return "\n\n".join(formatted)
 
     @staticmethod
     def format_with_titles(docs: list[Document], title_key: str = "title") -> str:
