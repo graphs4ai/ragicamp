@@ -1,8 +1,8 @@
-"""Hybrid retriever combining dense and sparse search.
+"""Hybrid retriever combining dense and sparse (TF-IDF) search.
 
 Hybrid retrieval combines the strengths of:
 - Dense retrieval (semantic understanding, handles synonyms)
-- Sparse retrieval (BM25, exact keyword matching, handles rare terms)
+- Sparse retrieval (TF-IDF, exact keyword matching, handles rare terms)
 
 This is especially useful when documents contain:
 - Technical jargon
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 
 class HybridRetriever(Retriever):
-    """Combines dense (semantic) and sparse (BM25) retrieval.
+    """Combines dense (semantic) and sparse (TF-IDF) retrieval.
 
     Uses Reciprocal Rank Fusion (RRF) to merge results from both
     retrievers. RRF is robust and doesn't require score normalization.
@@ -33,7 +33,7 @@ class HybridRetriever(Retriever):
     RRF formula: score(d) = Σ 1/(k + rank(d))
     where k is a constant (typically 60) and rank is 1-indexed.
 
-    This is a thin wrapper around an EmbeddingIndex + BM25.
+    This is a thin wrapper around an EmbeddingIndex + TF-IDF sparse index.
     """
 
     def __init__(

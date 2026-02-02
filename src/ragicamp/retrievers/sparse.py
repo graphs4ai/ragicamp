@@ -1,4 +1,4 @@
-"""Sparse retriever using BM25-like TF-IDF."""
+"""Sparse retriever using TF-IDF for keyword-based retrieval."""
 
 from typing import Any
 
@@ -14,10 +14,11 @@ logger = get_logger(__name__)
 
 
 class SparseRetriever(Retriever):
-    """Sparse retriever using BM25-like TF-IDF scoring.
+    """Sparse retriever using TF-IDF for keyword-based matching.
 
-    Uses scikit-learn's TF-IDF vectorizer for simple sparse retrieval.
-    For production BM25, consider using rank-bm25 library.
+    Uses scikit-learn's TF-IDF vectorizer for sparse retrieval.
+    TF-IDF is effective for exact keyword matching, technical terms,
+    and rare words that dense embeddings might miss.
     """
 
     def __init__(self, name: str, max_features: int = 10000, **kwargs: Any):
