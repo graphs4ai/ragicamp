@@ -153,9 +153,19 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
         try:
             with open(predictions_path) as f:
                 data = json.load(f)
-            actual_metrics = set(data.get("aggregate_metrics", {}).keys())
+            actual_keys = set(data.get("aggregate_metrics", {}).keys())
+            
+            # Map metric names to their expected keys in aggregate_metrics
+            # Some metrics produce multiple keys (e.g., bertscore -> bertscore_f1, bertscore_precision, etc.)
+            def metric_exists(metric_name: str) -> bool:
+                if metric_name in actual_keys:
+                    return True
+                # Check for prefixed keys (e.g., bertscore -> bertscore_f1)
+                prefix = f"{metric_name}_"
+                return any(k.startswith(prefix) for k in actual_keys)
+            
             # Only keep metrics that actually exist in the predictions file
-            validated_metrics = [m for m in state.metrics_computed if m in actual_metrics]
+            validated_metrics = [m for m in state.metrics_computed if metric_exists(m)]
             if len(validated_metrics) != len(state.metrics_computed):
                 removed = set(state.metrics_computed) - set(validated_metrics)
                 logger.warning(
