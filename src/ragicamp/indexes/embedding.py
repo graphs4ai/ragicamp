@@ -26,20 +26,32 @@ _faiss_gpu_available: Optional[bool] = None
 
 
 def _check_faiss_gpu_available() -> bool:
-    """Check if FAISS GPU is available."""
+    """Check if FAISS GPU is available.
+
+    Requires faiss-gpu package (not faiss-cpu).
+    Install with: pip install faiss-gpu-cu12 (or faiss-gpu-cu11 for CUDA 11)
+    """
     global _faiss_gpu_available
     if _faiss_gpu_available is None:
         try:
-            import faiss.contrib.torch_utils  # noqa: F401
+            # Check if faiss has GPU support (faiss-gpu vs faiss-cpu)
+            if not hasattr(faiss, 'StandardGpuResources'):
+                logger.warning(
+                    "FAISS GPU not available: faiss-cpu is installed. "
+                    "Install faiss-gpu-cu12 for GPU support: "
+                    "pip uninstall faiss-cpu -y && pip install faiss-gpu-cu12"
+                )
+                _faiss_gpu_available = False
+                return False
 
-            # Check if GPU resources can be created
+            # Try to create GPU resources
             res = faiss.StandardGpuResources()
             del res
             _faiss_gpu_available = True
             logger.info("FAISS GPU support detected")
         except Exception as e:
             _faiss_gpu_available = False
-            logger.debug("FAISS GPU not available: %s", e)
+            logger.warning("FAISS GPU not available: %s", e)
     return _faiss_gpu_available
 
 
