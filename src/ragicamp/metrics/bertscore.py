@@ -67,9 +67,10 @@ class BERTScoreMetric(Metric):
     def compute(
         self, predictions: list[str], references: list[str], **kwargs: Any
     ) -> dict[str, float]:
-        """Compute BERTScore with automatic batching for memory efficiency (1-to-1).
+        """Compute BERTScore with automatic batching and OOM retry.
 
         Loads model, computes scores in batches, then unloads to free GPU memory.
+        If OOM occurs, automatically retries with smaller batch size.
 
         Args:
             predictions: List of predicted answers
@@ -84,76 +85,66 @@ class BERTScoreMetric(Metric):
             # Load model (lazy)
             self._load_scorer()
 
-            # Compute BERTScore in batches to avoid OOM
-            batch_size = self._estimate_batch_size(predictions)
+            # Start with batch_size=64, halve on OOM
+            batch_size = 64
+            min_batch_size = 1
 
-            all_P, all_R, all_F1 = [], [], []
+            while batch_size >= min_batch_size:
+                try:
+                    all_P, all_R, all_F1 = [], [], []
 
-            for i in range(0, len(predictions), batch_size):
-                batch_preds = predictions[i : i + batch_size]
-                batch_refs = references[i : i + batch_size]
+                    for i in range(0, len(predictions), batch_size):
+                        batch_preds = predictions[i : i + batch_size]
+                        batch_refs = references[i : i + batch_size]
 
-                # Clear cache before each batch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                        # Clear cache before each batch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
 
-                P, R, F1 = self._scorer.score(batch_preds, batch_refs)
-                all_P.append(P)
-                all_R.append(R)
-                all_F1.append(F1)
+                        P, R, F1 = self._scorer.score(batch_preds, batch_refs)
+                        all_P.append(P)
+                        all_R.append(R)
+                        all_F1.append(F1)
 
-            # Concatenate results
-            P = torch.cat(all_P)
-            R = torch.cat(all_R)
-            F1 = torch.cat(all_F1)
+                    # Concatenate results
+                    P = torch.cat(all_P)
+                    R = torch.cat(all_R)
+                    F1 = torch.cat(all_F1)
 
-            # Store per-item scores for detailed analysis
-            self._last_scores = F1.tolist()
+                    # Store per-item scores for detailed analysis
+                    self._last_scores = F1.tolist()
 
-            return {
-                "bertscore_precision": P.mean().item(),
-                "bertscore_recall": R.mean().item(),
-                "bertscore_f1": F1.mean().item(),
-            }
+                    return {
+                        "bertscore_precision": P.mean().item(),
+                        "bertscore_recall": R.mean().item(),
+                        "bertscore_f1": F1.mean().item(),
+                    }
+
+                except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+                    if "out of memory" in str(e).lower() or isinstance(e, torch.cuda.OutOfMemoryError):
+                        # Clear memory and retry with smaller batch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        gc.collect()
+
+                        old_batch_size = batch_size
+                        batch_size = batch_size // 2
+                        if batch_size >= min_batch_size:
+                            print(f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}")
+                        else:
+                            raise RuntimeError(
+                                f"BERTScore OOM even with batch_size=1. "
+                                f"Text too long or GPU memory insufficient."
+                            ) from e
+                    else:
+                        raise
+
+            # Should not reach here
+            raise RuntimeError("BERTScore computation failed")
+
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
-
-    def _estimate_batch_size(self, predictions: list[str]) -> int:
-        """Estimate safe batch size based on text lengths and GPU memory.
-
-        BERTScore memory scales with sequence length squared.
-        For deberta-xlarge-mnli:
-        - Model base: ~2.5 GB
-        - Each batch item with long text can use 0.5-1 GB
-        
-        With B200 GPU (80GB+ VRAM), we can use larger batches.
-        """
-
-        if not predictions:
-            return 1
-
-        # Calculate average and max text lengths
-        avg_len = sum(len(p) for p in predictions) / len(predictions)
-        max_len = max(len(p) for p in predictions)
-
-        # Batch sizing based on text length (optimized for high-VRAM GPUs)
-        if max_len > 3000 or avg_len > 1000:
-            batch_size = 8  # Very long texts
-        elif max_len > 1500 or avg_len > 500:
-            batch_size = 16  # Long texts
-        elif max_len > 500 or avg_len > 200:
-            batch_size = 32  # Medium texts
-        else:
-            batch_size = 64  # Short texts (QA answers are typically short)
-
-        # Cap at total predictions
-        batch_size = min(batch_size, len(predictions))
-
-        if len(predictions) > batch_size:
-            print(f"    Processing {len(predictions)} items in batches of {batch_size}")
-
-        return batch_size
 
     def get_per_item_scores(self) -> list[float]:
         """Get per-item F1 scores from last compute() call."""

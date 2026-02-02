@@ -178,9 +178,10 @@ class BLEURTMetric(Metric):
     def compute(
         self, predictions: list[str], references: list[str], **kwargs: Any
     ) -> dict[str, float]:
-        """Compute BLEURT scores (1-to-1).
+        """Compute BLEURT scores with automatic batching and OOM retry.
 
         Loads model, computes scores in batches, then unloads to free GPU memory.
+        If OOM occurs, automatically retries with smaller batch size.
 
         Args:
             predictions: List of predicted answers
@@ -193,21 +194,52 @@ class BLEURTMetric(Metric):
             # Load model (lazy)
             self._load_scorer()
 
-            # Compute BLEURT scores in batches to manage memory
-            batch_size = 64  # BLEURT is memory-efficient, can handle larger batches
-            all_scores = []
+            # Start with batch_size=64, halve on OOM
+            batch_size = 64
+            min_batch_size = 1
 
-            for i in range(0, len(predictions), batch_size):
-                batch_preds = predictions[i : i + batch_size]
-                batch_refs = references[i : i + batch_size]
-                batch_scores = self._scorer.score(references=batch_refs, candidates=batch_preds)
-                all_scores.extend(batch_scores)
+            while batch_size >= min_batch_size:
+                try:
+                    all_scores = []
 
-            # Store per-item scores for detailed analysis
-            self._last_scores = list(all_scores)
+                    for i in range(0, len(predictions), batch_size):
+                        batch_preds = predictions[i : i + batch_size]
+                        batch_refs = references[i : i + batch_size]
+                        batch_scores = self._scorer.score(references=batch_refs, candidates=batch_preds)
+                        all_scores.extend(batch_scores)
 
-            # Only return the mean score (not individual scores)
-            return {"bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0}
+                    # Store per-item scores for detailed analysis
+                    self._last_scores = list(all_scores)
+
+                    # Only return the mean score (not individual scores)
+                    return {"bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0}
+
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "out of memory" in error_msg or "oom" in error_msg or "resource exhausted" in error_msg:
+                        # Clear memory and retry with smaller batch
+                        gc.collect()
+                        try:
+                            import tensorflow as tf
+                            tf.keras.backend.clear_session()
+                        except Exception:
+                            pass
+
+                        old_batch_size = batch_size
+                        batch_size = batch_size // 2
+                        if batch_size >= min_batch_size:
+                            print(f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}")
+                        else:
+                            raise RuntimeError(
+                                f"BLEURT OOM even with batch_size=1. "
+                                f"Text too long or GPU memory insufficient."
+                            ) from e
+                    else:
+                        raise
+
+            # Should not reach here
+            raise RuntimeError("BLEURT computation failed")
+
         finally:
             # ALWAYS unload after computation to free GPU
             self._unload_scorer()
