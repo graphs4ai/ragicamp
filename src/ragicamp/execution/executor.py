@@ -203,13 +203,16 @@ class ResilientExecutor:
                         "prompt": getattr(resp, "prompt", None),
                         "error": None,
                     }
-                    # Include retrieved docs if available (for RAG)
-                    # Use metadata_dict property for consistent access
+                    # Include metadata for analysis (RAG steps, iterations, decisions)
                     metadata = (
                         getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
                     )
-                    if "retrieved_docs" in metadata:
-                        result_item["retrieved_docs"] = metadata["retrieved_docs"]
+                    if metadata:
+                        result_item["metadata"] = metadata
+                    # Include intermediate steps (iterations, query refinements, etc.)
+                    context = getattr(resp, "context", None)
+                    if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                        result_item["intermediate_steps"] = context.intermediate_steps
                     results.append(result_item)
 
                 pbar.update(len(batch))
@@ -345,13 +348,16 @@ class ResilientExecutor:
                     "prompt": getattr(resp, "prompt", None),
                     "error": None,
                 }
-                # Include retrieved docs if available (for RAG)
-                # Use metadata_dict property for consistent access
+                # Include metadata for analysis (RAG steps, iterations, decisions)
                 metadata = (
                     getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
                 )
-                if "retrieved_docs" in metadata:
-                    result_item["retrieved_docs"] = metadata["retrieved_docs"]
+                if metadata:
+                    result_item["metadata"] = metadata
+                # Include intermediate steps (iterations, query refinements, etc.)
+                context = getattr(resp, "context", None)
+                if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                    result_item["intermediate_steps"] = context.intermediate_steps
                 results.append(result_item)
             except Exception as e:
                 results.append(
@@ -395,13 +401,16 @@ class ResilientExecutor:
                     "prompt": getattr(resp, "prompt", None),
                     "error": None,
                 }
-                # Include retrieved docs if available (for RAG)
-                # Use metadata_dict property for consistent access
+                # Include metadata for analysis (RAG steps, iterations, decisions)
                 metadata = (
                     getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
                 )
-                if "retrieved_docs" in metadata:
-                    result_item["retrieved_docs"] = metadata["retrieved_docs"]
+                if metadata:
+                    result_item["metadata"] = metadata
+                # Include intermediate steps (iterations, query refinements, etc.)
+                context = getattr(resp, "context", None)
+                if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                    result_item["intermediate_steps"] = context.intermediate_steps
                 results.append(result_item)
             except Exception as e:
                 results.append(
