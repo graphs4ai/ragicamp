@@ -263,12 +263,20 @@ class EmbeddingIndex(Index):
                     co.useFloat16 = True  # Use FP16 for 2x memory efficiency
                     gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
                     self._is_gpu_index = True
-                    logger.info("Created GPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
+                    if self.index_type in ("ivf", "ivfpq"):
+                        logger.info("Created GPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
+                    else:
+                        logger.info("Created GPU FAISS index (type=%s)", self.index_type)
                     return gpu_index
                 except Exception as e:
                     logger.warning("Failed to create GPU index, falling back to CPU: %s", e)
 
-        logger.info("Created CPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
+        if self.index_type in ("ivf", "ivfpq"):
+            logger.info("Created CPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
+        elif self.index_type == "hnsw":
+            logger.info("Created CPU FAISS index (type=%s, M=32, efConstruction=200)", self.index_type)
+        else:
+            logger.info("Created CPU FAISS index (type=%s)", self.index_type)
         return cpu_index
 
     def _set_search_params(self) -> None:
