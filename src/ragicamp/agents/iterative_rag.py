@@ -166,7 +166,7 @@ class IterativeRAGAgent(RAGAgent):
         response_upper = response.upper()
         is_sufficient = "SUFFICIENT" in response_upper and "INSUFFICIENT" not in response_upper
 
-        logger.debug("Sufficiency check: %s -> %s", response[:100], is_sufficient)
+        logger.debug("Sufficiency check: %s", "sufficient" if is_sufficient else "insufficient")
         return is_sufficient
 
     def _generate_refined_query(self, query: str, previous_query: str, context: str) -> str:
@@ -264,6 +264,15 @@ class IterativeRAGAgent(RAGAgent):
         # Use top documents for final answer
         final_docs = all_docs[: self.top_k * 2]
         context_text = ContextFormatter.format_numbered(final_docs)
+
+        # Log iteration summary
+        stop_reason = iterations[-1].get("stopped", "continued") if iterations else "none"
+        logger.debug(
+            "Iterative RAG: %d iterations, %d docs, stopped=%s",
+            len(iterations),
+            len(final_docs),
+            stop_reason,
+        )
 
         # Build final prompt
         prompt = self.prompt_builder.build_rag(query, context_text)

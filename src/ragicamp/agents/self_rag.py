@@ -260,6 +260,13 @@ class SelfRAGAgent(RAGAgent):
         confidence = self._assess_retrieval_need(query)
         used_retrieval = confidence <= self.retrieval_threshold
 
+        logger.debug(
+            "Self-RAG decision: confidence=%.2f, threshold=%.2f -> %s",
+            confidence,
+            self.retrieval_threshold,
+            "retrieve" if used_retrieval else "direct",
+        )
+
         decision_info = {
             "confidence": confidence,
             "threshold": self.retrieval_threshold,
