@@ -172,10 +172,10 @@ class Defaults:
     ARTIFACTS_DIR = "artifacts"
     CACHE_DIR = "data/datasets"
 
-    # GPU Memory Partitioning (for vLLM + FAISS GPU coexistence)
-    # These should sum to <= 1.0, leaving some headroom for PyTorch overhead
-    VLLM_GPU_MEMORY_FRACTION = 0.40  # 40% for vLLM (~73GB on B200)
-    FAISS_GPU_MEMORY_FRACTION = 0.55  # 55% for FAISS GPU index (~100GB on B200)
+    # GPU Memory Partitioning
+    # With FAISS on CPU, vLLM can use most of the GPU
+    VLLM_GPU_MEMORY_FRACTION = 0.90  # 90% for vLLM (FAISS uses CPU/RAM)
+    FAISS_GPU_MEMORY_FRACTION = 0.0  # FAISS runs on CPU (B200 not yet supported)
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration
@@ -186,7 +186,7 @@ class Defaults:
     FAISS_INDEX_TYPE = "flat"  # Default index type: flat, ivf, ivfpq, hnsw
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
-    FAISS_CPU_THREADS = 32  # Number of threads for CPU FAISS (set to number of cores)
+    FAISS_CPU_THREADS = 128  # Number of threads for CPU FAISS (set to number of cores)
 
 
 # === Prompt Templates ===
