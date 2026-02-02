@@ -17,7 +17,7 @@ dependencies = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
     "datasets>=2.10.0",
-    "faiss-gpu-cu12>=1.7.4",  # GPU FAISS for 10-100x faster similarity search
+    "faiss-cpu>=1.7.4",  # FAISS for similarity search (GPU version not yet compatible with B200)
     "sentence-transformers>=2.2.0",
     "openai>=1.0.0",
     "tiktoken>=0.5.0",
@@ -50,8 +50,8 @@ dependencies = [
     # RAG features
     "rank-bm25>=0.2.2",  # BM25 for hybrid retrieval
 ]
-# NOTE: For CUDA 11.x, manually swap faiss-gpu packages:
-#   uv pip uninstall faiss-gpu-cu12 && uv pip install faiss-gpu-cu11>=1.7.4
+# NOTE: For GPU FAISS (once Blackwell/B200 is supported), manually install:
+#   uv pip uninstall faiss-cpu && uv pip install faiss-gpu-cu12>=1.7.4
 # NOTE: flash-attn has complex build requirements - install manually if needed:
 #   pip install flash-attn --no-build-isolation
 
