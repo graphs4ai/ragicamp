@@ -124,7 +124,9 @@ class BERTScoreMetric(Metric):
                     }
 
                 except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
-                    if "out of memory" in str(e).lower() or isinstance(e, torch.cuda.OutOfMemoryError):
+                    if "out of memory" in str(e).lower() or isinstance(
+                        e, torch.cuda.OutOfMemoryError
+                    ):
                         # Clear memory and retry with smaller batch
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
@@ -133,11 +135,13 @@ class BERTScoreMetric(Metric):
                         old_batch_size = batch_size
                         batch_size = batch_size // 2
                         if batch_size >= min_batch_size:
-                            print(f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}")
+                            print(
+                                f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}"
+                            )
                         else:
                             raise RuntimeError(
-                                f"BERTScore OOM even with batch_size=1. "
-                                f"Text too long or GPU memory insufficient."
+                                "BERTScore OOM even with batch_size=1. "
+                                "Text too long or GPU memory insufficient."
                             ) from e
                     else:
                         raise

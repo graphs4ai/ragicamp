@@ -153,7 +153,7 @@ def build_embedding_index(
         raise ValueError(f"Unknown index type: {index_type}")
 
     index = cpu_index
-    is_trained = (index_type == "flat" or index_type == "hnsw")  # These don't need training
+    is_trained = index_type == "flat" or index_type == "hnsw"  # These don't need training
 
     # Chunking config
     chunk_config = ChunkConfig(
@@ -298,7 +298,7 @@ def build_embedding_index(
     print(f"✓ Embedding complete: {total_docs} docs → {total_chunks} chunks")
 
     # Set nprobe for IVF indexes
-    if index_type in ("ivf", "ivfpq") and hasattr(index, 'nprobe'):
+    if index_type in ("ivf", "ivfpq") and hasattr(index, "nprobe"):
         index.nprobe = nprobe
         print(f"  Set nprobe={nprobe} for IVF index")
 

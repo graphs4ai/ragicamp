@@ -31,8 +31,8 @@ jobs:
         with:
           extra_args: --only-verified
 
-  lint:
-    name: Lint & Format
+  code-quality:
+    name: Code Quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,10 +45,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - run: uv sync
-      - name: Check formatting (ruff)
-        run: uv run ruff format --check src/ tests/
-      - name: Check linting (ruff)
-        run: uv run ruff check src/ tests/
+      - name: Check code quality (ruff format + lint)
+        run: |
+          echo "🔍 Checking formatting..."
+          uv run ruff format --check src/ tests/
+          echo "🔍 Checking linting..."
+          uv run ruff check src/ tests/
+          echo "✅ Code quality checks passed!"
 
   import-check:
     name: Import Check
@@ -84,7 +87,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: [lint, import-check]
+    needs: [code-quality, import-check]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -114,14 +117,14 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [secrets-scan, lint, import-check, test]
+    needs: [secrets-scan, code-quality, import-check, test]
     if: always()
     steps:
       - name: Check results
         run: |
-          echo "Results: secrets=${{ needs.secrets-scan.result }} lint=${{ needs.lint.result }} imports=${{ needs.import-check.result }} tests=${{ needs.test.result }}"
+          echo "Results: secrets=${{ needs.secrets-scan.result }} code-quality=${{ needs.code-quality.result }} imports=${{ needs.import-check.result }} tests=${{ needs.test.result }}"
           if [ "${{ needs.secrets-scan.result }}" = "failure" ]; then exit 1; fi
-          if [ "${{ needs.lint.result }}" = "failure" ]; then exit 1; fi
+          if [ "${{ needs.code-quality.result }}" = "failure" ]; then exit 1; fi
           if [ "${{ needs.import-check.result }}" = "failure" ]; then exit 1; fi
           # Tests are informational for now
           echo "✅ CI passed"

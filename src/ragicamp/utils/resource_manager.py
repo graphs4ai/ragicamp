@@ -63,6 +63,7 @@ class ResourceManager:
         """
         try:
             from ragicamp.indexes.embedding import release_faiss_gpu_resources
+
             release_faiss_gpu_resources()
         except ImportError:
             pass
@@ -89,8 +90,8 @@ class ResourceManager:
             vllm_gb = total * Defaults.VLLM_GPU_MEMORY_FRACTION
             faiss_gb = total * Defaults.FAISS_GPU_MEMORY_FRACTION
             print(f"📊 GPU Memory Partitioning (total: {total:.1f} GiB):")
-            print(f"   vLLM:  {vllm_gb:.1f} GiB ({Defaults.VLLM_GPU_MEMORY_FRACTION*100:.0f}%)")
-            print(f"   FAISS: {faiss_gb:.1f} GiB ({Defaults.FAISS_GPU_MEMORY_FRACTION*100:.0f}%)")
+            print(f"   vLLM:  {vllm_gb:.1f} GiB ({Defaults.VLLM_GPU_MEMORY_FRACTION * 100:.0f}%)")
+            print(f"   FAISS: {faiss_gb:.1f} GiB ({Defaults.FAISS_GPU_MEMORY_FRACTION * 100:.0f}%)")
 
 
 @contextmanager

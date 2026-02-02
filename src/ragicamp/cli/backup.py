@@ -8,7 +8,7 @@ from typing import Optional
 
 def get_b2_client():
     """Get B2 S3 client and credentials.
-    
+
     Returns:
         Tuple of (s3_client, endpoint, key_id, app_key) or (None, None, None, None) on error.
     """
@@ -44,7 +44,7 @@ def get_b2_client():
 
 def list_backups(bucket: str, limit: int = 20) -> list[str]:
     """List available backups in bucket.
-    
+
     Returns:
         List of backup names (timestamps), sorted newest first.
     """
@@ -53,16 +53,12 @@ def list_backups(bucket: str, limit: int = 20) -> list[str]:
         return []
 
     try:
-        response = s3.list_objects_v2(
-            Bucket=bucket, Prefix="ragicamp-backup/", Delimiter="/"
-        )
+        response = s3.list_objects_v2(Bucket=bucket, Prefix="ragicamp-backup/", Delimiter="/")
         prefixes = response.get("CommonPrefixes", [])
         if not prefixes:
             return []
 
-        backup_names = sorted(
-            [p["Prefix"].split("/")[1] for p in prefixes], reverse=True
-        )
+        backup_names = sorted([p["Prefix"].split("/")[1] for p in prefixes], reverse=True)
         return backup_names[:limit]
     except Exception as e:
         print(f"Error listing backups: {e}")
@@ -77,14 +73,14 @@ def backup(
     continue_on_error: bool = False,
 ) -> int:
     """Upload directories to B2.
-    
+
     Args:
         dirs_to_backup: List of directories to backup
         bucket: B2 bucket name
         prefix: S3 key prefix
         dry_run: If True, only preview files
         continue_on_error: If True, continue on upload errors
-        
+
     Returns:
         Exit code (0 on success)
     """
@@ -170,7 +166,7 @@ def download(
     continue_on_error: bool = False,
 ) -> int:
     """Download backup from B2.
-    
+
     Args:
         bucket: B2 bucket name
         backup_name: Specific backup to download (None = most recent)
@@ -178,7 +174,7 @@ def download(
         outputs_only: Only download outputs/
         dry_run: If True, only preview files
         continue_on_error: If True, continue on download errors
-        
+
     Returns:
         Exit code (0 on success)
     """
@@ -209,7 +205,7 @@ def download(
                 s3_key = obj["Key"]
                 size = obj["Size"]
                 # Extract local path: remove prefix, keep artifacts/... or outputs/...
-                relative_path = s3_key[len(prefix) + 1:]  # +1 for trailing /
+                relative_path = s3_key[len(prefix) + 1 :]  # +1 for trailing /
                 if not relative_path:
                     continue
 
@@ -234,8 +230,8 @@ def download(
 
     if dry_run:
         print("\n[DRY RUN] Would download:")
-        for s3_key, local_path, size in files_to_download[:15]:
-            print(f"  {local_path} ({size / (1024*1024):.1f} MB)")
+        for _, local_path, size in files_to_download[:15]:
+            print(f"  {local_path} ({size / (1024 * 1024):.1f} MB)")
         if len(files_to_download) > 15:
             print(f"  ... and {len(files_to_download) - 15} more files")
         return 0
@@ -265,7 +261,9 @@ def download(
     speed_mbps = (downloaded_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
     print(f"\n✓ Downloaded {downloaded_files}/{len(files_to_download)} files")
-    print(f"  Total: {downloaded_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(
+        f"  Total: {downloaded_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
+    )
 
     if errors:
         print(f"\n⚠️  {len(errors)} errors:")

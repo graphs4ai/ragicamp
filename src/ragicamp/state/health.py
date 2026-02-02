@@ -107,7 +107,6 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     results_path = exp_dir / "results.json"
 
     original_phase = state.phase
-    original_metrics = list(state.metrics_computed)
 
     # COMPLETE phase requires results.json
     if state.phase == ExperimentPhase.COMPLETE:
@@ -153,17 +152,17 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
         try:
             with open(predictions_path) as f:
                 data = json.load(f)
-            
+
             # Collect all metric keys from aggregate_metrics
             actual_keys = set(data.get("aggregate_metrics", {}).keys())
-            
+
             # Also check per-item metrics (first prediction that has metrics)
             predictions = data.get("predictions", [])
             for pred in predictions:
                 if "metrics" in pred and pred["metrics"]:
                     actual_keys.update(pred["metrics"].keys())
                     break
-            
+
             # Map metric names to their expected keys
             # Some metrics produce multiple keys (e.g., bertscore -> bertscore_f1, bertscore_precision, etc.)
             def metric_exists(metric_name: str) -> bool:
@@ -172,7 +171,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
                 # Check for prefixed keys (e.g., bertscore -> bertscore_f1)
                 prefix = f"{metric_name}_"
                 return any(k.startswith(prefix) for k in actual_keys)
-            
+
             # Only keep metrics that actually exist in the predictions file
             validated_metrics = [m for m in state.metrics_computed if metric_exists(m)]
             if len(validated_metrics) != len(state.metrics_computed):

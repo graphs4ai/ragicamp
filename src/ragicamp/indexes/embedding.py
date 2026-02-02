@@ -10,7 +10,12 @@ from typing import Any, Optional
 
 import faiss
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
+
+# Enable TensorFloat32 for faster matrix multiplication on Ampere+ GPUs
+if torch.cuda.is_available():
+    torch.set_float32_matmul_precision('high')
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -20,31 +25,33 @@ from ragicamp.utils.artifacts import get_artifact_manager
 
 logger = get_logger(__name__)
 
+
 # Configure FAISS CPU threads for better performance
 def _configure_faiss_threads():
     """Configure FAISS to use multiple CPU threads."""
     import os
-    
+
     num_threads = Defaults.FAISS_CPU_THREADS
-    
+
     # 0 means auto-detect (use all available cores)
     if num_threads == 0:
         num_threads = os.cpu_count() or 1
-    
+
     # Set environment variable (affects OpenMP globally)
     os.environ.setdefault("OMP_NUM_THREADS", str(num_threads))
-    
+
     # Also try the FAISS API
     try:
-        if hasattr(faiss, 'omp_set_num_threads'):
+        if hasattr(faiss, "omp_set_num_threads"):
             faiss.omp_set_num_threads(num_threads)
-        
+
         # Log actual thread count
-        if hasattr(faiss, 'omp_get_max_threads'):
+        if hasattr(faiss, "omp_get_max_threads"):
             actual = faiss.omp_get_max_threads()
             logger.info("FAISS CPU threads: %d", actual)
     except Exception as e:
         logger.debug("FAISS thread config: %s", e)
+
 
 _configure_faiss_threads()
 
@@ -63,7 +70,7 @@ def _check_faiss_gpu_available() -> bool:
     if _faiss_gpu_available is None:
         try:
             # Check if faiss has GPU support (faiss-gpu vs faiss-cpu)
-            if not hasattr(faiss, 'StandardGpuResources'):
+            if not hasattr(faiss, "StandardGpuResources"):
                 logger.warning(
                     "FAISS GPU not available: faiss-cpu is installed. "
                     "Install faiss-gpu-cu12 for GPU support: "
@@ -105,7 +112,10 @@ def get_faiss_gpu_resources(temp_memory_mb: int = None) -> Optional["faiss.Stand
             _faiss_gpu_resources = faiss.StandardGpuResources()
             temp_mem = (temp_memory_mb or Defaults.FAISS_GPU_TEMP_MEMORY_MB) * 1024 * 1024
             _faiss_gpu_resources.setTempMemory(temp_mem)
-            logger.info("Initialized FAISS GPU resources (temp_memory=%dMB)", temp_memory_mb or Defaults.FAISS_GPU_TEMP_MEMORY_MB)
+            logger.info(
+                "Initialized FAISS GPU resources (temp_memory=%dMB)",
+                temp_memory_mb or Defaults.FAISS_GPU_TEMP_MEMORY_MB,
+            )
         except Exception as e:
             logger.warning("Failed to initialize FAISS GPU resources: %s", e)
             return None
@@ -250,8 +260,9 @@ class EmbeddingIndex(Index):
             cpu_index.hnsw.efConstruction = 200  # Higher = better quality, slower build
             cpu_index.hnsw.efSearch = 128  # Higher = better recall, slower search
         else:
-            raise ValueError(f"Unknown index type: {self.index_type}. "
-                           f"Valid types: flat, ivf, ivfpq, hnsw")
+            raise ValueError(
+                f"Unknown index type: {self.index_type}. Valid types: flat, ivf, ivfpq, hnsw"
+            )
 
         # Move to GPU if requested and available
         if self.use_gpu and self.index_type != "hnsw":  # HNSW doesn't support GPU
@@ -264,7 +275,9 @@ class EmbeddingIndex(Index):
                     gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
                     self._is_gpu_index = True
                     if self.index_type in ("ivf", "ivfpq"):
-                        logger.info("Created GPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
+                        logger.info(
+                            "Created GPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist
+                        )
                     else:
                         logger.info("Created GPU FAISS index (type=%s)", self.index_type)
                     return gpu_index
@@ -274,7 +287,9 @@ class EmbeddingIndex(Index):
         if self.index_type in ("ivf", "ivfpq"):
             logger.info("Created CPU FAISS index (type=%s, nlist=%d)", self.index_type, nlist)
         elif self.index_type == "hnsw":
-            logger.info("Created CPU FAISS index (type=%s, M=32, efConstruction=200)", self.index_type)
+            logger.info(
+                "Created CPU FAISS index (type=%s, M=32, efConstruction=200)", self.index_type
+            )
         else:
             logger.info("Created CPU FAISS index (type=%s)", self.index_type)
         return cpu_index
@@ -291,7 +306,7 @@ class EmbeddingIndex(Index):
             pass  # nprobe is set via search params for GPU
 
         # Set nprobe for IVF indexes
-        if hasattr(index, 'nprobe'):
+        if hasattr(index, "nprobe"):
             index.nprobe = self.nprobe
             logger.debug("Set nprobe=%d for IVF index", self.nprobe)
 
@@ -547,7 +562,12 @@ class EmbeddingIndex(Index):
         with open(path / "documents.pkl", "rb") as f:
             index.documents = pickle.load(f)
 
-        logger.info("Loaded embedding index: %s (%d docs, GPU=%s)", name, len(index.documents), index._is_gpu_index)
+        logger.info(
+            "Loaded embedding index: %s (%d docs, GPU=%s)",
+            name,
+            len(index.documents),
+            index._is_gpu_index,
+        )
         return index
 
     def convert_to(self, new_index_type: str, save: bool = True) -> "EmbeddingIndex":
@@ -570,17 +590,19 @@ class EmbeddingIndex(Index):
         n_vectors = self.index.ntotal
         dim = self._embedding_dim
 
-        logger.info("Converting index from %s to %s (%d vectors)...", old_type, new_index_type, n_vectors)
+        logger.info(
+            "Converting index from %s to %s (%d vectors)...", old_type, new_index_type, n_vectors
+        )
 
         # Extract all vectors from current index
         # For flat index, we can reconstruct directly
-        if hasattr(self.index, 'reconstruct_n'):
-            vectors = np.zeros((n_vectors, dim), dtype='float32')
+        if hasattr(self.index, "reconstruct_n"):
+            vectors = np.zeros((n_vectors, dim), dtype="float32")
             self.index.reconstruct_n(0, n_vectors, vectors)
         else:
             # Fallback: search for each vector by ID (slower)
             logger.warning("Index type doesn't support reconstruct_n, using slower method")
-            vectors = np.zeros((n_vectors, dim), dtype='float32')
+            vectors = np.zeros((n_vectors, dim), dtype="float32")
             for i in range(n_vectors):
                 vectors[i] = self.index.reconstruct(i)
 

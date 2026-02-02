@@ -19,11 +19,11 @@ from ragicamp.config.validation import (
     validate_model_spec,
 )
 from ragicamp.execution.runner import run_spec
-from ragicamp.spec.builder import build_specs
 from ragicamp.indexes.builder import (
     ensure_indexes_exist,
 )
 from ragicamp.models import OpenAIModel
+from ragicamp.spec.builder import build_specs
 
 
 def get_prompt_builder(prompt_type: str, dataset: str):

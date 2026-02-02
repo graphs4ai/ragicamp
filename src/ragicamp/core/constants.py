@@ -182,8 +182,12 @@ class Defaults:
     # NOTE: GPU FAISS disabled by default - B200 (Blackwell) not yet supported by faiss-gpu-cu12.
     # Enable once faiss adds Blackwell kernels, or build from source.
     FAISS_USE_GPU = False  # Disable GPU FAISS until Blackwell support added
-    FAISS_GPU_TEMP_MEMORY_MB = 65536  # Temporary memory for FAISS operations (64GB for large index transfers)
-    FAISS_INDEX_TYPE = "hnsw"  # Default index type: flat, ivf, ivfpq, hnsw (hnsw is fastest for CPU)
+    FAISS_GPU_TEMP_MEMORY_MB = (
+        65536  # Temporary memory for FAISS operations (64GB for large index transfers)
+    )
+    FAISS_INDEX_TYPE = (
+        "hnsw"  # Default index type: flat, ivf, ivfpq, hnsw (hnsw is fastest for CPU)
+    )
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
     FAISS_CPU_THREADS = 0  # 0 = auto-detect (use all available cores)

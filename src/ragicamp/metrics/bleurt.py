@@ -35,7 +35,10 @@ class BLEURTMetric(Metric):
 
         try:
             import torch
-            from bleurt_pytorch import BleurtConfig, BleurtForSequenceClassification, BleurtTokenizer
+            from bleurt_pytorch import (
+                BleurtForSequenceClassification,
+                BleurtTokenizer,
+            )
         except ImportError as e:
             raise ImportError(
                 "bleurt-pytorch is required for BLEURTMetric. "
@@ -123,10 +126,14 @@ class BLEURTMetric(Metric):
                     # Store per-item scores
                     self._last_scores = all_scores
 
-                    return {"bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0}
+                    return {
+                        "bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0
+                    }
 
                 except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
-                    if "out of memory" in str(e).lower() or isinstance(e, torch.cuda.OutOfMemoryError):
+                    if "out of memory" in str(e).lower() or isinstance(
+                        e, torch.cuda.OutOfMemoryError
+                    ):
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                         gc.collect()
@@ -134,11 +141,13 @@ class BLEURTMetric(Metric):
                         old_batch_size = batch_size
                         batch_size = batch_size // 2
                         if batch_size >= min_batch_size:
-                            print(f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}")
+                            print(
+                                f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}"
+                            )
                         else:
                             raise RuntimeError(
-                                f"BLEURT OOM even with batch_size=1. "
-                                f"Text too long or GPU memory insufficient."
+                                "BLEURT OOM even with batch_size=1. "
+                                "Text too long or GPU memory insufficient."
                             ) from e
                     else:
                         raise

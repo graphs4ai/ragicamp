@@ -134,12 +134,12 @@ test-cov:
 	uv run pytest tests/ -v --cov=src/ragicamp --cov-report=term-missing
 
 lint:
-	uv run black --check src/ tests/ scripts/ --line-length 100
-	uv run isort --check-only src/ tests/ scripts/ --profile black
+	uv run ruff format --check src/ tests/ scripts/
+	uv run ruff check src/ tests/ scripts/
 
 format:
-	uv run black src/ tests/ scripts/ --line-length 100
-	uv run isort src/ tests/ scripts/ --profile black
+	uv run ruff format src/ tests/ scripts/
+	uv run ruff check --fix src/ tests/ scripts/
 
 validate-configs:
 	@echo "Validating Hydra configs..."
