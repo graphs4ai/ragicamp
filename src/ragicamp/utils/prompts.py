@@ -96,14 +96,18 @@ class PromptBuilder:
         parts = []
 
         # Task instruction - encourage using both context AND own knowledge
-        task = "Answer the question using the context below and your own knowledge."
+        task = "Answer the question based on the context below."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
+        else:
+            # Default: encourage finding the answer in context
+            task += " The answer is in the context - find and extract it."
         if self.config.style:
             task += f" {self.config.style}"
         if self.config.stop_instruction:
             task += f" {self.config.stop_instruction}"
-        task += " If you don't know, answer 'Unknown'."
+        # Softer fallback - only use Unknown as last resort
+        task += " Only answer 'Unknown' if the answer is truly not in the context."
         parts.append(task)
 
         # Examples section (if any)
@@ -163,6 +167,7 @@ class PromptBuilder:
             return cls(
                 PromptConfig(
                     style="Give only the answer, no explanations.",
+                    knowledge_instruction="Read the context carefully to find the answer.",
                 )
             )
 
@@ -170,6 +175,7 @@ class PromptBuilder:
             return cls(
                 PromptConfig(
                     style="Reply with just the answer.",
+                    knowledge_instruction="The answer can be found in the context.",
                 )
             )
 
