@@ -209,8 +209,8 @@ class VLLMModel(LanguageModel):
             **kwargs,
         )
 
-        # Generate
-        outputs = self.llm.generate(prompts, sampling_params)
+        # Generate (disable tqdm to avoid noisy per-request progress bars)
+        outputs = self.llm.generate(prompts, sampling_params, use_tqdm=False)
 
         # Extract generated text
         results = []
