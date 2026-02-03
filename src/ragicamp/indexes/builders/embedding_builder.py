@@ -3,15 +3,17 @@
 Builds dense vector indexes for semantic search.
 Supports both sentence-transformers and vLLM embedding backends.
 
-Uses a two-phase approach for optimal GPU utilization:
-- Phase 1: Chunk + embed all batches, save raw embeddings to disk
-- Phase 2: Load all, normalize, add to FAISS index
+Uses incremental FAISS building for memory efficiency:
+- Each batch: chunk → embed → normalize → add to FAISS
+- Checkpoints index every N batches for crash recovery
+- Never loads all embeddings into RAM at once
 
 Supports checkpointing for resume after crashes.
 """
 
 import gc
 import os
+import pickle
 import time
 from typing import Any
 
@@ -30,6 +32,9 @@ logger = get_logger(__name__)
 
 # Maximum document size in characters (larger docs are truncated)
 MAX_DOC_CHARS = 100_000
+
+# Checkpoint index every N batches
+CHECKPOINT_INTERVAL = 5
 
 
 def build_embedding_index(
@@ -54,9 +59,10 @@ def build_embedding_index(
     This is the expensive part - chunking + embedding. Once built, multiple
     retrievers can reuse this index.
 
-    Uses a two-phase approach:
-    - Phase 1: Chunk + embed all batches, save raw embeddings to disk
-    - Phase 2: Load all, normalize, add to FAISS index
+    Uses incremental FAISS building:
+    - Each batch: chunk → embed → normalize → add to FAISS
+    - Checkpoints every 5 batches for crash recovery
+    - Memory efficient: only one batch in RAM at a time
 
     Supports resume from checkpoint if process is interrupted.
 
@@ -96,6 +102,10 @@ def build_embedding_index(
 
     manager = get_artifact_manager()
 
+    # Use all CPU cores for FAISS
+    num_threads = os.cpu_count() or 8
+    faiss.omp_set_num_threads(num_threads)
+
     print(f"\n{'=' * 60}")
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
@@ -103,7 +113,7 @@ def build_embedding_index(
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
     print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
-    print(f"  FAISS index type: {index_type}, GPU: {use_gpu}")
+    print(f"  FAISS index type: {index_type}, GPU: {use_gpu}, threads: {num_threads}")
     if index_type in ("ivf", "ivfpq"):
         print(f"  IVF params: nlist={nlist}, nprobe={nprobe}")
     print(f"{'=' * 60}")
@@ -139,24 +149,49 @@ def build_embedding_index(
     embedding_dim = encoder.get_sentence_embedding_dimension()
     print(f"  Embedder loaded (dim={embedding_dim})")
 
-    # Initialize FAISS index
-    if index_type == "flat":
-        cpu_index = faiss.IndexFlatIP(embedding_dim)
-    elif index_type == "ivf":
-        quantizer = faiss.IndexFlatIP(embedding_dim)
-        cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist)
-    elif index_type == "ivfpq":
-        quantizer = faiss.IndexFlatIP(embedding_dim)
-        m = min(32, embedding_dim // 4)
-        cpu_index = faiss.IndexIVFPQ(quantizer, embedding_dim, nlist, m, 8)
-    elif index_type == "hnsw":
-        cpu_index = faiss.IndexHNSWFlat(embedding_dim, 32)
-        cpu_index.hnsw.efConstruction = 200
-    else:
-        raise ValueError(f"Unknown index type: {index_type}")
+    # Setup work directory for checkpointing
+    work_dir = manager.indexes_dir / ".work" / index_name
+    work_dir.mkdir(parents=True, exist_ok=True)
+    index_checkpoint_path = work_dir / "index.faiss"
 
-    index = cpu_index
-    is_trained = index_type == "flat" or index_type == "hnsw"
+    # Initialize checkpoint manager and storage (for chunks only now)
+    checkpoint_mgr = CheckpointManager(work_dir)
+    storage = EmbeddingStorage(work_dir)
+
+    # Check for existing checkpoint (resume support)
+    checkpoint = checkpoint_mgr.load(EmbeddingCheckpoint)
+    if checkpoint and index_checkpoint_path.exists():
+        print(
+            f"  Resuming from checkpoint: batch {checkpoint.batch_num}, {checkpoint.total_docs} docs"
+        )
+        print("  Loading checkpointed index...")
+        index = faiss.read_index(str(index_checkpoint_path))
+        print(f"  Loaded index with {index.ntotal} vectors")
+        start_batch = checkpoint.batch_num
+        total_docs = checkpoint.total_docs
+        total_chunks = checkpoint.total_chunks
+    else:
+        # Initialize fresh FAISS index
+        if index_type == "flat":
+            cpu_index = faiss.IndexFlatIP(embedding_dim)
+        elif index_type == "ivf":
+            quantizer = faiss.IndexFlatIP(embedding_dim)
+            cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist)
+        elif index_type == "ivfpq":
+            quantizer = faiss.IndexFlatIP(embedding_dim)
+            m = min(32, embedding_dim // 4)
+            cpu_index = faiss.IndexIVFPQ(quantizer, embedding_dim, nlist, m, 8)
+        elif index_type == "hnsw":
+            cpu_index = faiss.IndexHNSWFlat(embedding_dim, 32)
+            cpu_index.hnsw.efConstruction = 200
+        else:
+            raise ValueError(f"Unknown index type: {index_type}")
+        index = cpu_index
+        start_batch = 0
+        total_docs = 0
+        total_chunks = 0
+
+    is_trained = index_type in ("flat", "hnsw") or index.is_trained
 
     # Chunking config
     chunk_config = ChunkConfig(
@@ -166,38 +201,93 @@ def build_embedding_index(
     )
     chunker = DocumentChunker(chunk_config)
 
-    # Setup work directory for checkpointing and temp storage
-    work_dir = manager.indexes_dir / ".work" / index_name
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    # Initialize storage and checkpoint manager
-    storage = EmbeddingStorage(work_dir)
-    checkpoint_mgr = CheckpointManager(work_dir)
-
-    # Check for existing checkpoint (resume support)
-    checkpoint = checkpoint_mgr.load(EmbeddingCheckpoint)
-    if checkpoint:
-        print(
-            f"  Resuming from checkpoint: batch {checkpoint.batch_num}, {checkpoint.total_docs} docs"
-        )
-        start_batch = checkpoint.batch_num
-        total_docs = checkpoint.total_docs
-        total_chunks = checkpoint.total_chunks
-        # Restore embedding sizes for loading later
-        storage._embedding_sizes["default"] = checkpoint.embedding_sizes.copy()
-    else:
-        start_batch = 0
-        total_docs = 0
-        total_chunks = 0
-
     doc_batch = []
     batch_num = 0
-    docs_to_skip = start_batch * doc_batch_size  # Skip already processed docs
+    docs_to_skip = start_batch * doc_batch_size
 
     # ==========================================================================
-    # PHASE 1: Chunk and embed all batches (GPU runs continuously)
+    # INCREMENTAL BUILD: Chunk → Embed → Normalize → Add to FAISS
     # ==========================================================================
-    print("Phase 1: Chunking and embedding...")
+    print("Building index incrementally (chunk → embed → normalize → index)...")
+
+    def process_batch(doc_batch: list, batch_num: int, index, is_final: bool = False):
+        """Process a single batch: chunk, embed, normalize, add to index."""
+        nonlocal total_docs, total_chunks, is_trained
+
+        batch_size = len(doc_batch)
+        suffix = " (final)" if is_final else ""
+        print(f"\n  [Batch {batch_num}] Processing {batch_size} documents{suffix}...")
+
+        # Chunking phase
+        t_chunk = time.time()
+        batch_chunks = []
+        truncated = 0
+
+        for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+            text = doc.text
+            if len(text) > MAX_DOC_CHARS:
+                text = text[:MAX_DOC_CHARS]
+                truncated += 1
+                doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+            doc_chunks = list(chunker.strategy.chunk_document(doc))
+            batch_chunks.extend(doc_chunks)
+
+        chunk_elapsed = time.time() - t_chunk
+        msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s"
+        if truncated > 0:
+            msg += f" (truncated {truncated})"
+        print(msg)
+
+        total_docs += batch_size
+        total_chunks += len(batch_chunks)
+
+        if batch_chunks:
+            texts = [c.text for c in batch_chunks]
+            print(f"    Embedding {len(texts)} chunks...")
+
+            # Embed
+            embeddings = encoder.encode(
+                texts, show_progress_bar=True, batch_size=embedding_batch_size
+            )
+
+            # Normalize in-place
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            np.divide(embeddings, norms, out=embeddings)
+
+            # Train IVF if needed (first batch only)
+            if not is_trained and index_type in ("ivf", "ivfpq"):
+                print(f"    Training IVF index on {len(embeddings)} vectors...")
+                index.train(embeddings)
+                is_trained = True
+
+            # Add to index
+            t_index = time.time()
+            index.add(embeddings.astype(np.float32))
+            index_elapsed = time.time() - t_index
+
+            print(f"    ✓ Added to index in {index_elapsed:.1f}s (total: {index.ntotal} vectors)")
+
+            # Save chunks to disk
+            storage.append_chunks(batch_chunks)
+
+            # Cleanup
+            del embeddings, texts
+            gc.collect()
+
+        print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
+
+        # Checkpoint every N batches
+        if batch_num % CHECKPOINT_INTERVAL == 0:
+            print("    Saving checkpoint...")
+            faiss.write_index(index, str(index_checkpoint_path))
+            checkpoint_mgr.save(
+                EmbeddingCheckpoint(
+                    batch_num=batch_num,
+                    total_docs=total_docs,
+                    total_chunks=total_chunks,
+                    embedding_sizes=[],  # Not used in incremental mode
+                )
+            )
 
     try:
         for doc in corpus.load():
@@ -216,178 +306,63 @@ def build_embedding_index(
                     doc_batch = []
                     continue
 
-                batch_size = len(doc_batch)
-                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
-
-                # Chunking phase
-                t_chunk = time.time()
-                batch_chunks = []
-                truncated = 0
-
-                for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
-                    text = doc.text
-                    if len(text) > MAX_DOC_CHARS:
-                        text = text[:MAX_DOC_CHARS]
-                        truncated += 1
-                        doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-                    doc_chunks = list(chunker.strategy.chunk_document(doc))
-                    batch_chunks.extend(doc_chunks)
-
-                chunk_elapsed = time.time() - t_chunk
-                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s"
-                if truncated > 0:
-                    msg += f" (truncated {truncated})"
-                print(msg)
-
-                total_docs += batch_size
-                total_chunks += len(batch_chunks)
-
-                if batch_chunks:
-                    texts = [c.text for c in batch_chunks]
-                    print(f"    Embedding {len(texts)} chunks...")
-
-                    # Embed (no normalization yet - save raw)
-                    embeddings = encoder.encode(
-                        texts, show_progress_bar=True, batch_size=embedding_batch_size
-                    )
-
-                    # Save to storage
-                    storage.append_embeddings(embeddings)
-                    storage.append_chunks(batch_chunks)
-
-                    # Save checkpoint
-                    checkpoint_mgr.save(
-                        EmbeddingCheckpoint(
-                            batch_num=batch_num,
-                            total_docs=total_docs,
-                            total_chunks=total_chunks,
-                            embedding_sizes=storage.get_embedding_sizes(),
-                        )
-                    )
-
-                print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks")
+                process_batch(doc_batch, batch_num, index)
                 doc_batch = []
-                del batch_chunks, texts, embeddings
-                gc.collect()
 
         # Process remaining docs
         if doc_batch:
             batch_num += 1
-            batch_size = len(doc_batch)
-            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
-
-            t_chunk = time.time()
-            batch_chunks = []
-            truncated = 0
-
-            for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
-                text = doc.text
-                if len(text) > MAX_DOC_CHARS:
-                    text = text[:MAX_DOC_CHARS]
-                    truncated += 1
-                    doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-                doc_chunks = list(chunker.strategy.chunk_document(doc))
-                batch_chunks.extend(doc_chunks)
-
-            chunk_elapsed = time.time() - t_chunk
-            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s"
-            if truncated > 0:
-                msg += f" (truncated {truncated})"
-            print(msg)
-
-            total_docs += batch_size
-            total_chunks += len(batch_chunks)
-
-            if batch_chunks:
-                texts = [c.text for c in batch_chunks]
-                print(f"    Embedding {len(texts)} chunks...")
-                embeddings = encoder.encode(
-                    texts, show_progress_bar=True, batch_size=embedding_batch_size
-                )
-                storage.append_embeddings(embeddings)
-                storage.append_chunks(batch_chunks)
-                checkpoint_mgr.save(
-                    EmbeddingCheckpoint(
-                        batch_num=batch_num,
-                        total_docs=total_docs,
-                        total_chunks=total_chunks,
-                        embedding_sizes=storage.get_embedding_sizes(),
-                    )
-                )
-
-            print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks")
-            del doc_batch, batch_chunks, texts, embeddings
-            gc.collect()
+            process_batch(doc_batch, batch_num, index, is_final=True)
+            doc_batch = []
 
     except Exception as e:
+        # Save checkpoint on error
+        print(f"\n*** Error at batch {batch_num}: {e}")
+        print("    Saving checkpoint before exit...")
+        faiss.write_index(index, str(index_checkpoint_path))
+        checkpoint_mgr.save(
+            EmbeddingCheckpoint(
+                batch_num=batch_num - 1,  # Last successful batch
+                total_docs=total_docs,
+                total_chunks=total_chunks,
+                embedding_sizes=[],
+            )
+        )
         storage.close()
-        raise RuntimeError(f"Phase 1 failed at batch {batch_num}: {e}") from e
+        raise RuntimeError(f"Build failed at batch {batch_num}: {e}") from e
 
-    print(f"✓ Phase 1 complete: {total_docs} docs → {total_chunks} chunks in {batch_num} batches")
-
-    # ==========================================================================
-    # PHASE 2: Load embeddings, normalize, add to FAISS
-    # ==========================================================================
-    print("\nPhase 2: Post-processing (normalize + index)...")
-
-    # Load all embeddings from disk
-    print("  Loading embeddings from disk...")
-    t_load = time.time()
-    embeddings = storage.load_all_embeddings()
-    print(f"  ✓ Loaded {len(embeddings)} embeddings in {time.time() - t_load:.1f}s")
-
-    # Normalize all at once (in-place for efficiency)
-    print("  Normalizing embeddings...")
-    t_norm = time.time()
-    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    np.divide(embeddings, norms, out=embeddings)
-    print(f"  ✓ Normalized in {time.time() - t_norm:.1f}s")
-
-    # Train IVF if needed
-    if not is_trained and index_type in ("ivf", "ivfpq"):
-        print(f"  Training IVF index on {len(embeddings)} vectors...")
-        index.train(embeddings)
-        is_trained = True
-
-    # Add all to index at once
-    print("  Adding to FAISS index...")
-    t_add = time.time()
-    index.add(embeddings)
-    print(f"  ✓ Added {index.ntotal} vectors in {time.time() - t_add:.1f}s")
-
-    del embeddings
-    gc.collect()
-
-    print(f"✓ Phase 2 complete: {index.ntotal} vectors indexed")
+    print(f"\n✓ Build complete: {total_docs} docs → {total_chunks} chunks → {index.ntotal} vectors")
 
     # Set nprobe for IVF indexes
     if index_type in ("ivf", "ivfpq") and hasattr(index, "nprobe"):
         index.nprobe = nprobe
         print(f"  Set nprobe={nprobe} for IVF index")
 
-    # Save to shared indexes directory
+    # Save to final location
     artifact_path = manager.get_embedding_index_path(index_name)
+    print(f"\nSaving to {artifact_path}...")
 
-    # Save FAISS index (always save CPU version for portability)
+    # Save FAISS index
     faiss.write_index(index, str(artifact_path / "index.faiss"))
 
     # Load and save all chunks
-    print("Saving documents...")
+    print("  Saving documents...")
     all_chunks = storage.load_all_chunks()
     with open(artifact_path / "documents.pkl", "wb") as f:
-        import pickle
-
         pickle.dump(all_chunks, f)
+    print(f"  ✓ Saved {len(all_chunks)} documents")
 
     # Cleanup work directory
     storage.cleanup()
     checkpoint_mgr.clear()
+    if index_checkpoint_path.exists():
+        index_checkpoint_path.unlink()
 
     # Try to remove work dir if empty
     try:
         work_dir.rmdir()
     except OSError:
-        pass  # Not empty, leave it
+        pass
 
     del all_chunks
     gc.collect()
