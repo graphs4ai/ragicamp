@@ -151,14 +151,15 @@ rag:
       index_type: hnsw
     
     # E5-Mistral: 7B decoder, top MTEB retrieval scores
-    - type: dense
-      name: dense_e5_mistral_512
-      embedding_model: intfloat/e5-mistral-7b-instruct
-      embedding_backend: vllm
-      chunk_size: 512
-      chunk_overlap: 50
-      chunking_strategy: recursive
-      index_type: hnsw
+    # TEMPORARILY DISABLED - index being recovered
+    # - type: dense
+    #   name: dense_e5_mistral_512
+    #   embedding_model: intfloat/e5-mistral-7b-instruct
+    #   embedding_backend: vllm
+    #   chunk_size: 512
+    #   chunk_overlap: 50
+    #   chunking_strategy: recursive
+    #   index_type: hnsw
     
     # =========================================================================
     # HYBRID RETRIEVERS (Dense + Sparse)
@@ -217,7 +218,7 @@ rag:
   retriever_names:
     - dense_bge_large_512
     - dense_bge_m3_512
-    - dense_e5_mistral_512
+    # - dense_e5_mistral_512  # TEMPORARILY DISABLED - index being recovered
     - hybrid_bge_large_bm25_07
     - hierarchical_bge_large
   
