@@ -16,12 +16,12 @@
 # =============================================================================
 # - Uses SINGLETON experiments (explicit, hypothesis-driven)
 # - Each experiment tests ONE specific configuration
-# - Premium embeddings: BGE-M3, BGE-large
-# - Advanced retrieval: Hybrid (TF-IDF/BM25), reranking, iterative/self-RAG
+# - Embeddings: BGE-large (BERT), E5-Mistral-7B (decoder, vLLM)
+# - Advanced retrieval: Hybrid (TF-IDF/BM25), reranking, iterative RAG
 # - Small generators: Llama-3.2-3B, Phi-3-mini, Qwen2.5-3B
 #
-# Hardware: Single GPU with 16GB+ VRAM
-# Expected runtime: 6-8 hours (3 SLMs x 3 datasets)
+# Hardware: Single GPU with 48GB+ VRAM (B200 recommended)
+# Expected runtime: 8-12 hours (22 experiments x 3 datasets)
 
 name: smart_retrieval_slm
 description: "Test if premium retrieval compensates for smaller generators"
@@ -130,64 +130,71 @@ rag:
   # - en_bge_large_en_v1.5_c512_o50 (dense_bge_large_512)
   # - en_bge_m3_c512_o50 (dense_bge_m3_512)
   retrievers:
-    # Dense retrievers with different embeddings (BUILT)
+    # Dense retrievers with different embeddings
+    # Note: embedding_backend can override global setting per-retriever
+    
+    # BGE-large: BERT-based, needs sentence_transformers (ALREADY BUILT)
     - type: dense
       name: dense_bge_large_512
       embedding_model: BAAI/bge-large-en-v1.5
+      embedding_backend: sentence_transformers  # BERT-based
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
-      index_type: hnsw  # Fast CPU search (50-100x faster than flat)
+      index_type: hnsw
     
+    # BGE-M3: BERT-based, needs sentence_transformers (ALREADY BUILT)
     - type: dense
       name: dense_bge_m3_512
       embedding_model: BAAI/bge-m3
+      embedding_backend: sentence_transformers  # BERT-based
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
     
     # -------------------------------------------------------------------------
-    # FUTURE: Top MTEB Retrieval Models (uncomment to build)
+    # E5-Mistral: vLLM-compatible, top MTEB retrieval (NEW - TO BUILD)
     # -------------------------------------------------------------------------
-    # Rankings from MTEB retrieval leaderboard (2024/2025):
-    # 1. gte-Qwen2-7B-instruct - Top overall but 7B params (expensive)
-    # 2. NV-Embed-v1 - NVIDIA, excellent quality
-    # 3. GTE-large-en-v1.5 - Strong retrieval, reasonable size
-    # 4. E5-large-v2 - Microsoft, battle-tested
-    # 5. Nomic-embed-text-v1.5 - Open source, good quality/size ratio
+    # 7B decoder model - uses vLLM continuous batching for fast embedding
+    # Ranked #1-2 on MTEB retrieval tasks
+    - type: dense
+      name: dense_e5_mistral_512
+      embedding_model: intfloat/e5-mistral-7b-instruct
+      embedding_backend: vllm  # Decoder model, uses vLLM
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+      index_type: hnsw
     
-    # GTE-large: Alibaba, top-tier retrieval performance
+    # -------------------------------------------------------------------------
+    # FUTURE: Other Top MTEB Models (uncomment to build)
+    # -------------------------------------------------------------------------
+    # GTE-Qwen2-7B: Top overall on MTEB, vLLM compatible
+    # - type: dense
+    #   name: dense_gte_qwen2_512
+    #   embedding_model: Alibaba-NLP/gte-Qwen2-7B-instruct
+    #   embedding_backend: vllm
+    #   chunk_size: 512
+    #   chunk_overlap: 50
+    #   chunking_strategy: recursive
+    #   index_type: hnsw
+    
+    # SFR-Embedding-Mistral: Salesforce, vLLM compatible
+    # - type: dense
+    #   name: dense_sfr_mistral_512
+    #   embedding_model: Salesforce/SFR-Embedding-Mistral
+    #   embedding_backend: vllm
+    #   chunk_size: 512
+    #   chunk_overlap: 50
+    #   chunking_strategy: recursive
+    #   index_type: hnsw
+    
+    # GTE-large: BERT-based (sentence_transformers only)
     # - type: dense
     #   name: dense_gte_large_512
     #   embedding_model: Alibaba-NLP/gte-large-en-v1.5
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # E5-large-v2: Microsoft, very stable and well-tested
-    # - type: dense
-    #   name: dense_e5_large_512
-    #   embedding_model: intfloat/e5-large-v2
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # Nomic: 137M params - tests if smaller model is sufficient
-    # - type: dense
-    #   name: dense_nomic_512
-    #   embedding_model: nomic-ai/nomic-embed-text-v1.5
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # Stella: 1.5B params - tests if bigger model improves quality
-    # - type: dense
-    #   name: dense_stella_512
-    #   embedding_model: dunzhang/stella_en_1.5B_v5
+    #   embedding_backend: sentence_transformers
     #   chunk_size: 512
     #   chunk_overlap: 50
     #   chunking_strategy: recursive
@@ -433,6 +440,47 @@ experiments:
     top_k: 5
     fetch_k: 25
     reranker: bge
+    prompt: concise
+
+  # ========================================================================
+  # GROUP G: Embedding Model Comparison (E5-Mistral vs BGE-large)
+  # ========================================================================
+  # Tests if better embeddings (E5-Mistral, top MTEB) improve RAG quality.
+  # Uses Qwen (best SLM) to isolate embedding impact.
+  # Compare against Group A/C/F which use BGE-large.
+  
+  # G1: Simple dense with E5-Mistral
+  - name: g1_qwen_e5mistral_dense
+    hypothesis: "E5-Mistral embeddings improve retrieval"
+    model: vllm:Qwen/Qwen2.5-3B-Instruct
+    retriever: dense_e5_mistral_512
+    top_k: 5
+    prompt: concise
+  
+  # G2: E5-Mistral + reranking (compare to c3)
+  - name: g2_qwen_e5mistral_rerank
+    hypothesis: "Top embeddings + reranking - best precision?"
+    model: vllm:Qwen/Qwen2.5-3B-Instruct
+    retriever: dense_e5_mistral_512
+    top_k: 5
+    fetch_k: 25
+    reranker: bge
+    prompt: concise
+  
+  # G3: Phi-3 + E5-Mistral (cross-check with different SLM)
+  - name: g3_phi3_e5mistral_dense
+    hypothesis: "E5-Mistral benefits Phi-3 too?"
+    model: vllm:microsoft/Phi-3-mini-4k-instruct
+    retriever: dense_e5_mistral_512
+    top_k: 5
+    prompt: concise
+  
+  # G4: Llama + E5-Mistral (complete the SLM comparison)
+  - name: g4_llama_e5mistral_dense
+    hypothesis: "E5-Mistral with Llama baseline"
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
+    retriever: dense_e5_mistral_512
+    top_k: 5
     prompt: concise
 
 # =============================================================================

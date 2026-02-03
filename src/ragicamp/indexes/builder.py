@@ -219,6 +219,14 @@ def ensure_indexes_exist(
                 ready_indexes.append(index_name)
             elif build_if_missing:
                 print(f"   📦 Building {index_name} (shared) → {len(retrievers)} retriever(s)")
+                # Get embedding config from corpus_config (global) or retriever (per-retriever override)
+                embedding_cfg = corpus_config.get("embedding", {})
+                embedding_backend = first_retriever.get(
+                    "embedding_backend",
+                    embedding_cfg.get("backend", "vllm"),
+                )
+                vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.9)
+                
                 build_embedding_index(
                     index_name=index_name,
                     embedding_model=first_retriever.get("embedding_model", "all-MiniLM-L6-v2"),
@@ -228,7 +236,9 @@ def ensure_indexes_exist(
                     chunking_strategy=first_retriever.get("chunking_strategy", "recursive"),
                     doc_batch_size=corpus_config.get("doc_batch_size", 5000),
                     embedding_batch_size=corpus_config.get("embedding_batch_size", 64),
-                    index_type=first_retriever.get("index_type"),  # Pass index_type from config
+                    index_type=first_retriever.get("index_type"),
+                    embedding_backend=embedding_backend,
+                    vllm_gpu_memory_fraction=vllm_gpu_fraction,
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()

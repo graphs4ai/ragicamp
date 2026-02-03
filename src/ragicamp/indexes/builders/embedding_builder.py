@@ -1,7 +1,7 @@
 """Embedding index builder.
 
-Builds dense vector indexes for semantic search using sentence transformers.
-Supports GPU FAISS for accelerated similarity search.
+Builds dense vector indexes for semantic search.
+Supports both sentence-transformers and vLLM embedding backends.
 """
 
 import gc
@@ -35,6 +35,8 @@ def build_embedding_index(
     use_gpu: bool = None,
     nlist: int = None,
     nprobe: int = None,
+    embedding_backend: str = "vllm",
+    vllm_gpu_memory_fraction: float = 0.9,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -55,6 +57,8 @@ def build_embedding_index(
         use_gpu: Whether to use GPU FAISS. Default: Defaults.FAISS_USE_GPU
         nlist: Number of clusters for IVF indexes. Default: Defaults.FAISS_IVF_NLIST
         nprobe: Number of clusters to search. Default: Defaults.FAISS_IVF_NPROBE
+        embedding_backend: 'vllm' or 'sentence_transformers'
+        vllm_gpu_memory_fraction: GPU memory fraction for vLLM (default 0.9)
 
     Returns:
         Path to the saved index
@@ -66,7 +70,6 @@ def build_embedding_index(
     nprobe = nprobe or Defaults.FAISS_IVF_NPROBE
     import faiss
     import numpy as np
-    from sentence_transformers import SentenceTransformer
     from tqdm import tqdm
 
     from ragicamp.corpus import ChunkConfig, CorpusConfig, DocumentChunker, WikipediaCorpus
@@ -77,6 +80,7 @@ def build_embedding_index(
     print(f"\n{'=' * 60}")
     print(f"Building shared embedding index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
+    print(f"  Embedding backend: {embedding_backend}")
     print(f"  Chunk size: {chunk_size}, overlap: {chunk_overlap}")
     print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
@@ -105,35 +109,49 @@ def build_embedding_index(
     )
     corpus = WikipediaCorpus(corpus_cfg)
 
-    # Initialize encoder with Flash Attention (if available) and trust_remote_code
-    print("Loading embedding model...")
+    # Initialize encoder based on backend
+    print(f"Loading embedding model ({embedding_backend})...")
 
-    # Try Flash Attention 2 if available, otherwise fall back to default
-    model_kwargs = {}
-    try:
-        import flash_attn  # noqa: F401
+    if embedding_backend == "vllm":
+        # vLLM backend - uses continuous batching for high throughput
+        from ragicamp.models.vllm_embedder import VLLMEmbedder
 
-        model_kwargs["attn_implementation"] = "flash_attention_2"
-        print("  Flash Attention 2 available, enabling")
-    except ImportError:
-        print("  flash-attn not installed, using default attention")
+        encoder = VLLMEmbedder(
+            model_name=embedding_model,
+            gpu_memory_fraction=vllm_gpu_memory_fraction,
+            enforce_eager=False,  # Use CUDA graphs for speed
+        )
+        embedding_dim = encoder.get_sentence_embedding_dimension()
+        print(f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})")
+    else:
+        # sentence_transformers backend - works with any HuggingFace model
+        from sentence_transformers import SentenceTransformer
 
-    encoder = SentenceTransformer(
-        embedding_model,
-        trust_remote_code=True,
-        model_kwargs=model_kwargs if model_kwargs else None,
-    )
-    embedding_dim = encoder.get_sentence_embedding_dimension()
+        model_kwargs = {}
+        try:
+            import flash_attn  # noqa: F401
 
-    # Apply torch.compile() for additional speedup (PyTorch 2.0+)
-    try:
-        import torch
+            model_kwargs["attn_implementation"] = "flash_attention_2"
+            print("  Flash Attention 2 available, enabling")
+        except ImportError:
+            print("  flash-attn not installed, using default attention")
 
-        if hasattr(torch, "compile") and torch.cuda.is_available():
-            encoder = torch.compile(encoder, mode="reduce-overhead")
-            print("  Applied torch.compile() to embedding model")
-    except Exception as e:
-        print(f"  torch.compile() not applied: {e}")
+        encoder = SentenceTransformer(
+            embedding_model,
+            trust_remote_code=True,
+            model_kwargs=model_kwargs if model_kwargs else None,
+        )
+        embedding_dim = encoder.get_sentence_embedding_dimension()
+
+        # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+        try:
+            import torch
+
+            if hasattr(torch, "compile") and torch.cuda.is_available():
+                encoder = torch.compile(encoder, mode="reduce-overhead")
+                print("  Applied torch.compile() to embedding model")
+        except Exception as e:
+            print(f"  torch.compile() not applied: {e}")
 
     # Initialize FAISS index (we'll build on CPU first, then optionally move to GPU after all vectors are added)
     # This is more efficient than adding vectors to GPU index incrementally
@@ -330,6 +348,7 @@ def build_embedding_index(
         "name": index_name,
         "type": "embedding",
         "embedding_model": embedding_model,
+        "embedding_backend": embedding_backend,
         "index_type": index_type,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
