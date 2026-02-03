@@ -187,17 +187,36 @@ class EmbeddingIndex(Index):
 
     @property
     def encoder(self) -> SentenceTransformer:
-        """Lazy load the encoder with Flash Attention (if available) and torch.compile()."""
-        if self._encoder is None:
-            # Try Flash Attention 2 if available, otherwise fall back to default
-            model_kwargs = {}
-            try:
-                import flash_attn  # noqa: F401
+        """Lazy load encoder with optimizations similar to vLLM.
 
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-                logger.info("Flash Attention 2 available, enabling for embeddings")
-            except ImportError:
-                logger.debug("flash-attn not installed, using default attention")
+        Optimizations applied:
+        1. Flash Attention 2 (if available) - faster attention computation
+        2. FP16/BF16 precision - 2x memory savings, faster compute
+        3. torch.compile() - kernel fusion and optimization
+        4. Optimal batch handling - configured via Defaults.EMBEDDING_BATCH_SIZE
+        """
+        if self._encoder is None:
+            model_kwargs = {}
+
+            # Optimization 1: Flash Attention 2
+            if Defaults.EMBEDDING_USE_FLASH_ATTENTION:
+                try:
+                    import flash_attn  # noqa: F401
+
+                    model_kwargs["attn_implementation"] = "flash_attention_2"
+                    logger.info("Flash Attention 2 enabled for embeddings")
+                except ImportError:
+                    logger.debug("flash-attn not installed, using default attention")
+
+            # Optimization 2: FP16/BF16 precision
+            if Defaults.EMBEDDING_USE_FP16 and torch.cuda.is_available():
+                # Prefer BF16 on Ampere+ for better stability, else FP16
+                if torch.cuda.is_bf16_supported():
+                    model_kwargs["torch_dtype"] = torch.bfloat16
+                    logger.info("Using BF16 precision for embeddings")
+                else:
+                    model_kwargs["torch_dtype"] = torch.float16
+                    logger.info("Using FP16 precision for embeddings")
 
             self._encoder = SentenceTransformer(
                 self.embedding_model_name,
@@ -206,15 +225,14 @@ class EmbeddingIndex(Index):
             )
             self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
 
-            # Apply torch.compile() for additional speedup (PyTorch 2.0+)
-            try:
-                import torch
-
-                if hasattr(torch, "compile") and torch.cuda.is_available():
-                    self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
-                    logger.info("Applied torch.compile() to embedding model")
-            except Exception as e:
-                logger.debug("torch.compile() not applied: %s", e)
+            # Optimization 3: torch.compile() for kernel fusion
+            if Defaults.EMBEDDING_USE_TORCH_COMPILE:
+                try:
+                    if hasattr(torch, "compile") and torch.cuda.is_available():
+                        self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
+                        logger.info("Applied torch.compile() to embedding model")
+                except Exception as e:
+                    logger.debug("torch.compile() not applied: %s", e)
 
         return self._encoder
 
@@ -310,18 +328,30 @@ class EmbeddingIndex(Index):
             index.nprobe = self.nprobe
             logger.debug("Set nprobe=%d for IVF index", self.nprobe)
 
-    def build(self, documents: list[Document]) -> None:
-        """Build index from documents.
+    def build(
+        self, documents: list[Document], batch_size: int | None = None
+    ) -> None:
+        """Build index from documents with optimized encoding.
 
         Args:
             documents: List of documents to index
+            batch_size: Encoding batch size (None = use default from Defaults)
         """
         self.documents = documents
         logger.info("Building embedding index for %d documents", len(documents))
 
-        # Compute embeddings
+        # Use optimized batch size
+        if batch_size is None:
+            batch_size = Defaults.EMBEDDING_BATCH_SIZE
+
+        # Compute embeddings with optimized settings
         texts = [doc.text for doc in documents]
-        embeddings = self.encoder.encode(texts, show_progress_bar=True)
+        embeddings = self.encoder.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=Defaults.EMBEDDING_SHOW_PROGRESS,
+            normalize_embeddings=False,  # We normalize after for consistency
+        )
 
         # Normalize for cosine similarity
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)

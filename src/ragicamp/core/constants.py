@@ -192,6 +192,18 @@ class Defaults:
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
     FAISS_CPU_THREADS = 0  # 0 = auto-detect (use all available cores)
 
+    # Embedding Model Optimization
+    # These settings optimize sentence-transformers inference similar to how vLLM
+    # optimizes causal LM inference.
+    EMBEDDING_BATCH_SIZE = 256  # Batch size for encoding (tune based on GPU memory)
+    EMBEDDING_USE_FP16 = True  # Use FP16 for faster encoding (minimal quality loss)
+    EMBEDDING_NORMALIZE = True  # L2 normalize embeddings (required for cosine similarity)
+    EMBEDDING_SHOW_PROGRESS = True  # Show progress bar during encoding
+    EMBEDDING_USE_FLASH_ATTENTION = True  # Use Flash Attention 2 if available
+    EMBEDDING_USE_TORCH_COMPILE = True  # Apply torch.compile() for speedup
+    # For production, consider using infinity-emb or HuggingFace TEI server
+    # which provide vLLM-style continuous batching for embeddings
+
 
 # === Prompt Templates ===
 
