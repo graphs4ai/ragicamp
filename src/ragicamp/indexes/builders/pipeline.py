@@ -50,13 +50,13 @@ class EmbeddingResult:
 
 
 class EmbeddingPipeline:
-    """Overlaps GPU embedding with CPU post-processing.
+    """Batched embedding with structured processing.
 
-    While GPU encodes batch N, CPU processes results from batch N-1.
-    This hides the CPU latency (normalize, index.add, save) behind GPU work.
+    Note: vLLM's synchronous embed() is not thread-safe for concurrent calls,
+    so true GPU/CPU overlap is limited. The main overlap happens during the
+    chunking phase between batches.
 
-    Uses 2 workers so batch N+1 can start immediately while batch N finishes,
-    allowing true overlap between GPU encoding and CPU post-processing.
+    For better overlap, consider using vLLM in server mode with async HTTP client.
     """
 
     def __init__(
@@ -79,9 +79,9 @@ class EmbeddingPipeline:
         self.embedding_batch_size = embedding_batch_size
         self.normalize = normalize
 
-        # 2 workers: allows batch N+1 to start encoding while we process batch N
-        # vLLM internally serializes GPU access, but worker 2 can prepare while worker 1 finishes
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embed")
+        # Single worker: vLLM is not thread-safe for concurrent embed() calls
+        # Overlap happens during chunking phase between batches
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed")
         self._pending: tuple[Future, list[Any], int, float] | None = None  # Added submit_time
         self._batch_num = 0
 
