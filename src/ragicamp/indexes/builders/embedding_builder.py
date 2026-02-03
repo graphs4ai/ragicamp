@@ -244,8 +244,9 @@ def build_embedding_index(
                     embeddings = encoder.encode(
                         texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
-                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                    embeddings = embeddings.astype("float32")
+                    # In-place normalization (encoder already returns float32)
+                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    np.divide(embeddings, norms, out=embeddings)
 
                     # Train IVF index on first batch if needed
                     if not is_trained and index_type in ("ivf", "ivfpq"):
@@ -300,8 +301,9 @@ def build_embedding_index(
                 embeddings = encoder.encode(
                     texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
-                embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                embeddings = embeddings.astype("float32")
+                # In-place normalization (encoder already returns float32)
+                norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                np.divide(embeddings, norms, out=embeddings)
 
                 # Train IVF index if not yet trained
                 if not is_trained and index_type in ("ivf", "ivfpq"):

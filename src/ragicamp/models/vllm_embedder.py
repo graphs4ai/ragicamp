@@ -117,16 +117,22 @@ class VLLMEmbedder:
         # vLLM handles batching internally with continuous batching
         outputs = self.llm.embed(sentences)
 
-        # Extract embeddings from outputs
-        embeddings = np.array(
-            [output.outputs.embedding for output in outputs],
-            dtype=np.float32,
-        )
+        # Pre-allocate array for faster extraction (avoids Python list overhead)
+        n_outputs = len(outputs)
+        if n_outputs == 0:
+            return np.array([], dtype=np.float32).reshape(0, self.get_sentence_embedding_dimension())
 
-        # Optionally normalize
+        embedding_dim = len(outputs[0].outputs.embedding)
+        embeddings = np.empty((n_outputs, embedding_dim), dtype=np.float32)
+
+        # Extract embeddings directly into pre-allocated array
+        for i, output in enumerate(outputs):
+            embeddings[i] = output.outputs.embedding
+
+        # Optionally normalize (in-place for speed)
         if normalize_embeddings:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings = embeddings / norms
+            np.divide(embeddings, norms, out=embeddings)
 
         return embeddings
 
