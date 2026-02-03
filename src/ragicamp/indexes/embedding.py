@@ -11,7 +11,6 @@ from typing import Any, Optional
 import faiss
 import numpy as np
 import torch
-from sentence_transformers import SentenceTransformer
 
 # Enable TensorFloat32 for faster matrix multiplication on Ampere+ GPUs
 if torch.cuda.is_available():
@@ -155,17 +154,21 @@ class EmbeddingIndex(Index):
         use_gpu: Optional[bool] = None,
         nlist: int = None,
         nprobe: int = None,
+        embedding_backend: str = "sentence_transformers",
+        vllm_gpu_memory_fraction: float = 0.5,
         **kwargs: Any,
     ):
         """Initialize embedding index.
 
         Args:
             name: Index identifier
-            embedding_model: Sentence transformer model name
+            embedding_model: Embedding model name
             index_type: FAISS index type (flat, ivf, ivfpq, hnsw)
             use_gpu: Whether to use GPU FAISS. If None, uses Defaults.FAISS_USE_GPU.
             nlist: Number of clusters for IVF indexes. Defaults to FAISS_IVF_NLIST.
             nprobe: Number of clusters to search for IVF. Defaults to FAISS_IVF_NPROBE.
+            embedding_backend: 'sentence_transformers' or 'vllm'
+            vllm_gpu_memory_fraction: GPU memory fraction for vLLM embeddings
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
@@ -177,8 +180,12 @@ class EmbeddingIndex(Index):
         self.nprobe = nprobe or Defaults.FAISS_IVF_NPROBE
         self._is_gpu_index = False
 
+        # Embedding backend configuration
+        self.embedding_backend = embedding_backend
+        self.vllm_gpu_memory_fraction = vllm_gpu_memory_fraction
+
         # Lazy load encoder (only when needed)
-        self._encoder: Optional[SentenceTransformer] = None
+        self._encoder: Optional[Any] = None
         self._embedding_dim: Optional[int] = None
 
         # Storage
@@ -186,55 +193,79 @@ class EmbeddingIndex(Index):
         self.index: Optional[faiss.Index] = None
 
     @property
-    def encoder(self) -> SentenceTransformer:
-        """Lazy load encoder with optimizations similar to vLLM.
+    def encoder(self) -> Any:
+        """Lazy load encoder with backend-specific optimizations.
 
-        Optimizations applied:
-        1. Flash Attention 2 (if available) - faster attention computation
-        2. FP16/BF16 precision - 2x memory savings, faster compute
-        3. torch.compile() - kernel fusion and optimization
-        4. Optimal batch handling - configured via Defaults.EMBEDDING_BATCH_SIZE
+        Backends:
+        - sentence_transformers: Default, with Flash Attention, FP16, torch.compile
+        - vllm: Uses vLLM's continuous batching for high throughput
+
+        For vLLM, supported models include:
+        - intfloat/e5-mistral-7b-instruct
+        - Alibaba-NLP/gte-Qwen2-7B-instruct
+        - BAAI/bge-en-icl
         """
         if self._encoder is None:
-            model_kwargs = {}
-
-            # Optimization 1: Flash Attention 2
-            if Defaults.EMBEDDING_USE_FLASH_ATTENTION:
-                try:
-                    import flash_attn  # noqa: F401
-
-                    model_kwargs["attn_implementation"] = "flash_attention_2"
-                    logger.info("Flash Attention 2 enabled for embeddings")
-                except ImportError:
-                    logger.debug("flash-attn not installed, using default attention")
-
-            # Optimization 2: FP16/BF16 precision
-            if Defaults.EMBEDDING_USE_FP16 and torch.cuda.is_available():
-                # Prefer BF16 on Ampere+ for better stability, else FP16
-                if torch.cuda.is_bf16_supported():
-                    model_kwargs["torch_dtype"] = torch.bfloat16
-                    logger.info("Using BF16 precision for embeddings")
-                else:
-                    model_kwargs["torch_dtype"] = torch.float16
-                    logger.info("Using FP16 precision for embeddings")
-
-            self._encoder = SentenceTransformer(
-                self.embedding_model_name,
-                trust_remote_code=True,
-                model_kwargs=model_kwargs if model_kwargs else None,
-            )
-            self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
-
-            # Optimization 3: torch.compile() for kernel fusion
-            if Defaults.EMBEDDING_USE_TORCH_COMPILE:
-                try:
-                    if hasattr(torch, "compile") and torch.cuda.is_available():
-                        self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
-                        logger.info("Applied torch.compile() to embedding model")
-                except Exception as e:
-                    logger.debug("torch.compile() not applied: %s", e)
+            if self.embedding_backend == "vllm":
+                self._load_vllm_encoder()
+            else:
+                self._load_sentence_transformers_encoder()
 
         return self._encoder
+
+    def _load_vllm_encoder(self):
+        """Load vLLM embedding model."""
+        from ragicamp.models.vllm_embedder import VLLMEmbedder
+
+        logger.info("Loading vLLM embedding model: %s", self.embedding_model_name)
+        self._encoder = VLLMEmbedder(
+            model_name=self.embedding_model_name,
+            gpu_memory_fraction=self.vllm_gpu_memory_fraction,
+            enforce_eager=True,
+        )
+        self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+        logger.info("vLLM embedder loaded (dim=%d)", self._embedding_dim)
+
+    def _load_sentence_transformers_encoder(self):
+        """Load sentence-transformers model with optimizations."""
+        from sentence_transformers import SentenceTransformer
+
+        model_kwargs = {}
+
+        # Optimization 1: Flash Attention 2
+        if Defaults.EMBEDDING_USE_FLASH_ATTENTION:
+            try:
+                import flash_attn  # noqa: F401
+
+                model_kwargs["attn_implementation"] = "flash_attention_2"
+                logger.info("Flash Attention 2 enabled for embeddings")
+            except ImportError:
+                logger.debug("flash-attn not installed, using default attention")
+
+        # Optimization 2: FP16/BF16 precision
+        if Defaults.EMBEDDING_USE_FP16 and torch.cuda.is_available():
+            if torch.cuda.is_bf16_supported():
+                model_kwargs["torch_dtype"] = torch.bfloat16
+                logger.info("Using BF16 precision for embeddings")
+            else:
+                model_kwargs["torch_dtype"] = torch.float16
+                logger.info("Using FP16 precision for embeddings")
+
+        self._encoder = SentenceTransformer(
+            self.embedding_model_name,
+            trust_remote_code=True,
+            model_kwargs=model_kwargs if model_kwargs else None,
+        )
+        self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+
+        # Optimization 3: torch.compile() for kernel fusion
+        if Defaults.EMBEDDING_USE_TORCH_COMPILE:
+            try:
+                if hasattr(torch, "compile") and torch.cuda.is_available():
+                    self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
+                    logger.info("Applied torch.compile() to embedding model")
+            except Exception as e:
+                logger.debug("torch.compile() not applied: %s", e)
 
     @property
     def embedding_dim(self) -> int:
