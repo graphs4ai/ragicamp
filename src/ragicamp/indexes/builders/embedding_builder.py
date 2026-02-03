@@ -187,19 +187,33 @@ def build_embedding_index(
     )
     chunker = DocumentChunker(chunk_config)
 
-    # Process documents in batches - save incrementally to avoid memory bloat
+    # Two-phase processing:
+    # Phase 1: Chunk + embed all batches, save raw embeddings to disk (vLLM runs continuously)
+    # Phase 2: Load all, normalize, add to FAISS index
+    
     temp_docs_file = tempfile.NamedTemporaryFile(
         delete=False, suffix=".pkl", dir=str(manager.indexes_dir)
     )
+    temp_emb_file = tempfile.NamedTemporaryFile(
+        delete=False, suffix=".npy", dir=str(manager.indexes_dir)
+    )
     temp_docs_file.close()
-    docs_file = open(temp_docs_file.name, "ab")
+    temp_emb_file.close()
 
     total_docs = 0
     total_chunks = 0
     doc_batch = []
+    all_embeddings_sizes = []  # Track sizes for loading
 
-    print("Processing documents in batches...")
+    # ==========================================================================
+    # PHASE 1: Chunk and embed all batches (vLLM runs continuously)
+    # ==========================================================================
+    print("Phase 1: Chunking and embedding (vLLM continuous)...")
     batch_num = 0
+    
+    docs_file = open(temp_docs_file.name, "ab")
+    emb_file = open(temp_emb_file.name, "ab")
+    
     try:
         for doc in corpus.load():
             doc_batch.append(doc)
@@ -209,24 +223,22 @@ def build_embedding_index(
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
 
-                # Chunking phase (sequential with progress bar)
+                # Chunking phase
                 t_chunk = time.time()
                 batch_chunks = []
                 truncated = 0
 
                 for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
-                    # Truncate oversized docs to prevent slow chunking
                     text = doc.text
                     if len(text) > MAX_DOC_CHARS:
                         text = text[:MAX_DOC_CHARS]
                         truncated += 1
                         doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-
                     doc_chunks = list(chunker.strategy.chunk_document(doc))
                     batch_chunks.extend(doc_chunks)
 
                 chunk_elapsed = time.time() - t_chunk
-                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
+                msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s"
                 if truncated > 0:
                     msg += f" (truncated {truncated})"
                 print(msg)
@@ -236,33 +248,22 @@ def build_embedding_index(
 
                 if batch_chunks:
                     texts = [c.text for c in batch_chunks]
-
-                    # Embedding phase with progress
-                    print(
-                        f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})..."
-                    )
+                    print(f"    Embedding {len(texts)} chunks...")
+                    
+                    # Embed (no normalization yet - save raw)
                     embeddings = encoder.encode(
                         texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
-                    # In-place normalization (encoder already returns float32)
-                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-                    np.divide(embeddings, norms, out=embeddings)
-
-                    # Train IVF index on first batch if needed
-                    if not is_trained and index_type in ("ivf", "ivfpq"):
-                        print(f"    Training IVF index on {len(embeddings)} vectors...")
-                        index.train(embeddings)
-                        is_trained = True
-
-                    index.add(embeddings)
-
-                    # Save chunks incrementally to disk
+                    
+                    # Save raw embeddings to disk
+                    np.save(emb_file, embeddings)
+                    all_embeddings_sizes.append(len(embeddings))
+                    
+                    # Save chunks
                     pickle.dump(batch_chunks, docs_file)
                     docs_file.flush()
 
-                print(
-                    f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})"
-                )
+                print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks")
                 doc_batch = []
                 del batch_chunks, texts, embeddings
                 gc.collect()
@@ -287,7 +288,7 @@ def build_embedding_index(
                 batch_chunks.extend(doc_chunks)
 
             chunk_elapsed = time.time() - t_chunk
-            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
+            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s"
             if truncated > 0:
                 msg += f" (truncated {truncated})"
             print(msg)
@@ -301,25 +302,64 @@ def build_embedding_index(
                 embeddings = encoder.encode(
                     texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
-                # In-place normalization (encoder already returns float32)
-                norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-                np.divide(embeddings, norms, out=embeddings)
-
-                # Train IVF index if not yet trained
-                if not is_trained and index_type in ("ivf", "ivfpq"):
-                    print(f"    Training IVF index on {len(embeddings)} vectors...")
-                    index.train(embeddings)
-                    is_trained = True
-
-                index.add(embeddings)
+                np.save(emb_file, embeddings)
+                all_embeddings_sizes.append(len(embeddings))
                 pickle.dump(batch_chunks, docs_file)
                 docs_file.flush()
 
-            print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
+            print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks")
             del doc_batch, batch_chunks, texts, embeddings
             gc.collect()
+            
     finally:
         docs_file.close()
+        emb_file.close()
+
+    print(f"✓ Phase 1 complete: {total_docs} docs → {total_chunks} chunks in {batch_num} batches")
+
+    # ==========================================================================
+    # PHASE 2: Load embeddings, normalize, add to FAISS
+    # ==========================================================================
+    print("\nPhase 2: Post-processing (normalize + index)...")
+    
+    # Load all embeddings from disk
+    print("  Loading embeddings from disk...")
+    t_load = time.time()
+    all_embeddings = []
+    with open(temp_emb_file.name, "rb") as f:
+        for size in all_embeddings_sizes:
+            emb = np.load(f)
+            all_embeddings.append(emb)
+    
+    embeddings = np.vstack(all_embeddings)
+    del all_embeddings
+    print(f"  ✓ Loaded {len(embeddings)} embeddings in {time.time() - t_load:.1f}s")
+    
+    # Normalize all at once
+    print("  Normalizing embeddings...")
+    t_norm = time.time()
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    np.divide(embeddings, norms, out=embeddings)
+    print(f"  ✓ Normalized in {time.time() - t_norm:.1f}s")
+    
+    # Train IVF if needed
+    if not is_trained and index_type in ("ivf", "ivfpq"):
+        print(f"  Training IVF index on {len(embeddings)} vectors...")
+        index.train(embeddings)
+        is_trained = True
+    
+    # Add all to index at once
+    print("  Adding to FAISS index...")
+    t_add = time.time()
+    index.add(embeddings)
+    print(f"  ✓ Added {index.ntotal} vectors in {time.time() - t_add:.1f}s")
+    
+    # Clean up temp embedding file
+    os.unlink(temp_emb_file.name)
+    del embeddings
+    gc.collect()
+    
+    print(f"✓ Phase 2 complete: {index.ntotal} vectors indexed")
 
     print(f"✓ Embedding complete: {total_docs} docs → {total_chunks} chunks")
 
