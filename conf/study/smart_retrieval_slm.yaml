@@ -220,7 +220,7 @@ rag:
     - dense_bge_m3_512
     # - dense_e5_mistral_512  # TEMPORARILY DISABLED - index being recovered
     - hybrid_bge_large_bm25_07
-    - hierarchical_bge_large
+    # - hierarchical_bge_large  # TEMPORARILY DISABLED - needs GPU for embedding
   
   top_k_values:
     - 3
