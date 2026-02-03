@@ -14,7 +14,7 @@ import torch
 
 # Enable TensorFloat32 for faster matrix multiplication on Ampere+ GPUs
 if torch.cuda.is_available():
-    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision("high")
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -359,9 +359,7 @@ class EmbeddingIndex(Index):
             index.nprobe = self.nprobe
             logger.debug("Set nprobe=%d for IVF index", self.nprobe)
 
-    def build(
-        self, documents: list[Document], batch_size: int | None = None
-    ) -> None:
+    def build(self, documents: list[Document], batch_size: int | None = None) -> None:
         """Build index from documents with optimized encoding.
 
         Args:

@@ -172,9 +172,7 @@ class SparseIndex(Index):
         top_indices = np.argsort(scores)[-top_k:][::-1]
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
-    def batch_search(
-        self, queries: list[str], top_k: int = 10
-    ) -> list[list[tuple[int, float]]]:
+    def batch_search(self, queries: list[str], top_k: int = 10) -> list[list[tuple[int, float]]]:
         """Batch search for multiple queries.
 
         Args:
@@ -190,9 +188,7 @@ class SparseIndex(Index):
             # BM25 doesn't have efficient batch search, fall back to sequential
             return [self._search_bm25(q, top_k) for q in queries]
 
-    def _batch_search_tfidf(
-        self, queries: list[str], top_k: int
-    ) -> list[list[tuple[int, float]]]:
+    def _batch_search_tfidf(self, queries: list[str], top_k: int) -> list[list[tuple[int, float]]]:
         """Batch TF-IDF search."""
         from sklearn.metrics.pairwise import cosine_similarity
 

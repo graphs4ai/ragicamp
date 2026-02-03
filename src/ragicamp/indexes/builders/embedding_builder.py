@@ -122,7 +122,9 @@ def build_embedding_index(
             enforce_eager=False,  # Use CUDA graphs for speed
         )
         embedding_dim = encoder.get_sentence_embedding_dimension()
-        print(f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})")
+        print(
+            f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
+        )
     else:
         # sentence_transformers backend - works with any HuggingFace model
         from sentence_transformers import SentenceTransformer

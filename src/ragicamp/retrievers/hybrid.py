@@ -298,9 +298,7 @@ class HybridRetriever(Retriever):
         if self._sparse_index is not None:
             sparse_index_name = self._sparse_index.name
         elif self.index:
-            sparse_index_name = get_sparse_index_name(
-                self.index.name, self.sparse_method.value
-            )
+            sparse_index_name = get_sparse_index_name(self.index.name, self.sparse_method.value)
 
         config = {
             "name": self.name,

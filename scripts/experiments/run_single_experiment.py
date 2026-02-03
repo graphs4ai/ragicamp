@@ -26,13 +26,13 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def _log_gpu_mem(label: str) -> None:
     """Log GPU memory usage for debugging."""
     try:
         import torch
+
         if torch.cuda.is_available():
             alloc = torch.cuda.memory_allocated() / 1024**3
             if alloc > 0.1:  # Only log if significant
@@ -47,8 +47,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 _log_gpu_mem("before imports")
 
 # Reuse existing abstractions - NO DUPLICATION
-from ragicamp.execution.runner import ExpSpec, run_spec
-from ragicamp.cli.study import create_judge_model
+from ragicamp.cli.study import create_judge_model  # noqa: E402
+from ragicamp.execution.runner import ExpSpec, run_spec  # noqa: E402
 
 _log_gpu_mem("after imports")
 
@@ -60,12 +60,12 @@ def main():
     parser.add_argument("--metrics", default="f1,exact_match", help="Comma-separated metrics")
     parser.add_argument("--limit", type=int, help="Limit number of examples")
     parser.add_argument("--llm-judge-config", help="LLM judge config as JSON string")
-    
+
     args = parser.parse_args()
-    
+
     spec_dict = json.loads(args.spec_json)
     metrics = args.metrics.split(",")
-    
+
     # Parse llm_judge config if provided
     llm_judge_config = None
     judge_model = None
@@ -73,15 +73,15 @@ def main():
         llm_judge_config = json.loads(args.llm_judge_config)
         # Create the judge model in this subprocess
         judge_model = create_judge_model(llm_judge_config)
-    
+
     # Convert dict back to ExpSpec dataclass
     # Use metrics from spec_dict (passed from parent) or fall back to CLI arg
     spec_metrics = spec_dict.get("metrics", metrics)
-    
+
     # Convert agent_params dict to tuple for frozen dataclass
     agent_params = spec_dict.get("agent_params", {})
     agent_params_tuple = tuple(agent_params.items()) if agent_params else ()
-    
+
     spec = ExpSpec(
         name=spec_dict["name"],
         exp_type=spec_dict["exp_type"],
@@ -101,7 +101,7 @@ def main():
         agent_type=spec_dict.get("agent_type"),
         agent_params=agent_params_tuple,
     )
-    
+
     # Reuse the existing run_spec function with subprocess disabled
     # (we're already in a subprocess, no need to nest)
     status = run_spec(
@@ -114,9 +114,9 @@ def main():
         force=True,  # Always retry in subprocess
         use_subprocess=False,  # We ARE the subprocess
     )
-    
+
     print(f"\n__RESULT__:{json.dumps({'status': status})}")
-    
+
     if status in ("failed", "crashed"):
         sys.exit(1)
     sys.exit(0)

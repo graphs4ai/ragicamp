@@ -2,10 +2,9 @@
 
 from typing import Any
 
-from tqdm import tqdm
-
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from tqdm import tqdm
 
 from ragicamp.core.logging import get_logger
 from ragicamp.retrievers.base import Document, Retriever
@@ -37,27 +36,30 @@ class SparseRetriever(Retriever):
 
     def index_documents(self, documents: list[Document], show_progress: bool = True) -> None:
         """Index documents using TF-IDF.
-        
+
         Args:
             documents: List of documents to index
             show_progress: Whether to show progress bar
         """
         self.documents = documents
-        
+
         logger.info("Building sparse (TF-IDF) index for %d documents...", len(documents))
-        
+
         # Extract texts with progress bar
         if show_progress and len(documents) > 10000:
             texts = [doc.text for doc in tqdm(documents, desc="Extracting texts for TF-IDF")]
         else:
             texts = [doc.text for doc in documents]
-        
+
         # Fit TF-IDF (this is fast, ~1 min for 10M docs)
         logger.info("Fitting TF-IDF vectorizer...")
         self.doc_vectors = self.vectorizer.fit_transform(texts)
-        
-        logger.info("Sparse index built: %d documents, %d features", 
-                    len(documents), self.doc_vectors.shape[1])
+
+        logger.info(
+            "Sparse index built: %d documents, %d features",
+            len(documents),
+            self.doc_vectors.shape[1],
+        )
 
     def retrieve(self, query: str, top_k: int = 5, **kwargs: Any) -> list[Document]:
         """Retrieve documents using TF-IDF similarity."""

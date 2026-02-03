@@ -211,7 +211,11 @@ class ResilientExecutor:
                         result_item["metadata"] = metadata
                     # Include intermediate steps (iterations, query refinements, etc.)
                     context = getattr(resp, "context", None)
-                    if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                    if (
+                        context
+                        and hasattr(context, "intermediate_steps")
+                        and context.intermediate_steps
+                    ):
                         result_item["intermediate_steps"] = context.intermediate_steps
                     results.append(result_item)
 
@@ -356,7 +360,11 @@ class ResilientExecutor:
                     result_item["metadata"] = metadata
                 # Include intermediate steps (iterations, query refinements, etc.)
                 context = getattr(resp, "context", None)
-                if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                if (
+                    context
+                    and hasattr(context, "intermediate_steps")
+                    and context.intermediate_steps
+                ):
                     result_item["intermediate_steps"] = context.intermediate_steps
                 results.append(result_item)
             except Exception as e:
@@ -409,7 +417,11 @@ class ResilientExecutor:
                     result_item["metadata"] = metadata
                 # Include intermediate steps (iterations, query refinements, etc.)
                 context = getattr(resp, "context", None)
-                if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+                if (
+                    context
+                    and hasattr(context, "intermediate_steps")
+                    and context.intermediate_steps
+                ):
                     result_item["intermediate_steps"] = context.intermediate_steps
                 results.append(result_item)
             except Exception as e:

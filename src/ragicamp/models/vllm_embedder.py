@@ -13,11 +13,14 @@ Note: Not all sentence-transformer models are supported by vLLM.
 Check vLLM model compatibility before using.
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
 from ragicamp.core.logging import get_logger
+
+if TYPE_CHECKING:
+    import vllm
 
 logger = get_logger(__name__)
 
@@ -49,7 +52,7 @@ class VLLMEmbedder:
         self.enforce_eager = enforce_eager
         self.trust_remote_code = trust_remote_code
 
-        self._llm: Optional["vllm.LLM"] = None
+        self._llm: Optional[vllm.LLM] = None
         self._embedding_dim: Optional[int] = None
 
     @property
@@ -133,6 +136,7 @@ class VLLMEmbedder:
 
             # Clear CUDA cache
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 

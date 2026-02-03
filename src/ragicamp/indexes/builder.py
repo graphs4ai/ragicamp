@@ -226,7 +226,7 @@ def ensure_indexes_exist(
                     embedding_cfg.get("backend", "vllm"),
                 )
                 vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.9)
-                
+
                 build_embedding_index(
                     index_name=index_name,
                     embedding_model=first_retriever.get("embedding_model", "all-MiniLM-L6-v2"),
