@@ -23,7 +23,7 @@ import argparse
 import gc
 import pickle
 import time
-from concurrent.futures import ThreadPoolExecutor
+import traceback
 from pathlib import Path
 
 import faiss
@@ -137,20 +137,29 @@ def main():
     if not chunks_path.exists():
         raise FileNotFoundError(f"Chunks file not found: {chunks_path}")
     
-    # Load embeddings and chunks in parallel (I/O bound, so threading works)
-    print("Loading embeddings and chunks in parallel...")
+    # Load sequentially with proper error handling
     t_start = time.time()
     
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        emb_future = executor.submit(
-            load_embeddings_from_temp, emb_path, args.num_batches, args.embedding_dim
-        )
-        chunks_future = executor.submit(load_chunks_from_temp, chunks_path)
-        
-        embeddings = emb_future.result()
-        chunks = chunks_future.result()
+    try:
+        print("Step 1: Loading embeddings...")
+        embeddings = load_embeddings_from_temp(emb_path, args.num_batches, args.embedding_dim)
+        print(f"  Embeddings loaded in {time.time() - t_start:.1f}s\n")
+    except Exception:
+        print(f"\n*** ERROR loading embeddings ***")
+        traceback.print_exc()
+        raise
     
-    print(f"✓ Parallel load complete in {time.time() - t_start:.1f}s\n")
+    try:
+        t_chunks = time.time()
+        print("Step 2: Loading chunks...")
+        chunks = load_chunks_from_temp(chunks_path)
+        print(f"  Chunks loaded in {time.time() - t_chunks:.1f}s\n")
+    except Exception:
+        print(f"\n*** ERROR loading chunks ***")
+        traceback.print_exc()
+        raise
+    
+    print(f"✓ Total load time: {time.time() - t_start:.1f}s\n")
     
     # Verify dimension
     if embeddings.shape[1] != args.embedding_dim:
@@ -238,4 +247,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        print("\n" + "=" * 60)
+        print("FATAL ERROR - Full traceback:")
+        print("=" * 60)
+        traceback.print_exc()
+        exit(1)
