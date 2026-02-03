@@ -127,10 +127,12 @@ rag:
     # =========================================================================
     
     # BGE-large: BERT-based, proven MTEB performer
+    # vLLM supports BERT-based embedding models via BertEmbeddingModel
+    # See: https://docs.vllm.ai/en/latest/api/vllm/model_executor/models/bert/
     - type: dense
       name: dense_bge_large_512
       embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: sentence_transformers
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -140,7 +142,7 @@ rag:
     - type: dense
       name: dense_bge_m3_512
       embedding_model: BAAI/bge-m3
-      embedding_backend: sentence_transformers
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive

@@ -23,18 +23,23 @@ def build_specs(
     """Build experiment specs from YAML config.
 
     Generates experiment matrix with support for three modes:
-
+    
     1. Grid Search (default): Full Cartesian product of all dimensions
        - Models x Datasets x Prompts x Quantizations (for direct)
        - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
-
-    2. Random Search: Sample N random combinations from the grid
-       - Configure via rag.sampling or direct.sampling in YAML
+    
+    2. Random Search: Sample N random combinations from the RAG grid
+       - Configure via rag.sampling in YAML or --sample CLI flag
        - Supports 'random' mode (uniform) or 'stratified' mode (ensure coverage)
-
+       - Only affects RAG experiments, not baselines or singletons
+    
     3. Singleton: Explicit experiment definitions via 'experiments' list
        - Always included (not affected by sampling)
        - Use for hypothesis-driven research or agent-based strategies
+
+    Baseline Behavior:
+        Direct LLM experiments (no retrieval) are ALWAYS included as baselines.
+        They are never subject to sampling, ensuring proper comparison.
 
     Args:
         config: Study configuration dict (loaded from YAML)
@@ -49,8 +54,8 @@ def build_specs(
         ...     config = yaml.safe_load(f)
         >>> specs = build_specs(config)
         >>> print(f"Generated {len(specs)} experiments")
-
-        # With random sampling override:
+        
+        # With random sampling (only affects RAG, baselines always included):
         >>> specs = build_specs(config, sampling_override={"mode": "random", "n_experiments": 50})
     """
     specs: list[ExperimentSpec] = []
@@ -61,16 +66,12 @@ def build_specs(
     min_batch_size = config.get("min_batch_size", 1)
     metrics = config.get("metrics", ["f1", "exact_match"])
 
-    # Build direct experiment specs (grid search, optionally sampled)
+    # Build direct experiment specs (baselines - never sampled)
+    # Direct LLM baselines are always included for proper comparison
     direct = config.get("direct", {})
     if direct.get("enabled"):
         direct_specs = _build_direct_specs(direct, datasets, batch_size, min_batch_size, metrics)
-
-        # Apply sampling if configured
-        sampling_config = sampling_override or direct.get("sampling")
-        if sampling_config:
-            direct_specs = _apply_sampling(direct_specs, sampling_config, "direct")
-
+        # Note: Direct baselines are NOT sampled - they're essential for comparison
         specs.extend(direct_specs)
 
     # Build RAG experiment specs (grid search, optionally sampled)
@@ -386,7 +387,15 @@ def _build_singleton_specs(
     specs: list[ExperimentSpec] = []
 
     # Get defaults from config
-    default_model = config.get("models", {}).get("default")
+    # Handle models as list (from YAML anchor) or dict (with "default" key)
+    models_config = config.get("models")
+    if isinstance(models_config, dict):
+        default_model = models_config.get("default")
+    elif isinstance(models_config, list) and models_config:
+        default_model = models_config[0]  # Use first model as default
+    else:
+        default_model = None
+    
     default_datasets = config.get("datasets", ["nq"])
     default_prompt = "concise"
     default_quant = "none"
