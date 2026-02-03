@@ -13,6 +13,7 @@ Usage:
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Protocol
 
 import numpy as np
@@ -20,6 +21,11 @@ import numpy as np
 from ragicamp.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _timestamp() -> str:
+    """Return current time as HH:MM:SS."""
+    return datetime.now().strftime("%H:%M:%S")
 
 
 class Encoder(Protocol):
@@ -128,8 +134,13 @@ class EmbeddingPipeline:
             # Normalize and process in main thread
             process_start = time.perf_counter()
             if self.normalize:
+                print(f"    [{_timestamp()}] Normalizing {len(embeddings)} embeddings...")
+                norm_start = time.perf_counter()
                 embeddings = self._normalize(embeddings)
+                norm_time = time.perf_counter() - norm_start
+                print(f"    [{_timestamp()}] Normalized in {norm_time:.1f}s")
 
+            print(f"    [{_timestamp()}] Saving batch {prev_batch_num} to index...")
             result = EmbeddingResult(
                 embeddings=embeddings,
                 chunks=prev_chunks,
@@ -160,8 +171,13 @@ class EmbeddingPipeline:
 
             process_start = time.perf_counter()
             if self.normalize:
+                print(f"    [{_timestamp()}] Normalizing {len(embeddings)} embeddings...")
+                norm_start = time.perf_counter()
                 embeddings = self._normalize(embeddings)
+                norm_time = time.perf_counter() - norm_start
+                print(f"    [{_timestamp()}] Normalized in {norm_time:.1f}s")
 
+            print(f"    [{_timestamp()}] Saving batch {batch_num} to index...")
             result = EmbeddingResult(
                 embeddings=embeddings,
                 chunks=chunks,
@@ -180,9 +196,10 @@ class EmbeddingPipeline:
         if self._batch_num > 0:
             total = self._total_encode_time + self._total_process_time
             saved = self._overlap_time
+            print(f"    [{_timestamp()}] ⚡ Pipeline complete: encode={self._total_encode_time:.1f}s, process={self._total_process_time:.1f}s")
             if total > 0 and saved > 0:
                 pct = (saved / total) * 100
-                print(f"    ⚡ Pipeline: {saved:.1f}s overlap saved ({pct:.0f}% efficiency)")
+                print(f"    [{_timestamp()}] ⚡ Overlap saved: {saved:.1f}s ({pct:.0f}% efficiency)")
 
     def __enter__(self):
         return self
