@@ -191,6 +191,18 @@ def build_embedding_index(
         print(
             f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
         )
+    elif embedding_backend == "vllm_server":
+        # vLLM server backend - subprocess server with async HTTP for overlap
+        from ragicamp.models.vllm_embedder import VLLMServerEmbedder
+
+        encoder = VLLMServerEmbedder(
+            model_name=embedding_model,
+            gpu_memory_fraction=vllm_gpu_memory_fraction,
+        )
+        embedding_dim = encoder.get_sentence_embedding_dimension()
+        print(
+            f"  vLLM server started (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
+        )
     else:
         # sentence_transformers backend - works with any HuggingFace model
         from sentence_transformers import SentenceTransformer

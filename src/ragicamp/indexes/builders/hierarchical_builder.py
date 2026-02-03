@@ -146,6 +146,17 @@ def build_hierarchical_index(
         print(
             f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
         )
+    elif embedding_backend == "vllm_server":
+        from ragicamp.models.vllm_embedder import VLLMServerEmbedder
+
+        encoder = VLLMServerEmbedder(
+            model_name=embedding_model,
+            gpu_memory_fraction=vllm_gpu_memory_fraction,
+        )
+        embedding_dim = encoder.get_sentence_embedding_dimension()
+        print(
+            f"  vLLM server started (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
+        )
     else:
         from sentence_transformers import SentenceTransformer
 
