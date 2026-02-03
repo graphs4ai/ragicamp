@@ -10,6 +10,7 @@ Usage:
     pipeline.finish()
 """
 
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
@@ -75,8 +76,13 @@ class EmbeddingPipeline:
         # 2 workers: allows batch N+1 to start encoding while we process batch N
         # vLLM internally serializes GPU access, but worker 2 can prepare while worker 1 finishes
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embed")
-        self._pending: tuple[Future, list[Any], int] | None = None
+        self._pending: tuple[Future, list[Any], int, float] | None = None  # Added submit_time
         self._batch_num = 0
+
+        # Stats for overlap tracking
+        self._total_encode_time = 0.0
+        self._total_process_time = 0.0
+        self._overlap_time = 0.0
 
     def _encode(self, texts: list[str]) -> np.ndarray:
         """Encode texts to embeddings (runs in background thread).
@@ -105,16 +111,22 @@ class EmbeddingPipeline:
             chunks: Corresponding chunk objects (passed through to process_fn)
         """
         self._batch_num += 1
+        submit_time = time.perf_counter()
 
         # Submit current batch to GPU (background thread starts immediately)
         future = self._executor.submit(self._encode, texts)
 
         # While GPU works on current batch, process previous batch
         if self._pending is not None:
-            prev_future, prev_chunks, prev_batch_num = self._pending
-            embeddings = prev_future.result()  # Wait for previous GPU work
+            prev_future, prev_chunks, prev_batch_num, prev_submit_time = self._pending
 
-            # Normalize in main thread (GPU thread is now free for next batch)
+            # Wait for previous GPU work
+            wait_start = time.perf_counter()
+            embeddings = prev_future.result()
+            encode_time = time.perf_counter() - prev_submit_time
+
+            # Normalize and process in main thread
+            process_start = time.perf_counter()
             if self.normalize:
                 embeddings = self._normalize(embeddings)
 
@@ -124,16 +136,29 @@ class EmbeddingPipeline:
                 batch_num=prev_batch_num,
             )
             self.process_fn(result)
+            process_time = time.perf_counter() - process_start
+
+            # Track stats
+            self._total_encode_time += encode_time
+            self._total_process_time += process_time
+            # Overlap = time GPU was working while we waited (negative wait = overlap)
+            wait_time = wait_start - prev_submit_time
+            if wait_time < encode_time:
+                self._overlap_time += encode_time - wait_time
 
         # Store current as pending
-        self._pending = (future, chunks, self._batch_num)
+        self._pending = (future, chunks, self._batch_num, submit_time)
 
     def finish(self) -> None:
         """Process any remaining pending batch and shutdown."""
         if self._pending is not None:
-            future, chunks, batch_num = self._pending
-            embeddings = future.result()
+            future, chunks, batch_num, submit_time = self._pending
 
+            wait_start = time.perf_counter()
+            embeddings = future.result()
+            encode_time = time.perf_counter() - submit_time
+
+            process_start = time.perf_counter()
             if self.normalize:
                 embeddings = self._normalize(embeddings)
 
@@ -143,9 +168,21 @@ class EmbeddingPipeline:
                 batch_num=batch_num,
             )
             self.process_fn(result)
+            process_time = time.perf_counter() - process_start
+
+            self._total_encode_time += encode_time
+            self._total_process_time += process_time
             self._pending = None
 
         self._executor.shutdown(wait=True)
+
+        # Print pipeline stats
+        if self._batch_num > 0:
+            total = self._total_encode_time + self._total_process_time
+            saved = self._overlap_time
+            if total > 0 and saved > 0:
+                pct = (saved / total) * 100
+                print(f"    ⚡ Pipeline: {saved:.1f}s overlap saved ({pct:.0f}% efficiency)")
 
     def __enter__(self):
         return self
