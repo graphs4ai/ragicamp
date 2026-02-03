@@ -14,22 +14,24 @@
 # =============================================================================
 # DESIGN
 # =============================================================================
-# - Uses SINGLETON experiments (explicit, hypothesis-driven)
-# - Each experiment tests ONE specific configuration
-# - Embeddings: BGE-large (BERT), E5-Mistral-7B (decoder, vLLM)
-# - Advanced retrieval: Hybrid (TF-IDF/BM25), reranking, iterative RAG
-# - Small generators: Llama-3.2-3B, Phi-3-mini, Qwen2.5-3B
+# - Uses GRID SEARCH for systematic coverage of combinations
+# - Uses SINGLETON experiments for agent-based strategies (iterative, self-rag)
+# - Supports RANDOM SEARCH mode for efficient exploration (see sampling: section)
+#
+# Embeddings: BGE-large (BERT), BGE-M3 (multilingual), E5-Mistral-7B (decoder)
+# Advanced retrieval: Hybrid (TF-IDF/BM25), Hierarchical, reranking
+# Query transforms: HyDE, MultiQuery
+# Small generators: Llama-3.2-3B, Phi-3-mini, Qwen2.5-3B
 #
 # Hardware: Single GPU with 48GB+ VRAM (B200 recommended)
-# Expected runtime: 8-12 hours (22 experiments x 3 datasets)
 
 name: smart_retrieval_slm
 description: "Test if premium retrieval compensates for smaller generators"
 
-# Sample size
+# Sample size per experiment
 num_questions: 1000
 
-# Default dataset (used when experiments don't specify)
+# Datasets to test
 datasets:
   - nq
   - triviaqa
@@ -49,338 +51,212 @@ llm_judge:
   judgment_type: binary
 
 # =============================================================================
+# SLM Models (shared across Direct and RAG)
+# =============================================================================
+# Using YAML anchors to ensure both Direct and RAG use identical models
+models: &slm_models
+  - vllm:meta-llama/Llama-3.2-3B-Instruct   # Meta, solid baseline
+  - vllm:microsoft/Phi-3-mini-4k-instruct   # Microsoft, strong reasoning (3.8B)
+  - vllm:Qwen/Qwen2.5-3B-Instruct           # Alibaba, best MMLU in 3B class
+
+# =============================================================================
 # DirectLLM Baseline (grid search for comparison)
 # =============================================================================
-# Grid search auto-generates: model x prompt x quantization combinations
 # These provide "no retrieval" baselines to measure RAG improvement.
-#
-# SLMs tested (based on 2024/2025 benchmarks):
-# - Llama-3.2-3B: Solid baseline, good instruction following
-# - Phi-3-mini-4k: Strong reasoning (3.8B), punches above weight class
-# - Qwen2.5-3B: Best MMLU scores in 3B class
 direct:
   enabled: true
-  models:
-    - vllm:meta-llama/Llama-3.2-3B-Instruct
-    - vllm:microsoft/Phi-3-mini-4k-instruct
-    - vllm:Qwen/Qwen2.5-3B-Instruct
+  models: *slm_models
   prompts:
     - concise
   quantization:
     - none
 
 # =============================================================================
-# RAG Configuration
+# RAG Configuration (Grid Search)
 # =============================================================================
-# We set enabled: true so indexes get built, but don't specify models/top_k
-# so no grid search experiments are generated. Actual experiments come from
-# the 'experiments:' section below.
+# Grid search generates: Models × Retrievers × TopK × QueryTransforms × Rerankers × Prompts × Datasets
+#
+# To enable random search mode, uncomment the sampling section below.
 
 rag:
   enabled: true
+  models: *slm_models
   
-  # Empty models list = no grid search experiments generated
-  models: []
+  # --------------------------------------------------------------------------
+  # Sampling Mode (Random Search)
+  # --------------------------------------------------------------------------
+  # Uncomment to enable random search instead of full grid search.
+  # This samples N random combinations from the full experiment space.
+  #
+  # sampling:
+  #   mode: random          # 'random' or 'stratified'
+  #   n_experiments: 50     # Number of experiments to sample
+  #   seed: 42              # Random seed for reproducibility
+  #   # Stratified mode ensures at least one experiment per:
+  #   # stratify_by: [model, retriever]  # Dimensions to stratify
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)
   # --------------------------------------------------------------------------
-  # Using WikiRank to filter to top 200k most important articles.
-  # This ensures we index high-quality content (major topics, countries, etc.)
-  # instead of arbitrary first-200k articles from the dataset stream.
   corpus:
     source: wikimedia/wikipedia
     version: 20231101.en
     max_docs: 200000
-    wikirank_top_k: 200000  # Filter to top 200k by WikiRank importance score
-    streaming: false        # Load full dataset into RAM (faster, requires ~20GB)
-    num_proc: 128           # Parallel workers for dataset loading & WikiRank filtering
-    # Index building batch sizes (tuned for high-RAM/VRAM machines)
-    doc_batch_size: 50000      # Documents to chunk per batch
-    embedding_batch_size: 4096 # Texts to embed per GPU batch
+    wikirank_top_k: 200000
+    streaming: false
+    num_proc: 128
+    doc_batch_size: 50000
+    embedding_batch_size: 4096
   
   # --------------------------------------------------------------------------
   # Embedding Backend Configuration
   # --------------------------------------------------------------------------
-  # Options:
-  # - sentence_transformers: Default, works with any HuggingFace model
-  # - vllm: Uses vLLM continuous batching (faster, but limited model support)
-  #
-  # vLLM-compatible embedding models:
-  # - intfloat/e5-mistral-7b-instruct (recommended, top MTEB)
-  # - Alibaba-NLP/gte-Qwen2-7B-instruct (top overall on MTEB)
-  # - BAAI/bge-en-icl (instruction-following BGE)
-  # - Salesforce/SFR-Embedding-Mistral
-  #
-  # NOT compatible with vLLM (use sentence_transformers):
-  # - BAAI/bge-large-en-v1.5, BAAI/bge-m3 (BERT-based, not decoder)
-  # - intfloat/e5-large-v2 (BERT-based)
-  #
-  # See: https://docs.vllm.ai/en/latest/getting_started/examples/embedding.html
   embedding:
-    backend: vllm  # 'vllm' (faster) or 'sentence_transformers' (more compatible)
-    # vLLM-specific settings (only used when backend: vllm)
-    vllm_gpu_memory_fraction: 0.9  # Index building runs before generation
-    vllm_enforce_eager: false      # Use CUDA graphs for better performance
+    backend: vllm
+    vllm_gpu_memory_fraction: 0.9
+    vllm_enforce_eager: false
   
   # --------------------------------------------------------------------------
-  # Retriever Definitions (for index building)
+  # Retrievers (referenced by grid search)
   # --------------------------------------------------------------------------
-  # Only the two indexes that are already built:
-  # - en_bge_large_en_v1.5_c512_o50 (dense_bge_large_512)
-  # - en_bge_m3_c512_o50 (dense_bge_m3_512)
+  # The grid search will use the 'name' field to reference these configs.
+  # Index building uses full config, experiments use name reference.
   retrievers:
-    # Dense retrievers with different embeddings
-    # Note: embedding_backend can override global setting per-retriever
+    # =========================================================================
+    # DENSE RETRIEVERS
+    # =========================================================================
     
-    # BGE-large: BERT-based, needs sentence_transformers (ALREADY BUILT)
+    # BGE-large: BERT-based, proven MTEB performer
     - type: dense
       name: dense_bge_large_512
       embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: sentence_transformers  # BERT-based
+      embedding_backend: sentence_transformers
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
     
-    # BGE-M3: BERT-based, needs sentence_transformers (ALREADY BUILT)
+    # BGE-M3: Multilingual, good for diverse queries
     - type: dense
       name: dense_bge_m3_512
       embedding_model: BAAI/bge-m3
-      embedding_backend: sentence_transformers  # BERT-based
+      embedding_backend: sentence_transformers
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
     
-    # -------------------------------------------------------------------------
-    # E5-Mistral: vLLM-compatible, top MTEB retrieval (NEW - TO BUILD)
-    # -------------------------------------------------------------------------
-    # 7B decoder model - uses vLLM continuous batching for fast embedding
-    # Ranked #1-2 on MTEB retrieval tasks
+    # E5-Mistral: 7B decoder, top MTEB retrieval scores
     - type: dense
       name: dense_e5_mistral_512
       embedding_model: intfloat/e5-mistral-7b-instruct
-      embedding_backend: vllm  # Decoder model, uses vLLM
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
     
-    # -------------------------------------------------------------------------
-    # FUTURE: Other Top MTEB Models (uncomment to build)
-    # -------------------------------------------------------------------------
-    # GTE-Qwen2-7B: Top overall on MTEB, vLLM compatible
-    # - type: dense
-    #   name: dense_gte_qwen2_512
-    #   embedding_model: Alibaba-NLP/gte-Qwen2-7B-instruct
-    #   embedding_backend: vllm
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
+    # =========================================================================
+    # HYBRID RETRIEVERS (Dense + Sparse)
+    # =========================================================================
     
-    # SFR-Embedding-Mistral: Salesforce, vLLM compatible
-    # - type: dense
-    #   name: dense_sfr_mistral_512
-    #   embedding_model: Salesforce/SFR-Embedding-Mistral
-    #   embedding_backend: vllm
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # GTE-large: BERT-based (sentence_transformers only)
-    # - type: dense
-    #   name: dense_gte_large_512
-    #   embedding_model: Alibaba-NLP/gte-large-en-v1.5
-    #   embedding_backend: sentence_transformers
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
-    
-    # -------------------------------------------------------------------------
-    # Hybrid retrievers (dense + sparse) - reuses BGE-large embeddings
-    # -------------------------------------------------------------------------
-    # sparse_method: 'tfidf' (default) or 'bm25'
-    # Multiple hybrid retrievers with same embedding_model share sparse index
-    
-    # TF-IDF hybrids
-    - type: hybrid
-      name: hybrid_bge_large_tfidf_05
-      embedding_model: BAAI/bge-large-en-v1.5
-      sparse_method: tfidf
-      alpha: 0.5  # 50% dense, 50% sparse
-      chunk_size: 512
-      chunk_overlap: 50
-      index_type: hnsw
-    
-    - type: hybrid
-      name: hybrid_bge_large_tfidf_07
-      embedding_model: BAAI/bge-large-en-v1.5
-      sparse_method: tfidf
-      alpha: 0.7  # 70% dense, 30% sparse
-      chunk_size: 512
-      chunk_overlap: 50
-      index_type: hnsw
-    
-    # BM25 hybrids (more sophisticated sparse ranking)
+    # Hybrid BM25 - 50/50 blend
     - type: hybrid
       name: hybrid_bge_large_bm25_05
       embedding_model: BAAI/bge-large-en-v1.5
       sparse_method: bm25
-      alpha: 0.5  # 50% dense, 50% sparse
+      alpha: 0.5
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
     
+    # Hybrid BM25 - 70/30 dense-heavy (typically best)
     - type: hybrid
       name: hybrid_bge_large_bm25_07
       embedding_model: BAAI/bge-large-en-v1.5
       sparse_method: bm25
-      alpha: 0.7  # 70% dense, 30% sparse
+      alpha: 0.7
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
+    
+    # Hybrid TF-IDF - alternative sparse method
+    - type: hybrid
+      name: hybrid_bge_large_tfidf_07
+      embedding_model: BAAI/bge-large-en-v1.5
+      sparse_method: tfidf
+      alpha: 0.7
+      chunk_size: 512
+      chunk_overlap: 50
+      index_type: hnsw
+    
+    # =========================================================================
+    # HIERARCHICAL RETRIEVERS (Parent-Child Chunks)
+    # =========================================================================
+    
+    # Hierarchical: Search small chunks, return larger context
+    - type: hierarchical
+      name: hierarchical_bge_large
+      embedding_model: BAAI/bge-large-en-v1.5
+      parent_chunk_size: 1024
+      child_chunk_size: 256
+      index_type: hnsw
+  
+  # --------------------------------------------------------------------------
+  # Grid Search Dimensions
+  # --------------------------------------------------------------------------
+  # Which retrievers to test in grid search (by name)
+  retriever_names:
+    - dense_bge_large_512
+    - dense_bge_m3_512
+    - dense_e5_mistral_512
+    - hybrid_bge_large_bm25_07
+    - hierarchical_bge_large
+  
+  top_k_values:
+    - 3
+    - 5
+    - 10
+  
+  # Query transformation strategies
+  query_transform:
+    - none         # Baseline
+    - hyde         # Hypothetical document embeddings
+    - multiquery   # Multiple query variations
+  
+  # Reranker configurations
+  reranker:
+    configs:
+      - enabled: false
+        name: none
+      - enabled: true
+        name: bge
+      - enabled: true
+        name: bge-v2
+  
+  # Fetch K multiplier (documents to retrieve before reranking)
+  fetch_k_multiplier: 5  # fetch_k = top_k * 5 when reranking
+  
+  prompts:
+    - concise
+  
+  quantization:
+    - none
 
 # =============================================================================
-# SINGLETON EXPERIMENTS (hypothesis-driven)
+# SINGLETON EXPERIMENTS (Agent-Based Strategies)
 # =============================================================================
-# Each group tests ONE retrieval strategy with ALL 3 SLMs for fair comparison.
-# Direct baselines (no RAG) are auto-generated by the direct: section above.
-#
-# SLMs tested in each group:
-# - Llama-3.2-3B: Meta, solid baseline
-# - Phi-3-mini-4k: Microsoft, strong reasoning (3.8B)
-# - Qwen2.5-3B: Alibaba, best MMLU in 3B class
+# These require agent_type which can't be expressed in grid search.
+# Each tests ONE agent strategy with each SLM for comparison.
 
 experiments:
   # ========================================================================
-  # GROUP A: Simple Dense RAG (baseline for all SLMs)
+  # GROUP: Iterative RAG (Query Refinement)
   # ========================================================================
-  # Tests basic dense retrieval with BGE-large embeddings.
-  # This is the simplest RAG setup - establishes baseline for each model.
+  # Tests query refinement over multiple iterations.
   
-  - name: a1_llama_dense
-    hypothesis: "Llama + simple dense retrieval"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-  
-  - name: a2_phi3_dense
-    hypothesis: "Phi-3 + simple dense retrieval"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-  
-  - name: a3_qwen_dense
-    hypothesis: "Qwen + simple dense retrieval"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-
-  # ========================================================================
-  # GROUP B: Hybrid Retrieval (Dense + BM25) - all SLMs
-  # ========================================================================
-  # Tests hybrid retrieval combining dense embeddings with BM25 sparse.
-  # Uses 70/30 dense-heavy blend which typically works best.
-  
-  - name: b1_llama_hybrid
-    hypothesis: "Llama + hybrid (70/30) catches keywords"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    top_k: 5
-    prompt: concise
-  
-  - name: b2_phi3_hybrid
-    hypothesis: "Phi-3 + hybrid retrieval"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: hybrid_bge_large_bm25_07
-    top_k: 5
-    prompt: concise
-  
-  - name: b3_qwen_hybrid
-    hypothesis: "Qwen + hybrid retrieval"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    top_k: 5
-    prompt: concise
-
-  # ========================================================================
-  # GROUP C: Reranking (Two-Stage) - all SLMs
-  # ========================================================================
-  # Tests cross-encoder reranking: overfetch 25, rerank to top 5.
-  # Reranking typically gives biggest single improvement.
-  
-  - name: c1_llama_rerank
-    hypothesis: "Llama + reranking for precision"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    fetch_k: 25
-    reranker: bge
-    prompt: concise
-  
-  - name: c2_phi3_rerank
-    hypothesis: "Phi-3 + reranking"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    fetch_k: 25
-    reranker: bge
-    prompt: concise
-  
-  - name: c3_qwen_rerank
-    hypothesis: "Qwen + reranking"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: dense_bge_large_512
-    top_k: 5
-    fetch_k: 25
-    reranker: bge
-    prompt: concise
-
-  # ========================================================================
-  # GROUP D: Query Transform (HyDE) - all SLMs
-  # ========================================================================
-  # Tests HyDE query transformation for better retrieval.
-  # Note: HyDE uses the LLM itself, so model quality matters more here.
-  
-  - name: d1_llama_hyde
-    hypothesis: "Llama + HyDE query transform"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: dense_bge_large_512
-    query_transform: hyde
-    top_k: 5
-    prompt: concise
-  
-  - name: d2_phi3_hyde
-    hypothesis: "Phi-3 + HyDE - better hypotheticals?"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: dense_bge_large_512
-    query_transform: hyde
-    top_k: 5
-    prompt: concise
-  
-  - name: d3_qwen_hyde
-    hypothesis: "Qwen + HyDE"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: dense_bge_large_512
-    query_transform: hyde
-    top_k: 5
-    prompt: concise
-
-  # ========================================================================
-  # GROUP E: Iterative RAG - all SLMs
-  # ========================================================================
-  # Tests query refinement with one iteration.
-  # Model quality affects refinement ability.
-  
-  - name: e1_llama_iterative
-    hypothesis: "Llama + iterative refinement"
+  - name: iterative_llama_1iter
+    hypothesis: "Llama + 1 iteration refinement"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
     retriever: dense_bge_large_512
@@ -389,8 +265,8 @@ experiments:
     stop_on_sufficient: true
     prompt: concise
   
-  - name: e2_phi3_iterative
-    hypothesis: "Phi-3 + iterative - better reasoning?"
+  - name: iterative_phi3_1iter
+    hypothesis: "Phi-3 + 1 iteration - better reasoning?"
     model: vllm:microsoft/Phi-3-mini-4k-instruct
     agent_type: iterative_rag
     retriever: dense_bge_large_512
@@ -399,8 +275,8 @@ experiments:
     stop_on_sufficient: true
     prompt: concise
   
-  - name: e3_qwen_iterative
-    hypothesis: "Qwen + iterative refinement"
+  - name: iterative_qwen_1iter
+    hypothesis: "Qwen + 1 iteration refinement"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
     agent_type: iterative_rag
     retriever: dense_bge_large_512
@@ -408,79 +284,80 @@ experiments:
     max_iterations: 1
     stop_on_sufficient: true
     prompt: concise
+  
+  # 2 iterations - does more help?
+  - name: iterative_qwen_2iter
+    hypothesis: "Qwen + 2 iterations - more refinement helps?"
+    model: vllm:Qwen/Qwen2.5-3B-Instruct
+    agent_type: iterative_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    max_iterations: 2
+    stop_on_sufficient: true
+    prompt: concise
 
   # ========================================================================
-  # GROUP F: Premium Stack (Hybrid + Rerank) - all SLMs
+  # GROUP: Self-RAG (Adaptive Retrieval)
   # ========================================================================
-  # Tests best combined retrieval: hybrid + reranking.
-  # This should show maximum retrieval quality.
+  # Tests adaptive retrieval - model decides when to retrieve.
   
-  - name: f1_llama_premium
-    hypothesis: "Llama + hybrid + rerank (premium)"
+  - name: selfrag_llama
+    hypothesis: "Llama + Self-RAG adaptive retrieval"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_bm25_07
+    agent_type: self_rag
+    retriever: dense_bge_large_512
     top_k: 5
-    fetch_k: 25
-    reranker: bge
     prompt: concise
   
-  - name: f2_phi3_premium
+  - name: selfrag_phi3
+    hypothesis: "Phi-3 + Self-RAG - better self-assessment?"
+    model: vllm:microsoft/Phi-3-mini-4k-instruct
+    agent_type: self_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    prompt: concise
+  
+  - name: selfrag_qwen
+    hypothesis: "Qwen + Self-RAG adaptive retrieval"
+    model: vllm:Qwen/Qwen2.5-3B-Instruct
+    agent_type: self_rag
+    retriever: dense_bge_large_512
+    top_k: 5
+    prompt: concise
+
+  # ========================================================================
+  # GROUP: Premium Combo (Hybrid + Rerank + HyDE) - Best of Everything
+  # ========================================================================
+  # Tests maximum retrieval investment per SLM.
+  
+  - name: premium_llama
+    hypothesis: "Llama + hybrid + rerank + hyde (maximum retrieval)"
+    model: vllm:meta-llama/Llama-3.2-3B-Instruct
+    retriever: hybrid_bge_large_bm25_07
+    query_transform: hyde
+    top_k: 5
+    fetch_k: 25
+    reranker: bge-v2
+    prompt: concise
+  
+  - name: premium_phi3
     hypothesis: "Phi-3 + premium stack"
     model: vllm:microsoft/Phi-3-mini-4k-instruct
     retriever: hybrid_bge_large_bm25_07
+    query_transform: hyde
     top_k: 5
     fetch_k: 25
-    reranker: bge
+    reranker: bge-v2
     prompt: concise
   
-  - name: f3_qwen_premium
+  - name: premium_qwen
     hypothesis: "Qwen + premium stack - best overall?"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
     retriever: hybrid_bge_large_bm25_07
+    query_transform: hyde
     top_k: 5
     fetch_k: 25
-    reranker: bge
-    prompt: concise
-
-  # ========================================================================
-  # GROUP G: Embedding Model Comparison (E5-Mistral vs BGE-large)
-  # ========================================================================
-  # Tests if better embeddings (E5-Mistral, top MTEB) improve RAG quality.
-  # Uses Qwen (best SLM) to isolate embedding impact.
-  # Compare against Group A/C/F which use BGE-large.
-  
-  # G1: Simple dense with E5-Mistral
-  - name: g1_qwen_e5mistral_dense
-    hypothesis: "E5-Mistral embeddings improve retrieval"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: dense_e5_mistral_512
-    top_k: 5
-    prompt: concise
-  
-  # G2: E5-Mistral + reranking (compare to c3)
-  - name: g2_qwen_e5mistral_rerank
-    hypothesis: "Top embeddings + reranking - best precision?"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: dense_e5_mistral_512
-    top_k: 5
-    fetch_k: 25
-    reranker: bge
-    prompt: concise
-  
-  # G3: Phi-3 + E5-Mistral (cross-check with different SLM)
-  - name: g3_phi3_e5mistral_dense
-    hypothesis: "E5-Mistral benefits Phi-3 too?"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: dense_e5_mistral_512
-    top_k: 5
-    prompt: concise
-  
-  # G4: Llama + E5-Mistral (complete the SLM comparison)
-  - name: g4_llama_e5mistral_dense
-    hypothesis: "E5-Mistral with Llama baseline"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: dense_e5_mistral_512
-    top_k: 5
+    reranker: bge-v2
     prompt: concise
 
 # =============================================================================

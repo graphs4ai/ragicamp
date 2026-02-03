@@ -2,15 +2,24 @@
 
 Builds ExperimentSpec objects from YAML configuration files.
 This is the main entry point for generating the experiment matrix.
+
+Supports three modes:
+- Grid search: Full Cartesian product of all dimensions
+- Random search: Sample N random combinations from the grid
+- Singleton: Explicit experiment definitions for hypothesis-driven research
 """
 
-from typing import Any
+import random
+from typing import Any, Optional
 
 from ragicamp.spec.experiment import ExperimentSpec
 from ragicamp.spec.naming import name_direct, name_rag
 
 
-def build_specs(config: dict[str, Any]) -> list[ExperimentSpec]:
+def build_specs(
+    config: dict[str, Any],
+    sampling_override: Optional[dict[str, Any]] = None,
+) -> list[ExperimentSpec]:
     """Build experiment specs from YAML config.
 
     Generates the full experiment matrix by combining:

@@ -11,6 +11,10 @@ import tempfile
 import time
 from typing import Any
 
+# Disable tokenizers parallelism to avoid fork warnings
+# Must be set before importing transformers/tokenizers
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager

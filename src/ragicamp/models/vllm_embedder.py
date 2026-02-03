@@ -13,7 +13,11 @@ Note: Not all sentence-transformer models are supported by vLLM.
 Check vLLM model compatibility before using.
 """
 
+import os
 from typing import TYPE_CHECKING, Optional
+
+# Disable tokenizers parallelism to avoid fork warnings with multiprocessing
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import numpy as np
 
