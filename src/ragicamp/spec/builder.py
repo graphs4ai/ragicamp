@@ -19,6 +19,7 @@ from ragicamp.spec.naming import name_direct, name_rag
 def build_specs(
     config: dict[str, Any],
     sampling_override: Optional[dict[str, Any]] = None,
+    exclude_names: Optional[set[str]] = None,
 ) -> list[ExperimentSpec]:
     """Build experiment specs from YAML config.
 
@@ -45,6 +46,8 @@ def build_specs(
         config: Study configuration dict (loaded from YAML)
         sampling_override: Optional dict to override sampling config
             Example: {"mode": "random", "n_experiments": 50, "seed": 42}
+        exclude_names: Optional set of experiment names to exclude from sampling
+            Used to avoid resampling already-completed experiments when resuming
 
     Returns:
         List of ExperimentSpec objects for all experiments
@@ -82,7 +85,9 @@ def build_specs(
         # Apply sampling if configured
         sampling_config = sampling_override or rag.get("sampling")
         if sampling_config:
-            rag_specs = _apply_sampling(rag_specs, sampling_config, "rag")
+            rag_specs = _apply_sampling(
+                rag_specs, sampling_config, "rag", exclude_names=exclude_names
+            )
 
         specs.extend(rag_specs)
 
@@ -100,6 +105,7 @@ def _apply_sampling(
     specs: list[ExperimentSpec],
     sampling_config: dict[str, Any],
     spec_type: str,
+    exclude_names: Optional[set[str]] = None,
 ) -> list[ExperimentSpec]:
     """Apply sampling to reduce experiment count.
 
@@ -111,6 +117,8 @@ def _apply_sampling(
             - seed: Random seed for reproducibility
             - stratify_by: List of dimensions to stratify (for stratified mode)
         spec_type: Type of specs ('direct' or 'rag') for logging
+        exclude_names: Optional set of experiment names to exclude from sampling
+            (already-completed experiments that shouldn't be resampled)
 
     Returns:
         Sampled list of experiment specs
@@ -118,6 +126,14 @@ def _apply_sampling(
     mode = sampling_config.get("mode", "random")
     n_experiments = sampling_config.get("n_experiments", len(specs))
     seed = sampling_config.get("seed")
+
+    # Filter out already-completed experiments before sampling
+    if exclude_names:
+        original_count = len(specs)
+        specs = [s for s in specs if s.name not in exclude_names]
+        excluded_count = original_count - len(specs)
+        if excluded_count > 0:
+            print(f"📋 [{spec_type}] Excluding {excluded_count} already-completed experiments from sampling pool")
 
     if n_experiments >= len(specs):
         return specs

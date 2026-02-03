@@ -71,6 +71,43 @@ def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):
     return None
 
 
+def _get_completed_experiment_names(output_dir: Path) -> set[str]:
+    """Scan output directory for completed experiments.
+
+    Used to exclude already-completed experiments from sampling, ensuring
+    that when resampling with a new seed, we only sample NEW experiments.
+
+    Args:
+        output_dir: Path to study output directory
+
+    Returns:
+        Set of experiment names that are already complete
+    """
+    from ragicamp.state.health import check_experiment_health
+
+    completed = set()
+
+    if not output_dir.exists():
+        return completed
+
+    for exp_dir in output_dir.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        # Skip non-experiment directories
+        if exp_dir.name.startswith(".") or exp_dir.name == "study_meta.json":
+            continue
+
+        try:
+            health = check_experiment_health(exp_dir)
+            if health.is_complete:
+                completed.add(exp_dir.name)
+        except Exception:
+            # If health check fails, assume incomplete
+            pass
+
+    return completed
+
+
 def run_study(
     config: dict[str, Any],
     dry_run: bool = False,
@@ -138,8 +175,18 @@ def run_study(
         retriever_configs = rag_config.get("retrievers", [])
         ensure_indexes_exist(retriever_configs, corpus_config)
 
-    # Build experiment specs (with optional sampling)
-    specs = build_specs(config, sampling_override=sampling_override)
+    # When sampling, exclude already-completed experiments from the pool
+    # This prevents resampling experiments that were already run
+    exclude_names: Optional[set[str]] = None
+    if sampling_override or rag_config.get("sampling"):
+        exclude_names = _get_completed_experiment_names(out)
+        if exclude_names:
+            print(f"📊 Found {len(exclude_names)} completed experiments in {out}")
+
+    # Build experiment specs (with optional sampling, excluding completed)
+    specs = build_specs(
+        config, sampling_override=sampling_override, exclude_names=exclude_names
+    )
 
     # Filter if requested
     if experiment_filter:
