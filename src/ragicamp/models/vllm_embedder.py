@@ -275,6 +275,28 @@ class VLLMServerEmbedder:
             logger.info("Embedding dimension: %d", self._embedding_dim)
         return self._embedding_dim
 
+    async def encode_async(
+        self,
+        sentences: list[str] | str,
+        normalize_embeddings: bool = False,
+        **kwargs,
+    ) -> np.ndarray:
+        """Async encode sentences to embeddings.
+
+        Use this for true async overlap in pipeline.
+        """
+        if isinstance(sentences, str):
+            sentences = [sentences]
+
+        self._start_server()
+        embeddings = await self._encode_async(sentences)
+
+        if normalize_embeddings:
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            np.divide(embeddings, norms, out=embeddings)
+
+        return embeddings
+
     def encode(
         self,
         sentences: list[str] | str,
@@ -283,9 +305,10 @@ class VLLMServerEmbedder:
         normalize_embeddings: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        """Encode sentences to embeddings.
+        """Encode sentences to embeddings (sync wrapper).
 
         Same interface as VLLMEmbedder.encode() for compatibility.
+        For async overlap, use encode_async() instead.
         """
         if isinstance(sentences, str):
             sentences = [sentences]

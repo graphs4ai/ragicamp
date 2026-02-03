@@ -116,7 +116,7 @@ rag:
   # Embedding Backend Configuration
   # --------------------------------------------------------------------------
   embedding:
-    backend: vllm
+    backend: vllm_server  # Use server mode for async overlap
     vllm_gpu_memory_fraction: 0.9
     vllm_enforce_eager: false
   
