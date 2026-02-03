@@ -83,7 +83,7 @@ def _get_completed_experiment_names(output_dir: Path) -> set[str]:
     Returns:
         Set of experiment names that are already complete
     """
-    from ragicamp.state.health import check_experiment_health
+    from ragicamp.state.health import check_health
 
     completed = set()
 
@@ -98,7 +98,7 @@ def _get_completed_experiment_names(output_dir: Path) -> set[str]:
             continue
 
         try:
-            health = check_experiment_health(exp_dir)
+            health = check_health(exp_dir)
             if health.is_complete:
                 completed.add(exp_dir.name)
         except Exception:
