@@ -109,7 +109,7 @@ rag:
     # doc_batch_size: Number of documents per embedding batch.
     # With ~65 chunks/doc average, 5000 docs = ~325k chunks per vLLM call.
     # Larger values can cause vLLM to hang when extracting embeddings.
-    doc_batch_size: 5000
+    doc_batch_size: 100
     embedding_batch_size: 4096
   
   # --------------------------------------------------------------------------
