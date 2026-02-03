@@ -1,6 +1,7 @@
 """Language model interfaces."""
 
 from ragicamp.models.base import LanguageModel
+from ragicamp.models.embedder import Embedder, create_embedder
 from ragicamp.models.huggingface import HuggingFaceModel
 from ragicamp.models.openai import OpenAIModel
 
@@ -18,4 +19,6 @@ __all__ = [
     "HuggingFaceModel",
     "OpenAIModel",
     "VLLMModel",
+    "Embedder",
+    "create_embedder",
 ]

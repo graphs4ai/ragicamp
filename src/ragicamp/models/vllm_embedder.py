@@ -120,7 +120,9 @@ class VLLMEmbedder:
         # Pre-allocate array for faster extraction (avoids Python list overhead)
         n_outputs = len(outputs)
         if n_outputs == 0:
-            return np.array([], dtype=np.float32).reshape(0, self.get_sentence_embedding_dimension())
+            return np.array([], dtype=np.float32).reshape(
+                0, self.get_sentence_embedding_dimension()
+            )
 
         embedding_dim = len(outputs[0].outputs.embedding)
         embeddings = np.empty((n_outputs, embedding_dim), dtype=np.float32)
@@ -151,34 +153,3 @@ class VLLMEmbedder:
                 torch.cuda.empty_cache()
 
             logger.info("vLLM embedding model unloaded: %s", self.model_name)
-
-
-def create_embedder(
-    model_name: str,
-    backend: str = "sentence_transformers",
-    vllm_gpu_memory_fraction: float = 0.5,
-    vllm_enforce_eager: bool = True,
-):
-    """Create an embedder using the specified backend.
-
-    Args:
-        model_name: HuggingFace model name
-        backend: 'sentence_transformers' or 'vllm'
-        vllm_gpu_memory_fraction: GPU memory fraction for vLLM
-        vllm_enforce_eager: Use eager mode for vLLM
-
-    Returns:
-        Embedder instance (SentenceTransformer or VLLMEmbedder)
-    """
-    if backend == "vllm":
-        logger.info("Using vLLM embedding backend for: %s", model_name)
-        return VLLMEmbedder(
-            model_name=model_name,
-            gpu_memory_fraction=vllm_gpu_memory_fraction,
-            enforce_eager=vllm_enforce_eager,
-        )
-    else:
-        from sentence_transformers import SentenceTransformer
-
-        logger.info("Using sentence-transformers backend for: %s", model_name)
-        return SentenceTransformer(model_name, trust_remote_code=True)

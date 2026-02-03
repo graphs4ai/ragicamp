@@ -1,16 +1,24 @@
 """Hierarchical index builder.
 
 Builds hierarchical indexes with parent-child chunk relationships.
+
+Uses a two-phase approach for optimal GPU utilization:
+- Phase 1: Chunk + embed all batches, save to disk
+- Phase 2: Load all, normalize, add to FAISS index
+
+Supports checkpointing for resume after crashes.
 """
 
 import gc
-import os
 import pickle
-import tempfile
+import time
 from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
+
+from .checkpoint import CheckpointManager, HierarchicalCheckpoint
+from .storage import EmbeddingStorage
 
 logger = get_logger(__name__)
 
@@ -20,32 +28,45 @@ def build_hierarchical_index(
     corpus_config: dict[str, Any],
     doc_batch_size: int = 1000,
     embedding_batch_size: int = 64,
+    embedding_backend: str = "vllm",
+    vllm_gpu_memory_fraction: float = 0.9,
 ) -> str:
     """Build a hierarchical index with batched processing.
 
     Hierarchical indexes have unique parent/child chunking, so they
     can't share indexes with other retrievers.
 
+    Uses a two-phase approach:
+    - Phase 1: Chunk + embed all batches, save to disk
+    - Phase 2: Load all, normalize, add to FAISS index
+
+    Supports resume from checkpoint if process is interrupted.
+
     Args:
         retriever_config: Retriever configuration with chunk sizes
         corpus_config: Corpus configuration
         doc_batch_size: Documents to process per batch (default 1000)
         embedding_batch_size: Texts to embed per GPU batch (default 64)
+        embedding_backend: 'vllm' or 'sentence_transformers'
+        vllm_gpu_memory_fraction: GPU memory fraction for vLLM (default 0.9)
 
     Returns:
         Retriever name
     """
     import faiss
     import numpy as np
-    from sentence_transformers import SentenceTransformer
 
     from ragicamp.corpus import CorpusConfig, WikipediaCorpus
+    from ragicamp.models.embedder import create_embedder
     from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
     from ragicamp.retrievers.base import Document
 
     manager = get_artifact_manager()
     retriever_name = retriever_config["name"]
     embedding_model = retriever_config.get("embedding_model", "all-MiniLM-L6-v2")
+
+    # Get embedding backend from retriever config, fall back to parameter
+    backend = retriever_config.get("embedding_backend", embedding_backend)
 
     parent_chunk_size = retriever_config.get("parent_chunk_size", 1024)
     child_chunk_size = retriever_config.get("child_chunk_size", 256)
@@ -54,6 +75,8 @@ def build_hierarchical_index(
 
     print(f"\n{'=' * 60}")
     print(f"Building hierarchical index: {retriever_name}")
+    print(f"  Embedding model: {embedding_model}")
+    print(f"  Embedding backend: {backend}")
     print(f"  Parent chunks: {parent_chunk_size}")
     print(f"  Child chunks: {child_chunk_size}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
@@ -87,61 +110,66 @@ def build_hierarchical_index(
         child_chunk_overlap=child_overlap,
     )
 
-    print("Processing documents in batches...")
-
-    # Try Flash Attention 2 if available, otherwise fall back to default
-    model_kwargs = {}
-    try:
-        import flash_attn  # noqa: F401
-
-        model_kwargs["attn_implementation"] = "flash_attention_2"
-        print("  Flash Attention 2 available, enabling")
-    except ImportError:
-        print("  flash-attn not installed, using default attention")
-
-    encoder = SentenceTransformer(
-        embedding_model,
-        trust_remote_code=True,
-        model_kwargs=model_kwargs if model_kwargs else None,
+    # Initialize encoder using factory (backend-agnostic)
+    print(f"Loading embedding model ({backend})...")
+    encoder = create_embedder(
+        model_name=embedding_model,
+        backend=backend,
+        gpu_memory_fraction=vllm_gpu_memory_fraction,
+        enforce_eager=False,
     )
     embedding_dim = encoder.get_sentence_embedding_dimension()
+    print(f"  Embedder loaded (dim={embedding_dim})")
 
-    # Apply torch.compile() for additional speedup (PyTorch 2.0+)
-    try:
-        import torch
+    # Setup work directory for checkpointing and temp storage
+    work_dir = manager.indexes_dir / ".work" / retriever_name
+    work_dir.mkdir(parents=True, exist_ok=True)
 
-        if hasattr(torch, "compile") and torch.cuda.is_available():
-            encoder = torch.compile(encoder, mode="reduce-overhead")
-            print("  Applied torch.compile() to embedding model")
-    except Exception as e:
-        print(f"  torch.compile() not applied: {e}")
+    # Initialize storage and checkpoint manager
+    storage = EmbeddingStorage(work_dir)
+    checkpoint_mgr = CheckpointManager(work_dir)
 
-    index = faiss.IndexFlatIP(embedding_dim)
+    # Check for existing checkpoint (resume support)
+    checkpoint = checkpoint_mgr.load(HierarchicalCheckpoint)
+    if checkpoint:
+        print(
+            f"  Resuming from checkpoint: batch {checkpoint.batch_num}, {checkpoint.total_docs} docs"
+        )
+        start_batch = checkpoint.batch_num
+        total_docs = checkpoint.total_docs
+        parent_count = checkpoint.total_parent_chunks
+        child_count = checkpoint.total_child_chunks
+        # Restore embedding sizes for loading later
+        storage._embedding_sizes["child"] = checkpoint.child_embedding_sizes.copy()
+    else:
+        start_batch = 0
+        total_docs = 0
+        parent_count = 0
+        child_count = 0
 
-    # Save to indexes directory
-    temp_dir = manager.get_embedding_index_path(retriever_name)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    # Temporary files for incremental saving
-    temp_parent_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
-    temp_child_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
-    temp_mapping_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=str(temp_dir))
-    temp_parent_file.close()
-    temp_child_file.close()
-    temp_mapping_file.close()
-
-    parent_file = open(temp_parent_file.name, "ab")
-    child_file = open(temp_child_file.name, "ab")
-    mapping_file = open(temp_mapping_file.name, "ab")
-
-    total_docs = 0
     doc_batch = []
-    parent_count = 0
-    child_count = 0
     batch_num = 0
+    docs_to_skip = start_batch * doc_batch_size
+
+    # Mapping file for child->parent relationships
+    mapping_path = work_dir / "child_to_parent.pkl"
+    if checkpoint and mapping_path.exists():
+        mapping_file = open(mapping_path, "ab")
+    else:
+        mapping_file = open(mapping_path, "wb")
+
+    # ==========================================================================
+    # PHASE 1: Chunk and embed all batches (GPU runs continuously)
+    # ==========================================================================
+    print("Phase 1: Chunking and embedding...")
 
     try:
         for doc in corpus.load():
+            # Skip already processed docs when resuming
+            if docs_to_skip > 0:
+                docs_to_skip -= 1
+                continue
+
             doc_with_id = Document(
                 id=f"wiki_{total_docs}",
                 text=doc.text,
@@ -152,50 +180,68 @@ def build_hierarchical_index(
 
             if len(doc_batch) >= doc_batch_size:
                 batch_num += 1
+
+                # Skip if already processed (resume case)
+                if batch_num <= start_batch:
+                    doc_batch = []
+                    continue
+
                 batch_size = len(doc_batch)
                 print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
 
+                # Chunking phase
+                t_chunk = time.time()
                 print("    Chunking (hierarchical)...", end=" ", flush=True)
                 parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                     iter(doc_batch)
                 )
-                print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
+                chunk_elapsed = time.time() - t_chunk
+                print(
+                    f"→ {len(parent_chunks)} parents, {len(child_chunks)} children ({chunk_elapsed:.1f}s)"
+                )
 
+                # Save mapping
                 pickle.dump(batch_child_to_parent, mapping_file)
                 mapping_file.flush()
-                del batch_child_to_parent
+
+                # Save parent chunks (no embedding needed for parents)
+                storage.append_chunks(parent_chunks, key="parent")
+                parent_count += len(parent_chunks)
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    print(
-                        f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
-                    )
+                    print(f"    Embedding {len(child_texts)} child chunks...")
+
+                    # Embed (no normalization yet - save raw)
                     embeddings = encoder.encode(
                         child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
-                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                    index.add(embeddings.astype("float32"))
+
+                    # Save to storage
+                    storage.append_embeddings(embeddings, key="child")
+                    storage.append_chunks(child_chunks, key="child")
+                    child_count += len(child_chunks)
+
+                    # Save checkpoint
+                    checkpoint_mgr.save(
+                        HierarchicalCheckpoint(
+                            batch_num=batch_num,
+                            total_docs=total_docs,
+                            total_parent_chunks=parent_count,
+                            total_child_chunks=child_count,
+                            parent_embedding_sizes=[],  # Parents not embedded
+                            child_embedding_sizes=storage.get_embedding_sizes("child"),
+                        )
+                    )
 
                     del child_texts, embeddings
-                    gc.collect()
-
-                    pickle.dump(child_chunks, child_file)
-                    child_file.flush()
-                    child_count += len(child_chunks)
-                    del child_chunks
-                    gc.collect()
-
-                pickle.dump(parent_chunks, parent_file)
-                parent_file.flush()
-                parent_count += len(parent_chunks)
-                del parent_chunks
-                gc.collect()
 
                 print(
-                    f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
-                    f"{child_count} children (index: {index.ntotal})"
+                    f"  ✓ Total: {total_docs} docs → {parent_count} parents, {child_count} children"
                 )
                 doc_batch = []
+                del parent_chunks, child_chunks, batch_child_to_parent
+                gc.collect()
 
         # Process remaining docs
         if doc_batch:
@@ -203,84 +249,114 @@ def build_hierarchical_index(
             batch_size = len(doc_batch)
             print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
 
+            t_chunk = time.time()
             print("    Chunking (hierarchical)...", end=" ", flush=True)
             parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                 iter(doc_batch)
             )
-            print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
+            chunk_elapsed = time.time() - t_chunk
+            print(
+                f"→ {len(parent_chunks)} parents, {len(child_chunks)} children ({chunk_elapsed:.1f}s)"
+            )
 
             pickle.dump(batch_child_to_parent, mapping_file)
+            mapping_file.flush()
+
+            storage.append_chunks(parent_chunks, key="parent")
+            parent_count += len(parent_chunks)
 
             if child_chunks:
                 child_texts = [c.text for c in child_chunks]
-                print(
-                    f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
-                )
+                print(f"    Embedding {len(child_texts)} child chunks...")
                 embeddings = encoder.encode(
                     child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
-                embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-                index.add(embeddings.astype("float32"))
-                pickle.dump(child_chunks, child_file)
+                storage.append_embeddings(embeddings, key="child")
+                storage.append_chunks(child_chunks, key="child")
                 child_count += len(child_chunks)
+
+                checkpoint_mgr.save(
+                    HierarchicalCheckpoint(
+                        batch_num=batch_num,
+                        total_docs=total_docs,
+                        total_parent_chunks=parent_count,
+                        total_child_chunks=child_count,
+                        parent_embedding_sizes=[],
+                        child_embedding_sizes=storage.get_embedding_sizes("child"),
+                    )
+                )
+
                 del child_texts, embeddings
 
-            pickle.dump(parent_chunks, parent_file)
-            parent_count += len(parent_chunks)
-
-            print(
-                f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
-                f"{child_count} children (index: {index.ntotal})"
-            )
+            print(f"  ✓ Total: {total_docs} docs → {parent_count} parents, {child_count} children")
             del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
+            gc.collect()
 
-        print(
-            f"✓ Processing complete: {total_docs} docs → {parent_count} parents, {child_count} children"
-        )
-
-    finally:
-        parent_file.close()
-        child_file.close()
+    except Exception as e:
         mapping_file.close()
+        storage.close()
+        raise RuntimeError(f"Phase 1 failed at batch {batch_num}: {e}") from e
 
-    # Copy temp files to final location
-    print("Copying files to final location...")
+    mapping_file.close()
+    print(f"✓ Phase 1 complete: {total_docs} docs → {parent_count} parents, {child_count} children")
+
+    # ==========================================================================
+    # PHASE 2: Load embeddings, normalize, add to FAISS
+    # ==========================================================================
+    print("\nPhase 2: Post-processing (normalize + index)...")
+
+    # Load all child embeddings from disk
+    print("  Loading child embeddings from disk...")
+    t_load = time.time()
+    embeddings = storage.load_all_embeddings(key="child")
+    print(f"  ✓ Loaded {len(embeddings)} embeddings in {time.time() - t_load:.1f}s")
+
+    # Normalize all at once (in-place for efficiency)
+    print("  Normalizing embeddings...")
+    t_norm = time.time()
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    np.divide(embeddings, norms, out=embeddings)
+    print(f"  ✓ Normalized in {time.time() - t_norm:.1f}s")
+
+    # Create and populate FAISS index
+    index = faiss.IndexFlatIP(embedding_dim)
+    print("  Adding to FAISS index...")
+    t_add = time.time()
+    index.add(embeddings.astype("float32"))
+    print(f"  ✓ Added {index.ntotal} vectors in {time.time() - t_add:.1f}s")
+
+    del embeddings
+    gc.collect()
+
+    print(f"✓ Phase 2 complete: {index.ntotal} vectors indexed")
+
+    # ==========================================================================
+    # Save to final location
+    # ==========================================================================
+    print("\nSaving to final location...")
     index_path = manager.get_embedding_index_path(retriever_name)
     index_path.mkdir(parents=True, exist_ok=True)
 
-    import shutil
+    # Load and save all documents
+    print("  Loading and saving parent documents...")
+    all_parent_docs = storage.load_all_chunks(key="parent")
+    with open(index_path / "parent_docs.pkl", "wb") as f:
+        pickle.dump(all_parent_docs, f)
 
-    shutil.copy2(temp_parent_file.name, index_path / "parent_docs.pkl")
-    shutil.copy2(temp_child_file.name, index_path / "child_docs.pkl")
+    print("  Loading and saving child documents...")
+    all_child_docs = storage.load_all_chunks(key="child")
+    with open(index_path / "child_docs.pkl", "wb") as f:
+        pickle.dump(all_child_docs, f)
 
-    # Load and reconstruct data for final save
-    print("Loading documents for final save...")
-    all_parent_docs = []
-    all_child_docs = []
-    child_to_parent = {}
+    # Build parent ID -> index mapping
     parent_id_to_idx = {}
+    for idx, doc in enumerate(all_parent_docs):
+        parent_id_to_idx[doc.id] = idx
 
-    idx = 0
-    with open(temp_parent_file.name, "rb") as f:
-        while True:
-            try:
-                batch = pickle.load(f)
-                all_parent_docs.extend(batch)
-                for doc in batch:
-                    parent_id_to_idx[doc.id] = idx
-                    idx += 1
-            except EOFError:
-                break
-
-    with open(temp_child_file.name, "rb") as f:
-        while True:
-            try:
-                batch = pickle.load(f)
-                all_child_docs.extend(batch)
-            except EOFError:
-                break
-
-    with open(temp_mapping_file.name, "rb") as f:
+    # Load and merge child_to_parent mapping
+    print("  Loading and saving child-to-parent mapping...")
+    child_to_parent = {}
+    with open(mapping_path, "rb") as f:
         while True:
             try:
                 batch_mapping = pickle.load(f)
@@ -288,7 +364,6 @@ def build_hierarchical_index(
             except EOFError:
                 break
 
-    # Save child_to_parent mapping
     with open(index_path / "child_to_parent.pkl", "wb") as f:
         pickle.dump(child_to_parent, f)
 
@@ -300,6 +375,7 @@ def build_hierarchical_index(
         "name": retriever_name,
         "type": "hierarchical",
         "embedding_model": embedding_model,
+        "embedding_backend": backend,
         "parent_chunk_size": parent_chunk_size,
         "child_chunk_size": child_chunk_size,
         "parent_overlap": parent_overlap,
@@ -317,6 +393,7 @@ def build_hierarchical_index(
         "type": "hierarchical",
         "hierarchical_index": retriever_name,
         "embedding_model": embedding_model,
+        "embedding_backend": backend,
         "parent_chunk_size": parent_chunk_size,
         "child_chunk_size": child_chunk_size,
         "num_parents": parent_count,
@@ -324,14 +401,23 @@ def build_hierarchical_index(
     }
     manager.save_json(retriever_config_data, retriever_path / "config.json")
 
-    # Clean up temp files
-    os.unlink(temp_parent_file.name)
-    os.unlink(temp_child_file.name)
-    os.unlink(temp_mapping_file.name)
+    # Cleanup work directory
+    storage.cleanup()
+    checkpoint_mgr.clear()
+    if mapping_path.exists():
+        mapping_path.unlink()
+
+    # Try to remove work dir if empty
+    try:
+        work_dir.rmdir()
+    except OSError:
+        pass
 
     # Clean up
     del all_parent_docs, all_child_docs, child_to_parent, parent_id_to_idx
-    del index, encoder, chunker
+    del index
+    encoder.unload()
+    del chunker
     gc.collect()
 
     print(f"✓ Saved hierarchical index: {retriever_name}")
