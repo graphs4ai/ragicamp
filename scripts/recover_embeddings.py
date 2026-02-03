@@ -30,40 +30,62 @@ import faiss
 import numpy as np
 
 
-def load_embeddings_from_temp(emb_path: Path, num_batches: int, embedding_dim: int) -> np.ndarray:
-    """Load embeddings from temp file with multiple np.save() calls.
-    
-    The old code appended multiple arrays to one file using np.save().
-    We need to load them sequentially.
-    """
-    print(f"Loading embeddings from {emb_path}...")
-    print(f"  Expected batches: {num_batches}, dim: {embedding_dim}")
-    
-    all_embeddings = []
-    total_loaded = 0
+def count_embeddings_in_file(emb_path: Path) -> tuple[int, list[int]]:
+    """First pass: count total embeddings and batch sizes without keeping data."""
+    print(f"  First pass: counting embeddings in {emb_path}...")
+    batch_sizes = []
+    total = 0
     
     with open(emb_path, "rb") as f:
         batch_num = 0
         while True:
             try:
+                # Load but immediately get shape and discard
                 emb = np.load(f)
                 batch_num += 1
-                total_loaded += len(emb)
-                all_embeddings.append(emb)
-                print(f"  Batch {batch_num}: {len(emb)} embeddings (total: {total_loaded})")
-            except Exception as e:
-                print(f"  Finished loading at batch {batch_num}: {e}")
+                batch_sizes.append(len(emb))
+                total += len(emb)
+                if batch_num % 10 == 0:
+                    print(f"    Scanned {batch_num} batches, {total:,} embeddings...")
+                del emb
+            except Exception:
                 break
     
-    if not all_embeddings:
-        raise ValueError("No embeddings found in file!")
+    print(f"  ✓ Found {len(batch_sizes)} batches, {total:,} total embeddings")
+    return total, batch_sizes
+
+
+def load_embeddings_from_temp(emb_path: Path, num_batches: int, embedding_dim: int) -> np.ndarray:
+    """Load embeddings from temp file with multiple np.save() calls.
     
-    print(f"  Stacking {len(all_embeddings)} batches...")
-    embeddings = np.vstack(all_embeddings)
-    del all_embeddings
-    gc.collect()
+    Memory-efficient: pre-allocates final array, loads batches directly into it.
+    Avoids 2x memory peak from np.vstack().
+    """
+    print(f"Loading embeddings from {emb_path}...")
+    print(f"  Expected batches: {num_batches}, dim: {embedding_dim}")
     
-    print(f"✓ Loaded {len(embeddings)} embeddings, shape: {embeddings.shape}")
+    # First pass: count embeddings
+    total_count, batch_sizes = count_embeddings_in_file(emb_path)
+    
+    # Pre-allocate final array
+    print(f"  Pre-allocating array: {total_count:,} x {embedding_dim} ({total_count * embedding_dim * 4 / 1e9:.1f} GB)...")
+    embeddings = np.empty((total_count, embedding_dim), dtype=np.float32)
+    
+    # Second pass: load directly into pre-allocated array
+    print(f"  Second pass: loading into pre-allocated array...")
+    offset = 0
+    
+    with open(emb_path, "rb") as f:
+        for batch_num, expected_size in enumerate(batch_sizes, 1):
+            emb = np.load(f)
+            embeddings[offset:offset + len(emb)] = emb
+            offset += len(emb)
+            if batch_num % 5 == 0 or batch_num == len(batch_sizes):
+                print(f"    Loaded batch {batch_num}/{len(batch_sizes)} ({offset:,} embeddings)")
+            del emb
+            gc.collect()
+    
+    print(f"✓ Loaded {len(embeddings):,} embeddings, shape: {embeddings.shape}")
     return embeddings
 
 
