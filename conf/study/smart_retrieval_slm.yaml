@@ -102,8 +102,8 @@ rag:
   corpus:
     source: wikimedia/wikipedia
     version: 20231101.en
-    max_docs: 10000  # Reduced for faster iteration (was 200000)
-    wikirank_top_k: 10000
+    max_docs: 1000  # Reduced for faster iteration (was 200000)
+    wikirank_top_k: 1000
     streaming: false
     num_proc: 128
     # doc_batch_size: Number of documents per embedding batch.
@@ -136,7 +136,7 @@ rag:
     - type: dense
       name: dense_bge_large_512
       embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: vllm
+      embedding_backend: vllm_server
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -146,7 +146,7 @@ rag:
     - type: dense
       name: dense_bge_m3_512
       embedding_model: BAAI/bge-m3
-      embedding_backend: vllm
+      embedding_backend: vllm_server
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -156,7 +156,7 @@ rag:
     - type: dense
       name: dense_e5_mistral_512
       embedding_model: intfloat/e5-mistral-7b-instruct
-      embedding_backend: vllm
+      embedding_backend: vllm_server
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
