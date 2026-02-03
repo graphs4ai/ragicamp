@@ -1,17 +1,13 @@
 """Hierarchical index builder.
 
 Builds hierarchical indexes with parent-child chunk relationships.
-Uses pipelined processing to overlap GPU embedding with CPU post-processing.
 """
 
 import gc
 import os
 import pickle
 import tempfile
-from typing import Any, Iterator
-
-# Disable tokenizers parallelism to avoid fork warnings
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
@@ -19,48 +15,11 @@ from ragicamp.utils.artifacts import get_artifact_manager
 logger = get_logger(__name__)
 
 
-def generate_doc_batches(
-    corpus,
-    doc_batch_size: int,
-    Document,
-) -> Iterator[tuple[list, int, bool]]:
-    """Generate batches of documents from corpus.
-
-    Args:
-        corpus: Corpus to load documents from
-        doc_batch_size: Number of documents per batch
-        Document: Document class for creating docs with IDs
-
-    Yields:
-        Tuples of (doc_batch, total_docs_so_far, is_final)
-    """
-    doc_batch = []
-    total_docs = 0
-
-    for doc in corpus.load():
-        doc_with_id = Document(
-            id=f"wiki_{total_docs}",
-            text=doc.text,
-            metadata=doc.metadata,
-        )
-        doc_batch.append(doc_with_id)
-        total_docs += 1
-
-        if len(doc_batch) >= doc_batch_size:
-            yield doc_batch, total_docs, False
-            doc_batch = []
-
-    if doc_batch:
-        yield doc_batch, total_docs, True
-
-
 def build_hierarchical_index(
     retriever_config: dict[str, Any],
     corpus_config: dict[str, Any],
     doc_batch_size: int = 1000,
     embedding_batch_size: int = 64,
-    embedding_backend: str = "vllm",
-    vllm_gpu_memory_fraction: float = 0.9,
 ) -> str:
     """Build a hierarchical index with batched processing.
 
@@ -72,14 +31,13 @@ def build_hierarchical_index(
         corpus_config: Corpus configuration
         doc_batch_size: Documents to process per batch (default 1000)
         embedding_batch_size: Texts to embed per GPU batch (default 64)
-        embedding_backend: 'vllm' or 'sentence_transformers'
-        vllm_gpu_memory_fraction: GPU memory fraction for vLLM (default 0.9)
 
     Returns:
         Retriever name
     """
     import faiss
     import numpy as np
+    from sentence_transformers import SentenceTransformer
 
     from ragicamp.corpus import CorpusConfig, WikipediaCorpus
     from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
@@ -96,8 +54,6 @@ def build_hierarchical_index(
 
     print(f"\n{'=' * 60}")
     print(f"Building hierarchical index: {retriever_name}")
-    print(f"  Embedding model: {embedding_model}")
-    print(f"  Embedding backend: {embedding_backend}")
     print(f"  Parent chunks: {parent_chunk_size}")
     print(f"  Child chunks: {child_chunk_size}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
@@ -131,52 +87,34 @@ def build_hierarchical_index(
         child_chunk_overlap=child_overlap,
     )
 
-    # Initialize encoder based on backend
-    print(f"Loading embedding model ({embedding_backend})...")
+    print("Processing documents in batches...")
 
-    if embedding_backend == "vllm":
-        from ragicamp.models.vllm_embedder import VLLMEmbedder
+    # Try Flash Attention 2 if available, otherwise fall back to default
+    model_kwargs = {}
+    try:
+        import flash_attn  # noqa: F401
 
-        encoder = VLLMEmbedder(
-            model_name=embedding_model,
-            gpu_memory_fraction=vllm_gpu_memory_fraction,
-            enforce_eager=False,
-        )
-        embedding_dim = encoder.get_sentence_embedding_dimension()
-        print(
-            f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
-        )
-    elif embedding_backend == "vllm_server":
-        from ragicamp.models.vllm_embedder import VLLMServerEmbedder
+        model_kwargs["attn_implementation"] = "flash_attention_2"
+        print("  Flash Attention 2 available, enabling")
+    except ImportError:
+        print("  flash-attn not installed, using default attention")
 
-        encoder = VLLMServerEmbedder(
-            model_name=embedding_model,
-            gpu_memory_fraction=vllm_gpu_memory_fraction,
-        )
-        embedding_dim = encoder.get_sentence_embedding_dimension()
-        print(
-            f"  vLLM server started (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
-        )
-    else:
-        from sentence_transformers import SentenceTransformer
+    encoder = SentenceTransformer(
+        embedding_model,
+        trust_remote_code=True,
+        model_kwargs=model_kwargs if model_kwargs else None,
+    )
+    embedding_dim = encoder.get_sentence_embedding_dimension()
 
-        model_kwargs = {}
-        try:
-            import flash_attn  # noqa: F401
+    # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+    try:
+        import torch
 
-            model_kwargs["attn_implementation"] = "flash_attention_2"
-            print("  Flash Attention 2 available, enabling")
-        except ImportError:
-            print("  flash-attn not installed, using default attention")
-
-        encoder = SentenceTransformer(
-            embedding_model,
-            trust_remote_code=True,
-            model_kwargs=model_kwargs if model_kwargs else None,
-        )
-        embedding_dim = encoder.get_sentence_embedding_dimension()
-
-    print("Processing documents in batches (pipelined)...")
+        if hasattr(torch, "compile") and torch.cuda.is_available():
+            encoder = torch.compile(encoder, mode="reduce-overhead")
+            print("  Applied torch.compile() to embedding model")
+    except Exception as e:
+        print(f"  torch.compile() not applied: {e}")
 
     index = faiss.IndexFlatIP(embedding_dim)
 
@@ -196,58 +134,26 @@ def build_hierarchical_index(
     child_file = open(temp_child_file.name, "ab")
     mapping_file = open(temp_mapping_file.name, "ab")
 
+    total_docs = 0
+    doc_batch = []
     parent_count = 0
     child_count = 0
-    total_docs = 0
-
-    # Pipeline for overlapping GPU embedding with CPU post-processing
-    from ragicamp.indexes.builders.pipeline import EmbeddingPipeline, EmbeddingResult
-
-    # Store parent chunks separately (they don't get embedded)
-    pending_parents: list = []
-
-    def process_batch(result: EmbeddingResult) -> None:
-        """Process embeddings: add to index, save chunks."""
-        nonlocal child_count, parent_count
-
-        embeddings = result.embeddings
-        child_chunks = result.chunks
-
-        # Add to index
-        index.add(embeddings.astype("float32"))
-
-        # Save child chunks
-        pickle.dump(child_chunks, child_file)
-        child_file.flush()
-        child_count += len(child_chunks)
-
-        # Save corresponding parent chunks
-        if pending_parents:
-            parents = pending_parents.pop(0)
-            pickle.dump(parents, parent_file)
-            parent_file.flush()
-            parent_count += len(parents)
-
-        print(f"    ✓ Indexed {len(embeddings)} vectors (total: {index.ntotal})")
-        gc.collect()
+    batch_num = 0
 
     try:
-        with EmbeddingPipeline(
-            encoder=encoder,
-            process_fn=process_batch,
-            embedding_batch_size=embedding_batch_size,
-            normalize=True,
-        ) as pipeline:
-            batch_num = 0
+        for doc in corpus.load():
+            doc_with_id = Document(
+                id=f"wiki_{total_docs}",
+                text=doc.text,
+                metadata=doc.metadata,
+            )
+            doc_batch.append(doc_with_id)
+            total_docs += 1
 
-            for doc_batch, docs_so_far, is_final in generate_doc_batches(
-                corpus, doc_batch_size, Document
-            ):
+            if len(doc_batch) >= doc_batch_size:
                 batch_num += 1
                 batch_size = len(doc_batch)
-                total_docs = docs_so_far
-                suffix = " (final)" if is_final else ""
-                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents{suffix}...")
+                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
 
                 print("    Chunking (hierarchical)...", end=" ", flush=True)
                 parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
@@ -255,34 +161,78 @@ def build_hierarchical_index(
                 )
                 print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
 
-                # Save mapping immediately
                 pickle.dump(batch_child_to_parent, mapping_file)
                 mapping_file.flush()
+                del batch_child_to_parent
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    print(f"    Embedding {len(child_texts)} child chunks...")
+                    print(
+                        f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
+                    )
+                    embeddings = encoder.encode(
+                        child_texts, show_progress_bar=True, batch_size=embedding_batch_size
+                    )
+                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    index.add(embeddings.astype("float32"))
 
-                    # Queue parent chunks for saving after embedding completes
-                    pending_parents.append(parent_chunks)
+                    del child_texts, embeddings
+                    gc.collect()
 
-                    # Submit to pipeline - GPU work starts, previous batch processed
-                    pipeline.submit(child_texts, child_chunks)
-                else:
-                    # No children, just save parents
-                    pickle.dump(parent_chunks, parent_file)
-                    parent_file.flush()
-                    parent_count += len(parent_chunks)
+                    pickle.dump(child_chunks, child_file)
+                    child_file.flush()
+                    child_count += len(child_chunks)
+                    del child_chunks
+                    gc.collect()
 
-                print(f"  ✓ Total: {total_docs} docs processed")
-                del doc_batch, batch_child_to_parent
+                pickle.dump(parent_chunks, parent_file)
+                parent_file.flush()
+                parent_count += len(parent_chunks)
+                del parent_chunks
                 gc.collect()
 
-        # Save any remaining parents after pipeline finishes
-        for parents in pending_parents:
-            pickle.dump(parents, parent_file)
-            parent_file.flush()
-            parent_count += len(parents)
+                print(
+                    f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
+                    f"{child_count} children (index: {index.ntotal})"
+                )
+                doc_batch = []
+
+        # Process remaining docs
+        if doc_batch:
+            batch_num += 1
+            batch_size = len(doc_batch)
+            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
+
+            print("    Chunking (hierarchical)...", end=" ", flush=True)
+            parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
+                iter(doc_batch)
+            )
+            print(f"→ {len(parent_chunks)} parents, {len(child_chunks)} children")
+
+            pickle.dump(batch_child_to_parent, mapping_file)
+
+            if child_chunks:
+                child_texts = [c.text for c in child_chunks]
+                print(
+                    f"    Embedding {len(child_texts)} child chunks (batch_size={embedding_batch_size})..."
+                )
+                embeddings = encoder.encode(
+                    child_texts, show_progress_bar=True, batch_size=embedding_batch_size
+                )
+                embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+                index.add(embeddings.astype("float32"))
+                pickle.dump(child_chunks, child_file)
+                child_count += len(child_chunks)
+                del child_texts, embeddings
+
+            pickle.dump(parent_chunks, parent_file)
+            parent_count += len(parent_chunks)
+
+            print(
+                f"  ✓ Total: {total_docs} docs → {parent_count} parents, "
+                f"{child_count} children (index: {index.ntotal})"
+            )
+            del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
 
         print(
             f"✓ Processing complete: {total_docs} docs → {parent_count} parents, {child_count} children"
@@ -350,7 +300,6 @@ def build_hierarchical_index(
         "name": retriever_name,
         "type": "hierarchical",
         "embedding_model": embedding_model,
-        "embedding_backend": embedding_backend,
         "parent_chunk_size": parent_chunk_size,
         "child_chunk_size": child_chunk_size,
         "parent_overlap": parent_overlap,

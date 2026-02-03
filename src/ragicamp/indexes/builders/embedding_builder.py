@@ -2,8 +2,6 @@
 
 Builds dense vector indexes for semantic search.
 Supports both sentence-transformers and vLLM embedding backends.
-
-Uses pipelined processing to overlap GPU embedding with CPU post-processing.
 """
 
 import gc
@@ -11,7 +9,7 @@ import os
 import pickle
 import tempfile
 import time
-from typing import Any, Iterator
+from typing import Any
 
 # Disable tokenizers parallelism to avoid fork warnings
 # Must be set before importing transformers/tokenizers
@@ -25,66 +23,6 @@ logger = get_logger(__name__)
 
 # Maximum document size in characters (larger docs are truncated)
 MAX_DOC_CHARS = 100_000
-
-
-def chunk_documents(
-    doc_batch: list,
-    chunker,
-    Document,
-    tqdm,
-) -> tuple[list, int]:
-    """Chunk a batch of documents.
-
-    Args:
-        doc_batch: List of documents to chunk
-        chunker: DocumentChunker instance
-        Document: Document class for creating truncated docs
-        tqdm: tqdm function for progress bar
-
-    Returns:
-        Tuple of (chunks list, truncated count)
-    """
-    batch_chunks = []
-    truncated = 0
-
-    for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
-        text = doc.text
-        if len(text) > MAX_DOC_CHARS:
-            text = text[:MAX_DOC_CHARS]
-            truncated += 1
-            doc = Document(id=doc.id, text=text, metadata=doc.metadata)
-
-        doc_chunks = list(chunker.strategy.chunk_document(doc))
-        batch_chunks.extend(doc_chunks)
-
-    return batch_chunks, truncated
-
-
-def generate_doc_batches(
-    corpus,
-    doc_batch_size: int,
-) -> Iterator[tuple[list, bool]]:
-    """Generate batches of documents from corpus.
-
-    Args:
-        corpus: Corpus to load documents from
-        doc_batch_size: Number of documents per batch
-
-    Yields:
-        Tuples of (doc_batch, is_final)
-    """
-    doc_batch = []
-
-    for doc in corpus.load():
-        doc_batch.append(doc)
-
-        if len(doc_batch) >= doc_batch_size:
-            yield doc_batch, False
-            doc_batch = []
-
-    # Yield remaining docs as final batch
-    if doc_batch:
-        yield doc_batch, True
 
 
 def build_embedding_index(
@@ -191,18 +129,6 @@ def build_embedding_index(
         print(
             f"  vLLM embedder loaded (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
         )
-    elif embedding_backend == "vllm_server":
-        # vLLM server backend - subprocess server with async HTTP for overlap
-        from ragicamp.models.vllm_embedder import VLLMServerEmbedder
-
-        encoder = VLLMServerEmbedder(
-            model_name=embedding_model,
-            gpu_memory_fraction=vllm_gpu_memory_fraction,
-        )
-        embedding_dim = encoder.get_sentence_embedding_dimension()
-        print(
-            f"  vLLM server started (dim={embedding_dim}, gpu_mem={vllm_gpu_memory_fraction:.0%})"
-        )
     else:
         # sentence_transformers backend - works with any HuggingFace model
         from sentence_transformers import SentenceTransformer
@@ -270,54 +196,36 @@ def build_embedding_index(
 
     total_docs = 0
     total_chunks = 0
+    doc_batch = []
 
-    # Pipeline overlaps GPU embedding with CPU post-processing
-    from ragicamp.indexes.builders.pipeline import EmbeddingPipeline, EmbeddingResult
-
-    def process_batch(result: EmbeddingResult) -> None:
-        """Process embeddings: train index, add vectors, save chunks."""
-        nonlocal is_trained
-
-        embeddings = result.embeddings
-
-        # Train IVF index on first batch if needed
-        if not is_trained and index_type in ("ivf", "ivfpq"):
-            print(f"    Training IVF index on {len(embeddings)} vectors...")
-            index.train(embeddings)
-            is_trained = True
-
-        # Add to index and save (CPU work - overlaps with next GPU batch)
-        index.add(embeddings)
-        pickle.dump(result.chunks, docs_file)
-        docs_file.flush()
-
-        print(f"    ✓ Indexed {len(embeddings)} vectors (total: {index.ntotal})")
-        gc.collect()
-
-    print("Processing documents in batches (pipelined)...")
-
+    print("Processing documents in batches...")
+    batch_num = 0
     try:
-        with EmbeddingPipeline(
-            encoder=encoder,
-            process_fn=process_batch,
-            embedding_batch_size=embedding_batch_size,
-            normalize=True,
-        ) as pipeline:
-            batch_num = 0
+        for doc in corpus.load():
+            doc_batch.append(doc)
 
-            for doc_batch, is_final in generate_doc_batches(corpus, doc_batch_size):
+            if len(doc_batch) >= doc_batch_size:
                 batch_num += 1
                 batch_size = len(doc_batch)
-                suffix = " (final)" if is_final else ""
-                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents{suffix}...")
+                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
 
-                # Chunking phase
+                # Chunking phase (sequential with progress bar)
                 t_chunk = time.time()
-                batch_chunks, truncated = chunk_documents(
-                    doc_batch, chunker, Document, tqdm
-                )
-                chunk_elapsed = time.time() - t_chunk
+                batch_chunks = []
+                truncated = 0
 
+                for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                    # Truncate oversized docs to prevent slow chunking
+                    text = doc.text
+                    if len(text) > MAX_DOC_CHARS:
+                        text = text[:MAX_DOC_CHARS]
+                        truncated += 1
+                        doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+
+                    doc_chunks = list(chunker.strategy.chunk_document(doc))
+                    batch_chunks.extend(doc_chunks)
+
+                chunk_elapsed = time.time() - t_chunk
                 msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
                 if truncated > 0:
                     msg += f" (truncated {truncated})"
@@ -328,15 +236,86 @@ def build_embedding_index(
 
                 if batch_chunks:
                     texts = [c.text for c in batch_chunks]
-                    print(f"    Embedding {len(texts)} chunks...")
 
-                    # Submit to pipeline - GPU work starts, previous batch processed
-                    pipeline.submit(texts, batch_chunks)
+                    # Embedding phase with progress
+                    print(
+                        f"    Embedding {len(texts)} chunks (batch_size={embedding_batch_size})..."
+                    )
+                    embeddings = encoder.encode(
+                        texts, show_progress_bar=True, batch_size=embedding_batch_size
+                    )
+                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    embeddings = embeddings.astype("float32")
 
-                print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks")
-                del doc_batch, batch_chunks, texts
+                    # Train IVF index on first batch if needed
+                    if not is_trained and index_type in ("ivf", "ivfpq"):
+                        print(f"    Training IVF index on {len(embeddings)} vectors...")
+                        index.train(embeddings)
+                        is_trained = True
+
+                    index.add(embeddings)
+
+                    # Save chunks incrementally to disk
+                    pickle.dump(batch_chunks, docs_file)
+                    docs_file.flush()
+
+                print(
+                    f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})"
+                )
+                doc_batch = []
+                del batch_chunks, texts, embeddings
                 gc.collect()
 
+        # Process remaining docs
+        if doc_batch:
+            batch_num += 1
+            batch_size = len(doc_batch)
+            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
+
+            t_chunk = time.time()
+            batch_chunks = []
+            truncated = 0
+
+            for doc in tqdm(doc_batch, desc="    Chunking", leave=False, ncols=80):
+                text = doc.text
+                if len(text) > MAX_DOC_CHARS:
+                    text = text[:MAX_DOC_CHARS]
+                    truncated += 1
+                    doc = Document(id=doc.id, text=text, metadata=doc.metadata)
+                doc_chunks = list(chunker.strategy.chunk_document(doc))
+                batch_chunks.extend(doc_chunks)
+
+            chunk_elapsed = time.time() - t_chunk
+            msg = f"    ✓ {len(batch_chunks)} chunks in {chunk_elapsed:.1f}s ({batch_size / chunk_elapsed:.0f} docs/s)"
+            if truncated > 0:
+                msg += f" (truncated {truncated})"
+            print(msg)
+
+            total_docs += batch_size
+            total_chunks += len(batch_chunks)
+
+            if batch_chunks:
+                texts = [c.text for c in batch_chunks]
+                print(f"    Embedding {len(texts)} chunks...")
+                embeddings = encoder.encode(
+                    texts, show_progress_bar=True, batch_size=embedding_batch_size
+                )
+                embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+                embeddings = embeddings.astype("float32")
+
+                # Train IVF index if not yet trained
+                if not is_trained and index_type in ("ivf", "ivfpq"):
+                    print(f"    Training IVF index on {len(embeddings)} vectors...")
+                    index.train(embeddings)
+                    is_trained = True
+
+                index.add(embeddings)
+                pickle.dump(batch_chunks, docs_file)
+                docs_file.flush()
+
+            print(f"  ✓ Total: {total_docs} docs → {total_chunks} chunks (index: {index.ntotal})")
+            del doc_batch, batch_chunks, texts, embeddings
+            gc.collect()
     finally:
         docs_file.close()
 

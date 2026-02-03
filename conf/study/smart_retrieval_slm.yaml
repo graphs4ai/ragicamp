@@ -102,21 +102,21 @@ rag:
   corpus:
     source: wikimedia/wikipedia
     version: 20231101.en
-    max_docs: 1000  # Reduced for faster iteration (was 200000)
-    wikirank_top_k: 1000
+    max_docs: 10000  # Reduced for faster iteration (was 200000)
+    wikirank_top_k: 10000
     streaming: false
     num_proc: 128
     # doc_batch_size: Number of documents per embedding batch.
     # With ~65 chunks/doc average, 5000 docs = ~325k chunks per vLLM call.
     # Larger values can cause vLLM to hang when extracting embeddings.
-    doc_batch_size: 100
+    doc_batch_size: 5000
     embedding_batch_size: 4096
   
   # --------------------------------------------------------------------------
   # Embedding Backend Configuration
   # --------------------------------------------------------------------------
   embedding:
-    backend: vllm_server  # Use server mode for async overlap
+    backend: vllm
     vllm_gpu_memory_fraction: 0.9
     vllm_enforce_eager: false
   
@@ -136,7 +136,7 @@ rag:
     - type: dense
       name: dense_bge_large_512
       embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: vllm_server
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -146,7 +146,7 @@ rag:
     - type: dense
       name: dense_bge_m3_512
       embedding_model: BAAI/bge-m3
-      embedding_backend: vllm_server
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -156,7 +156,7 @@ rag:
     - type: dense
       name: dense_e5_mistral_512
       embedding_model: intfloat/e5-mistral-7b-instruct
-      embedding_backend: vllm_server
+      embedding_backend: vllm
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive
@@ -204,7 +204,6 @@ rag:
     - type: hierarchical
       name: hierarchical_bge_large
       embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: vllm_server
       parent_chunk_size: 1024
       child_chunk_size: 256
       index_type: hnsw
