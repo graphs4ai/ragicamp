@@ -23,6 +23,7 @@ import argparse
 import gc
 import pickle
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import faiss
@@ -114,19 +115,24 @@ def main():
     if not chunks_path.exists():
         raise FileNotFoundError(f"Chunks file not found: {chunks_path}")
     
-    # Load embeddings
+    # Load embeddings and chunks in parallel (I/O bound, so threading works)
+    print("Loading embeddings and chunks in parallel...")
     t_start = time.time()
-    embeddings = load_embeddings_from_temp(emb_path, args.num_batches, args.embedding_dim)
-    print(f"  Load time: {time.time() - t_start:.1f}s\n")
+    
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        emb_future = executor.submit(
+            load_embeddings_from_temp, emb_path, args.num_batches, args.embedding_dim
+        )
+        chunks_future = executor.submit(load_chunks_from_temp, chunks_path)
+        
+        embeddings = emb_future.result()
+        chunks = chunks_future.result()
+    
+    print(f"✓ Parallel load complete in {time.time() - t_start:.1f}s\n")
     
     # Verify dimension
     if embeddings.shape[1] != args.embedding_dim:
         raise ValueError(f"Dimension mismatch: got {embeddings.shape[1]}, expected {args.embedding_dim}")
-    
-    # Load chunks
-    t_start = time.time()
-    chunks = load_chunks_from_temp(chunks_path)
-    print(f"  Load time: {time.time() - t_start:.1f}s\n")
     
     # Verify count match
     if len(embeddings) != len(chunks):
@@ -146,6 +152,13 @@ def main():
     # Create FAISS HNSW index
     print(f"Creating FAISS HNSW index (dim={args.embedding_dim})...")
     t_start = time.time()
+    
+    # Use all available CPU cores for FAISS
+    import os
+    num_threads = os.cpu_count() or 8
+    faiss.omp_set_num_threads(num_threads)
+    print(f"  Using {num_threads} threads for FAISS")
+    
     index = faiss.IndexHNSWFlat(args.embedding_dim, 32)
     index.hnsw.efConstruction = 200
     print(f"  Index created, adding {len(embeddings)} vectors...")
