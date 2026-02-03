@@ -79,13 +79,14 @@ def run_study(
     limit: Optional[int] = None,
     force: bool = False,
     experiment_filter: Optional[str] = None,
+    sampling_override: Optional[dict[str, Any]] = None,
 ) -> None:
     """Run a study from a configuration dictionary.
 
     This is the main orchestration function that:
     1. Validates the config
     2. Ensures all required indexes exist
-    3. Builds the experiment matrix
+    3. Builds the experiment matrix (with optional sampling)
     4. Runs each experiment
 
     Args:
@@ -96,6 +97,8 @@ def run_study(
         limit: Optional limit on examples per experiment
         force: Force re-run of completed/failed experiments
         experiment_filter: Optional filter pattern for experiment names
+        sampling_override: Optional sampling config to override YAML settings
+            Example: {"mode": "random", "n_experiments": 50, "seed": 42}
     """
     # Validate
     warnings = validate_config(config)
@@ -135,8 +138,8 @@ def run_study(
         retriever_configs = rag_config.get("retrievers", [])
         ensure_indexes_exist(retriever_configs, corpus_config)
 
-    # Build experiment specs
-    specs = build_specs(config)
+    # Build experiment specs (with optional sampling)
+    specs = build_specs(config, sampling_override=sampling_override)
 
     # Filter if requested
     if experiment_filter:

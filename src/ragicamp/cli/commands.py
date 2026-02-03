@@ -19,11 +19,26 @@ def cmd_run(args: argparse.Namespace) -> int:
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
+    # Build sampling override from CLI args
+    sampling_override = None
+    if args.sample:
+        sampling_override = {
+            "mode": args.sample_mode,
+            "n_experiments": args.sample,
+            "seed": args.sample_seed,
+        }
+        if args.sample_mode == "stratified":
+            sampling_override["stratify_by"] = [s.strip() for s in args.stratify_by.split(",")]
+        print(f"🎲 Sampling mode: {args.sample_mode}, n={args.sample}")
+        if args.sample_seed:
+            print(f"   Seed: {args.sample_seed}")
+
     run_study(
         config,
         dry_run=args.dry_run,
         skip_existing=args.skip_existing,
         validate_only=args.validate,
+        sampling_override=sampling_override,
     )
     return 0
 

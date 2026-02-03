@@ -22,14 +22,24 @@ def build_specs(
 ) -> list[ExperimentSpec]:
     """Build experiment specs from YAML config.
 
-    Generates the full experiment matrix by combining:
-    - Models x Datasets x Prompts x Quantizations (for direct)
-    - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
+    Generates experiment matrix with support for three modes:
 
-    Also supports singleton experiments via the 'experiments' list for hypothesis-driven research.
+    1. Grid Search (default): Full Cartesian product of all dimensions
+       - Models x Datasets x Prompts x Quantizations (for direct)
+       - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
+
+    2. Random Search: Sample N random combinations from the grid
+       - Configure via rag.sampling or direct.sampling in YAML
+       - Supports 'random' mode (uniform) or 'stratified' mode (ensure coverage)
+
+    3. Singleton: Explicit experiment definitions via 'experiments' list
+       - Always included (not affected by sampling)
+       - Use for hypothesis-driven research or agent-based strategies
 
     Args:
         config: Study configuration dict (loaded from YAML)
+        sampling_override: Optional dict to override sampling config
+            Example: {"mode": "random", "n_experiments": 50, "seed": 42}
 
     Returns:
         List of ExperimentSpec objects for all experiments
@@ -39,6 +49,9 @@ def build_specs(
         ...     config = yaml.safe_load(f)
         >>> specs = build_specs(config)
         >>> print(f"Generated {len(specs)} experiments")
+
+        # With random sampling override:
+        >>> specs = build_specs(config, sampling_override={"mode": "random", "n_experiments": 50})
     """
     specs: list[ExperimentSpec] = []
 
@@ -48,17 +61,31 @@ def build_specs(
     min_batch_size = config.get("min_batch_size", 1)
     metrics = config.get("metrics", ["f1", "exact_match"])
 
-    # Build direct experiment specs (grid search)
+    # Build direct experiment specs (grid search, optionally sampled)
     direct = config.get("direct", {})
     if direct.get("enabled"):
-        specs.extend(_build_direct_specs(direct, datasets, batch_size, min_batch_size, metrics))
+        direct_specs = _build_direct_specs(direct, datasets, batch_size, min_batch_size, metrics)
 
-    # Build RAG experiment specs (grid search)
+        # Apply sampling if configured
+        sampling_config = sampling_override or direct.get("sampling")
+        if sampling_config:
+            direct_specs = _apply_sampling(direct_specs, sampling_config, "direct")
+
+        specs.extend(direct_specs)
+
+    # Build RAG experiment specs (grid search, optionally sampled)
     rag = config.get("rag", {})
     if rag.get("enabled"):
-        specs.extend(_build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics))
+        rag_specs = _build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics)
 
-    # Build singleton experiments (hypothesis-driven)
+        # Apply sampling if configured
+        sampling_config = sampling_override or rag.get("sampling")
+        if sampling_config:
+            rag_specs = _apply_sampling(rag_specs, sampling_config, "rag")
+
+        specs.extend(rag_specs)
+
+    # Build singleton experiments (hypothesis-driven) - never sampled
     experiments = config.get("experiments", [])
     if experiments:
         specs.extend(
@@ -66,6 +93,106 @@ def build_specs(
         )
 
     return specs
+
+
+def _apply_sampling(
+    specs: list[ExperimentSpec],
+    sampling_config: dict[str, Any],
+    spec_type: str,
+) -> list[ExperimentSpec]:
+    """Apply sampling to reduce experiment count.
+
+    Args:
+        specs: Full list of experiment specs from grid search
+        sampling_config: Sampling configuration dict with:
+            - mode: 'random' (uniform) or 'stratified' (ensure coverage)
+            - n_experiments: Number of experiments to sample
+            - seed: Random seed for reproducibility
+            - stratify_by: List of dimensions to stratify (for stratified mode)
+        spec_type: Type of specs ('direct' or 'rag') for logging
+
+    Returns:
+        Sampled list of experiment specs
+    """
+    mode = sampling_config.get("mode", "random")
+    n_experiments = sampling_config.get("n_experiments", len(specs))
+    seed = sampling_config.get("seed")
+
+    if n_experiments >= len(specs):
+        return specs
+
+    if seed is not None:
+        random.seed(seed)
+
+    if mode == "random":
+        # Simple random sampling
+        sampled = random.sample(specs, n_experiments)
+        print(f"🎲 [{spec_type}] Random sampling: {len(sampled)}/{len(specs)} experiments")
+        return sampled
+
+    elif mode == "stratified":
+        # Stratified sampling: ensure at least one experiment per stratum
+        stratify_by = sampling_config.get("stratify_by", ["model", "retriever"])
+        sampled = _stratified_sample(specs, n_experiments, stratify_by)
+        print(
+            f"🎯 [{spec_type}] Stratified sampling by {stratify_by}: {len(sampled)}/{len(specs)} experiments"
+        )
+        return sampled
+
+    else:
+        print(f"⚠️  Unknown sampling mode '{mode}', using all experiments")
+        return specs
+
+
+def _stratified_sample(
+    specs: list[ExperimentSpec],
+    n_experiments: int,
+    stratify_by: list[str],
+) -> list[ExperimentSpec]:
+    """Stratified sampling ensuring coverage across specified dimensions.
+
+    Algorithm:
+    1. Group specs by unique combinations of stratify_by dimensions
+    2. Sample at least 1 from each group (if budget allows)
+    3. Fill remaining budget with random samples from all specs
+
+    Args:
+        specs: Full list of experiment specs
+        n_experiments: Target number of experiments
+        stratify_by: Dimensions to stratify by (e.g., ['model', 'retriever'])
+
+    Returns:
+        Stratified sample of specs
+    """
+    from collections import defaultdict
+
+    # Group specs by stratification key
+    groups: dict[tuple, list[ExperimentSpec]] = defaultdict(list)
+    for spec in specs:
+        key = tuple(getattr(spec, dim, None) for dim in stratify_by)
+        groups[key].append(spec)
+
+    sampled: list[ExperimentSpec] = []
+    sampled_set: set[str] = set()
+
+    # Phase 1: Sample at least 1 from each group
+    for group_specs in groups.values():
+        if len(sampled) >= n_experiments:
+            break
+        choice = random.choice(group_specs)
+        if choice.name not in sampled_set:
+            sampled.append(choice)
+            sampled_set.add(choice.name)
+
+    # Phase 2: Fill remaining budget with random samples
+    remaining_budget = n_experiments - len(sampled)
+    if remaining_budget > 0:
+        remaining_specs = [s for s in specs if s.name not in sampled_set]
+        if remaining_specs:
+            additional = random.sample(remaining_specs, min(remaining_budget, len(remaining_specs)))
+            sampled.extend(additional)
+
+    return sampled
 
 
 def _build_direct_specs(
@@ -115,14 +242,38 @@ def _build_rag_specs(
     min_batch_size: int,
     metrics: list[str],
 ) -> list[ExperimentSpec]:
-    """Build specs for RAG experiments."""
+    """Build specs for RAG experiments.
+
+    Supports two ways to specify retrievers for grid search:
+    1. retriever_names: List of retriever names to use (references full configs in 'retrievers')
+    2. retrievers: List of retriever configs (legacy, uses 'name' field from each config)
+
+    The 'retrievers' list is always used for index building, but 'retriever_names' takes
+    precedence for grid search dimension when specified.
+    """
     specs: list[ExperimentSpec] = []
 
     models = rag_config.get("models", [])
-    retrievers = rag_config.get("retrievers", [])
     top_k_values = rag_config.get("top_k_values", [5])
     prompts = rag_config.get("prompts", ["default"])
     quantizations = rag_config.get("quantization", ["4bit"])
+
+    # Get retriever names for grid search
+    # Priority: retriever_names > extracting names from retrievers list
+    retriever_names = rag_config.get("retriever_names")
+    if retriever_names is None:
+        # Fall back to extracting names from retrievers list
+        retrievers = rag_config.get("retrievers", [])
+        retriever_names = []
+        for ret_config in retrievers:
+            if isinstance(ret_config, dict):
+                retriever_names.append(ret_config["name"])
+            else:
+                retriever_names.append(ret_config)
+
+    # If no retrievers specified, return empty (indexes only, no experiments)
+    if not retriever_names or not models:
+        return specs
 
     # Fetch-K configuration: docs to retrieve before reranking
     # Can be explicit value or multiplier of top_k
@@ -134,18 +285,21 @@ def _build_rag_specs(
     if not query_transforms:
         query_transforms = ["none"]
 
-    # Reranker configs
-    reranker_cfgs = rag_config.get("reranker", {}).get(
-        "configs", [{"enabled": False, "name": "none"}]
-    )
+    # Reranker configs - support both old and new format
+    reranker_config = rag_config.get("reranker", {})
+    if isinstance(reranker_config, dict):
+        reranker_cfgs = reranker_config.get("configs", [{"enabled": False, "name": "none"}])
+        # Also support simple enabled/model format (legacy)
+        if not reranker_cfgs and reranker_config.get("enabled"):
+            reranker_cfgs = [{"enabled": True, "name": reranker_config.get("model", "bge")}]
+    else:
+        reranker_cfgs = [{"enabled": False, "name": "none"}]
+
     if not reranker_cfgs:
         reranker_cfgs = [{"enabled": False, "name": "none"}]
 
     for model in models:
-        for ret_config in retrievers:
-            # Handle both string and dict retriever configs
-            ret_name = ret_config["name"] if isinstance(ret_config, dict) else ret_config
-
+        for ret_name in retriever_names:
             for top_k in top_k_values:
                 for prompt in prompts:
                     for quant in quantizations:

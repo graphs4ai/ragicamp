@@ -62,6 +62,32 @@ def create_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dry-run", action="store_true", help="Preview only")
     run_parser.add_argument("--skip-existing", action="store_true", help="Skip completed")
     run_parser.add_argument("--validate", action="store_true", help="Validate config only")
+    # Random search options (override config)
+    run_parser.add_argument(
+        "--sample",
+        "-s",
+        type=int,
+        metavar="N",
+        help="Random sample N experiments from grid (enables random search)",
+    )
+    run_parser.add_argument(
+        "--sample-mode",
+        choices=["random", "stratified"],
+        default="random",
+        help="Sampling mode: random (uniform) or stratified (ensure coverage)",
+    )
+    run_parser.add_argument(
+        "--sample-seed",
+        type=int,
+        default=None,
+        help="Random seed for reproducible sampling",
+    )
+    run_parser.add_argument(
+        "--stratify-by",
+        type=str,
+        default="model,retriever",
+        help="Dimensions to stratify by (comma-separated, for stratified mode)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # Index command
