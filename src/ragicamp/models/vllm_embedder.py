@@ -32,16 +32,16 @@ class VLLMEmbedder:
     def __init__(
         self,
         model_name: str,
-        gpu_memory_fraction: float = 0.5,
-        enforce_eager: bool = True,
+        gpu_memory_fraction: float = 0.9,
+        enforce_eager: bool = False,
         trust_remote_code: bool = True,
     ):
         """Initialize vLLM embedder.
 
         Args:
             model_name: HuggingFace model name (must be vLLM-compatible)
-            gpu_memory_fraction: Fraction of GPU memory to use
-            enforce_eager: Disable CUDA graphs (more stable for embeddings)
+            gpu_memory_fraction: Fraction of GPU memory to use (0.9 for index building)
+            enforce_eager: Use eager mode (False = use CUDA graphs for speed)
             trust_remote_code: Trust remote code in model
         """
         self.model_name = model_name

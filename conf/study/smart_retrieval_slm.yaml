@@ -118,10 +118,10 @@ rag:
   #
   # See: https://docs.vllm.ai/en/latest/getting_started/examples/embedding.html
   embedding:
-    backend: sentence_transformers  # or 'vllm'
+    backend: vllm  # 'vllm' (faster) or 'sentence_transformers' (more compatible)
     # vLLM-specific settings (only used when backend: vllm)
-    vllm_gpu_memory_fraction: 0.5  # Share GPU with generation model
-    vllm_enforce_eager: true       # Disable CUDA graphs for embedding
+    vllm_gpu_memory_fraction: 0.9  # Index building runs before generation
+    vllm_enforce_eager: false      # Use CUDA graphs for better performance
   
   # --------------------------------------------------------------------------
   # Retriever Definitions (for index building)

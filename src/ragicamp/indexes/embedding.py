@@ -154,8 +154,8 @@ class EmbeddingIndex(Index):
         use_gpu: Optional[bool] = None,
         nlist: int = None,
         nprobe: int = None,
-        embedding_backend: str = "sentence_transformers",
-        vllm_gpu_memory_fraction: float = 0.5,
+        embedding_backend: str = "vllm",
+        vllm_gpu_memory_fraction: float = 0.9,
         **kwargs: Any,
     ):
         """Initialize embedding index.
@@ -221,7 +221,7 @@ class EmbeddingIndex(Index):
         self._encoder = VLLMEmbedder(
             model_name=self.embedding_model_name,
             gpu_memory_fraction=self.vllm_gpu_memory_fraction,
-            enforce_eager=True,
+            enforce_eager=False,  # Use CUDA graphs for speed
         )
         self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
         logger.info("vLLM embedder loaded (dim=%d)", self._embedding_dim)
