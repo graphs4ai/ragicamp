@@ -47,6 +47,9 @@ class EmbeddingPipeline:
 
     While GPU encodes batch N, CPU processes results from batch N-1.
     This hides the CPU latency (normalize, index.add, save) behind GPU work.
+
+    Uses 2 workers so batch N+1 can start immediately while batch N finishes,
+    allowing true overlap between GPU encoding and CPU post-processing.
     """
 
     def __init__(
@@ -69,23 +72,27 @@ class EmbeddingPipeline:
         self.embedding_batch_size = embedding_batch_size
         self.normalize = normalize
 
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed")
+        # 2 workers: allows batch N+1 to start encoding while we process batch N
+        # vLLM internally serializes GPU access, but worker 2 can prepare while worker 1 finishes
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="embed")
         self._pending: tuple[Future, list[Any], int] | None = None
         self._batch_num = 0
 
     def _encode(self, texts: list[str]) -> np.ndarray:
-        """Encode texts to embeddings (runs in background thread)."""
-        embeddings = self.encoder.encode(
+        """Encode texts to embeddings (runs in background thread).
+
+        Note: Normalization is done in main thread to free GPU thread faster.
+        """
+        return self.encoder.encode(
             texts,
             show_progress_bar=True,
             batch_size=self.embedding_batch_size,
         )
 
-        if self.normalize:
-            # In-place normalization
-            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            np.divide(embeddings, norms, out=embeddings)
-
+    def _normalize(self, embeddings: np.ndarray) -> np.ndarray:
+        """L2 normalize embeddings in-place."""
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        np.divide(embeddings, norms, out=embeddings)
         return embeddings
 
     def submit(self, texts: list[str], chunks: list[Any]) -> None:
@@ -99,13 +106,17 @@ class EmbeddingPipeline:
         """
         self._batch_num += 1
 
-        # Submit current batch to GPU (background thread)
+        # Submit current batch to GPU (background thread starts immediately)
         future = self._executor.submit(self._encode, texts)
 
         # While GPU works on current batch, process previous batch
         if self._pending is not None:
             prev_future, prev_chunks, prev_batch_num = self._pending
             embeddings = prev_future.result()  # Wait for previous GPU work
+
+            # Normalize in main thread (GPU thread is now free for next batch)
+            if self.normalize:
+                embeddings = self._normalize(embeddings)
 
             result = EmbeddingResult(
                 embeddings=embeddings,
@@ -122,6 +133,9 @@ class EmbeddingPipeline:
         if self._pending is not None:
             future, chunks, batch_num = self._pending
             embeddings = future.result()
+
+            if self.normalize:
+                embeddings = self._normalize(embeddings)
 
             result = EmbeddingResult(
                 embeddings=embeddings,
