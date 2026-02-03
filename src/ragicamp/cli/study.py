@@ -184,9 +184,7 @@ def run_study(
             print(f"📊 Found {len(exclude_names)} completed experiments in {out}")
 
     # Build experiment specs (with optional sampling, excluding completed)
-    specs = build_specs(
-        config, sampling_override=sampling_override, exclude_names=exclude_names
-    )
+    specs = build_specs(config, sampling_override=sampling_override, exclude_names=exclude_names)
 
     # Filter if requested
     if experiment_filter:

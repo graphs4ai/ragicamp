@@ -24,16 +24,16 @@ def build_specs(
     """Build experiment specs from YAML config.
 
     Generates experiment matrix with support for three modes:
-    
+
     1. Grid Search (default): Full Cartesian product of all dimensions
        - Models x Datasets x Prompts x Quantizations (for direct)
        - Models x Retrievers x TopK x QueryTransforms x Rerankers x Prompts x Datasets (for RAG)
-    
+
     2. Random Search: Sample N random combinations from the RAG grid
        - Configure via rag.sampling in YAML or --sample CLI flag
        - Supports 'random' mode (uniform) or 'stratified' mode (ensure coverage)
        - Only affects RAG experiments, not baselines or singletons
-    
+
     3. Singleton: Explicit experiment definitions via 'experiments' list
        - Always included (not affected by sampling)
        - Use for hypothesis-driven research or agent-based strategies
@@ -57,7 +57,7 @@ def build_specs(
         ...     config = yaml.safe_load(f)
         >>> specs = build_specs(config)
         >>> print(f"Generated {len(specs)} experiments")
-        
+
         # With random sampling (only affects RAG, baselines always included):
         >>> specs = build_specs(config, sampling_override={"mode": "random", "n_experiments": 50})
     """
@@ -133,7 +133,9 @@ def _apply_sampling(
         specs = [s for s in specs if s.name not in exclude_names]
         excluded_count = original_count - len(specs)
         if excluded_count > 0:
-            print(f"📋 [{spec_type}] Excluding {excluded_count} already-completed experiments from sampling pool")
+            print(
+                f"📋 [{spec_type}] Excluding {excluded_count} already-completed experiments from sampling pool"
+            )
 
     if n_experiments >= len(specs):
         return specs
@@ -411,7 +413,7 @@ def _build_singleton_specs(
         default_model = models_config[0]  # Use first model as default
     else:
         default_model = None
-    
+
     default_datasets = config.get("datasets", ["nq"])
     default_prompt = "concise"
     default_quant = "none"
