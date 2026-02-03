@@ -85,15 +85,16 @@ rag:
   # --------------------------------------------------------------------------
   # Sampling Mode (Random Search)
   # --------------------------------------------------------------------------
-  # Uncomment to enable random search instead of full grid search.
-  # This samples N random combinations from the full experiment space.
-  #
-  # sampling:
-  #   mode: random          # 'random' or 'stratified'
-  #   n_experiments: 50     # Number of experiments to sample
-  #   seed: 42              # Random seed for reproducibility
-  #   # Stratified mode ensures at least one experiment per:
-  #   # stratify_by: [model, retriever]  # Dimensions to stratify
+  # Sample ~260 RAG experiments from the grid to keep total around 300.
+  # Fixed experiments (always included):
+  #   - Direct baselines: 9 (3 models × 3 datasets)
+  #   - Singleton experiments: 30 (iterative_rag, self_rag, premium × 3 datasets)
+  # Total: 9 + 30 + 260 = ~300 experiments
+  sampling:
+    mode: stratified        # Ensures coverage across all models × retrievers
+    n_experiments: 260      # Sample from 1,215 RAG grid combinations
+    seed: 42                # Reproducible sampling
+    stratify_by: [model, retriever]  # At least one experiment per model×retriever
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)
