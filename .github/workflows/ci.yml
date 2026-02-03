@@ -45,40 +45,10 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - run: uv sync
-      - name: Check code quality (ruff format + lint)
+      - name: Check formatting and linting
         run: |
-          echo "🔍 Checking formatting..."
-          uv run ruff format --check src/ tests/
-          echo "🔍 Checking linting..."
-          uv run ruff check src/ tests/
-          echo "✅ Code quality checks passed!"
-
-  import-check:
-    name: Import Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-      - run: uv sync
-      - name: Test core imports
-        run: |
-          uv run python -c "
-          print('Testing imports...')
-          from ragicamp.corpus import DocumentChunker, ChunkConfig
-          print('✓ ragicamp.corpus')
-          from ragicamp.retrievers import DenseRetriever
-          print('✓ ragicamp.retrievers')
-          from ragicamp.cli import main
-          print('✓ ragicamp.cli')
-          print('✅ All imports successful!')
-          "
+          uv run ruff format --check src/ tests/ scripts/
+          uv run ruff check src/ tests/ scripts/
 
   # ============================================================================
   # TESTS
@@ -87,7 +57,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: [code-quality, import-check]
+    needs: [code-quality]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -99,15 +69,23 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - run: uv sync --extra dev
-      - name: Run tests
+      - name: Test imports
         run: |
-          uv run pytest tests/ -v --tb=short -x || echo "Tests completed with some failures"
-      - name: Upload test results
+          uv run python -c "
+          from ragicamp.corpus import DocumentChunker, ChunkConfig
+          from ragicamp.retrievers import DenseRetriever
+          from ragicamp.cli import main
+          print('✅ Core imports OK')
+          "
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/ -v --tb=short --cov=src/ragicamp --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: test-results.xml
+          name: coverage-report
+          path: coverage.xml
         continue-on-error: true
 
   # ============================================================================
@@ -117,14 +95,13 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [secrets-scan, code-quality, import-check, test]
+    needs: [secrets-scan, code-quality, test]
     if: always()
     steps:
       - name: Check results
         run: |
-          echo "Results: secrets=${{ needs.secrets-scan.result }} code-quality=${{ needs.code-quality.result }} imports=${{ needs.import-check.result }} tests=${{ needs.test.result }}"
+          echo "Results: secrets=${{ needs.secrets-scan.result }} quality=${{ needs.code-quality.result }} tests=${{ needs.test.result }}"
           if [ "${{ needs.secrets-scan.result }}" = "failure" ]; then exit 1; fi
           if [ "${{ needs.code-quality.result }}" = "failure" ]; then exit 1; fi
-          if [ "${{ needs.import-check.result }}" = "failure" ]; then exit 1; fi
-          # Tests are informational for now
+          if [ "${{ needs.test.result }}" = "failure" ]; then exit 1; fi
           echo "✅ CI passed"
