@@ -294,8 +294,23 @@ rag:
   # Fetch K multiplier (documents to retrieve before reranking)
   fetch_k_multiplier: 5  # fetch_k = top_k * 5 when reranking
   
+  # --------------------------------------------------------------------------
+  # Prompt Strategies
+  # --------------------------------------------------------------------------
+  # Testing different prompt formats to find what works best with SLMs
+  #
+  # Available prompts:
+  # - concise: Minimal instructions, just answer (baseline)
+  # - structured: Clear ### delimiters, explicit sections
+  # - extractive: Strict context-only, no model knowledge
+  # - cot: Chain-of-thought reasoning (good for HotpotQA)
+  # - cited: Answers with passage citations [1], [2]
+  # - fewshot_3: 3 in-context examples
+  #
   prompts:
-    - concise
+    - concise       # Baseline - minimal prompt
+    - structured    # Clear delimiters, better for instruction-tuned models
+    - extractive    # Strict extraction, reduces hallucination
   
   quantization:
     - none

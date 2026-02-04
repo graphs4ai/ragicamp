@@ -3,9 +3,16 @@
 This module provides a centralized way to build prompts for different
 experiment types (direct, RAG) with support for few-shot examples.
 
+Prompt Types:
+- concise: Short, direct answers (baseline)
+- structured: Clear delimiters, explicit instructions
+- extractive: Strict extraction from context only
+- cot: Chain-of-thought reasoning
+- cited: Answers with passage citations
+
 Usage:
-    builder = PromptBuilder.from_config("fewshot", dataset="hotpotqa")
-    prompt = builder.build_direct(query="What is AI?")
+    builder = PromptBuilder.from_config("structured", dataset="hotpotqa")
+    prompt = builder.build_rag(query="What is AI?", context="...")
 """
 
 from dataclasses import dataclass, field
@@ -31,6 +38,12 @@ class PromptConfig:
     stop_instruction: str = ""
     knowledge_instruction: str = ""
     examples: list[FewShotExample] = field(default_factory=list)
+    # New fields for advanced prompt types
+    system_instruction: str = ""
+    use_delimiters: bool = False
+    include_reasoning: bool = False
+    require_citation: bool = False
+    strict_extraction: bool = False
 
 
 class PromptBuilder:
@@ -41,6 +54,14 @@ class PromptBuilder:
     2. Examples in a labeled section (if fewshot)
     3. Clear transition to the actual question
     4. Consistent formatting throughout
+    5. Last instruction = most important (LLMs follow it better)
+    
+    Prompt types:
+    - concise: Minimal, just answer
+    - structured: Clear delimiters, explicit format
+    - extractive: Only from context, no model knowledge
+    - cot: Chain-of-thought for complex questions
+    - cited: Answers with [1], [2] citations
     """
 
     _fewshot_cache: Optional[dict[str, Any]] = None
@@ -64,7 +85,10 @@ class PromptBuilder:
         parts = []
 
         # Task context - brief description (no formatting instructions here)
-        parts.append("Answer the question using your knowledge.")
+        if self.config.system_instruction:
+            parts.append(self.config.system_instruction)
+        else:
+            parts.append("Answer the question using your knowledge.")
 
         # Examples section (if any)
         if self.config.examples:
@@ -87,31 +111,27 @@ class PromptBuilder:
 
     def build_rag(self, query: str, context: str) -> str:
         """Build prompt for RAG (with retrieved context).
-
-        Structure:
-            [Task context - what you're doing]
-
-            [Examples section - if fewshot]
-
-            Retrieved Passages:
-            {retrieved documents}
-
-            Question: {query}
-
-            [Format instruction - at END for better following]
-            Answer:
-
-        Key insight: LLMs follow the LAST instruction more reliably.
-        So we put format constraints (reply with just the answer) at the END.
-
-        RAG is ADDITIVE: passages augment model knowledge, not replace it.
-        If passages don't have the answer, model can still use its own knowledge.
+        
+        Dispatches to specialized builders based on config.
         """
+        if self.config.use_delimiters:
+            return self._build_rag_structured(query, context)
+        if self.config.include_reasoning:
+            return self._build_rag_cot(query, context)
+        if self.config.require_citation:
+            return self._build_rag_cited(query, context)
+        if self.config.strict_extraction:
+            return self._build_rag_extractive(query, context)
+        return self._build_rag_default(query, context)
+
+    def _build_rag_default(self, query: str, context: str) -> str:
+        """Default RAG prompt - simple and effective."""
         parts = []
 
-        # Task context - passages are helpful context, not exclusive source
+        # Task context
         task = "Answer the question using the retrieved passages below."
-        task += " If the passages don't contain the answer, you may use your own knowledge."
+        if not self.config.strict_extraction:
+            task += " If the passages don't contain the answer, you may use your own knowledge."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
         parts.append(task)
@@ -126,7 +146,7 @@ class PromptBuilder:
         # The actual question
         parts.append(f"Question: {query}")
 
-        # Format instructions at END - LLMs follow last instruction better
+        # Format instructions at END
         format_instruction = []
         if self.config.style:
             format_instruction.append(self.config.style)
@@ -137,6 +157,80 @@ class PromptBuilder:
         parts.append(" ".join(format_instruction) + "\nAnswer:")
 
         return "\n\n".join(parts)
+
+    def _build_rag_structured(self, query: str, context: str) -> str:
+        """Structured prompt with clear delimiters (works well with instruction-tuned models)."""
+        prompt = f"""### Instruction
+You are a helpful assistant that answers questions based on the provided context.
+Read the context carefully and give a precise, concise answer.
+
+### Context
+{context}
+
+### Question
+{query}
+
+### Requirements
+- Answer based on the context above
+- Be concise - give only the answer, no explanations
+- If the answer is not in the context, say "Unknown"
+
+### Answer
+"""
+        return prompt
+
+    def _build_rag_extractive(self, query: str, context: str) -> str:
+        """Strict extractive prompt - answer MUST come from context only."""
+        prompt = f"""You are an extractive QA system. Your answer MUST be extracted directly from the given passages.
+Do NOT use any knowledge outside of these passages.
+
+---PASSAGES---
+{context}
+---END PASSAGES---
+
+Question: {query}
+
+Instructions:
+1. Find the exact answer in the passages above
+2. Copy the answer exactly as it appears
+3. If the answer is NOT in the passages, respond with "Unknown"
+4. Do NOT make up information or use external knowledge
+
+Answer:"""
+        return prompt
+
+    def _build_rag_cot(self, query: str, context: str) -> str:
+        """Chain-of-thought prompt for complex reasoning (good for HotpotQA)."""
+        prompt = f"""Answer the question by reasoning step-by-step through the provided passages.
+
+Passages:
+{context}
+
+Question: {query}
+
+Let's think through this step by step:
+1. First, identify relevant information in the passages
+2. Then, connect the facts to answer the question
+3. Finally, give a concise final answer
+
+Reasoning:"""
+        return prompt
+
+    def _build_rag_cited(self, query: str, context: str) -> str:
+        """Citation-aware prompt - answers reference passage numbers."""
+        prompt = f"""Answer the question using the numbered passages below. Include citation numbers in your answer.
+
+{context}
+
+Question: {query}
+
+Instructions:
+- Use [1], [2], etc. to cite which passage(s) support your answer
+- Be concise but include the citation
+- If no passage contains the answer, say "Unknown"
+
+Answer:"""
+        return prompt
 
     def _format_examples(self) -> str:
         """Format examples in a clear, labeled section."""
@@ -175,12 +269,22 @@ class PromptBuilder:
         """Create a PromptBuilder from a config type.
 
         Args:
-            prompt_type: "default", "concise", "fewshot", "fewshot_3", "fewshot_1"
+            prompt_type: Prompt style to use:
+                - "default": Basic RAG prompt
+                - "concise": Minimal, just answer
+                - "structured": Clear delimiters (### sections)
+                - "extractive": Strict context-only answers
+                - "cot": Chain-of-thought reasoning
+                - "cited": Answers with [1], [2] citations
+                - "fewshot", "fewshot_3", "fewshot_1": With examples
             dataset: Dataset name for loading appropriate fewshot examples
 
         Returns:
             Configured PromptBuilder
         """
+        # =================================================================
+        # Basic prompts
+        # =================================================================
         if prompt_type == "default":
             return cls(
                 PromptConfig(
@@ -197,6 +301,45 @@ class PromptBuilder:
                 )
             )
 
+        # =================================================================
+        # Advanced prompts (new)
+        # =================================================================
+        if prompt_type == "structured":
+            return cls(
+                PromptConfig(
+                    use_delimiters=True,
+                    style="Be concise.",
+                )
+            )
+
+        if prompt_type == "extractive":
+            return cls(
+                PromptConfig(
+                    strict_extraction=True,
+                    style="Extract the exact answer from the passages.",
+                    knowledge_instruction="Only use information from the passages.",
+                )
+            )
+
+        if prompt_type == "cot":
+            return cls(
+                PromptConfig(
+                    include_reasoning=True,
+                    style="Show your reasoning, then give a final answer.",
+                )
+            )
+
+        if prompt_type == "cited":
+            return cls(
+                PromptConfig(
+                    require_citation=True,
+                    style="Include passage citations [1], [2], etc.",
+                )
+            )
+
+        # =================================================================
+        # Fewshot prompts
+        # =================================================================
         if prompt_type.startswith("fewshot"):
             n_examples = {"fewshot": 5, "fewshot_3": 3, "fewshot_1": 1}.get(prompt_type, 5)
 
