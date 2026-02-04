@@ -259,7 +259,7 @@ rag:
     - en_bge_large_en_v1.5_c512_o50              # Dense BGE Large
     - en_bge_m3_c512_o50                         # Dense BGE M3
     - en_gte_qwen2_1.5b_instruct_c512_o50        # Dense GTE-Qwen2
-    - en_e5_mistral_7b_instruct_c512_o50         # Dense E5-Mistral
+    # - en_e5_mistral_7b_instruct_c512_o50       # Dense E5-Mistral (7B - too large for RAM)
     - en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07  # Hybrid BGE + BM25
     - en_gte_qwen2_1.5b_instruct_c512_o50_hybrid_bm25_07  # Hybrid GTE + BM25
     - hierarchical_bge_large                     # Hierarchical
