@@ -68,6 +68,9 @@ def build_hierarchical_index(
     from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
 
     manager = get_artifact_manager()
+    # Use embedding_index for the index name (consistent with dense indexes)
+    # Fall back to name if embedding_index not specified
+    index_name = retriever_config.get("embedding_index", retriever_config["name"])
     retriever_name = retriever_config["name"]
     embedding_model = retriever_config.get("embedding_model", "all-MiniLM-L6-v2")
 
@@ -84,7 +87,7 @@ def build_hierarchical_index(
     faiss.omp_set_num_threads(num_threads)
 
     print(f"\n{'=' * 60}")
-    print(f"Building hierarchical index: {retriever_name}")
+    print(f"Building hierarchical index: {index_name}")
     print(f"  Embedding model: {embedding_model}")
     print(f"  Embedding backend: {backend}")
     print(f"  Parent chunks: {parent_chunk_size}")
@@ -133,7 +136,7 @@ def build_hierarchical_index(
     print(f"  Embedder loaded (dim={embedding_dim})")
 
     # Setup work directory for checkpointing and temp storage
-    work_dir = manager.indexes_dir / ".work" / retriever_name
+    work_dir = manager.indexes_dir / ".work" / index_name
     work_dir.mkdir(parents=True, exist_ok=True)
     index_checkpoint_path = work_dir / "child_index.faiss"
 
@@ -346,7 +349,7 @@ def build_hierarchical_index(
     # Save to final location
     # ==========================================================================
     print("\nSaving to final location...")
-    index_path = manager.get_embedding_index_path(retriever_name)
+    index_path = manager.get_embedding_index_path(index_name)
     index_path.mkdir(parents=True, exist_ok=True)
 
     # Load and save all documents
@@ -387,7 +390,7 @@ def build_hierarchical_index(
 
     # Save index config
     index_config = {
-        "name": retriever_name,
+        "name": index_name,
         "type": "hierarchical",
         "embedding_model": embedding_model,
         "embedding_backend": backend,
@@ -406,7 +409,7 @@ def build_hierarchical_index(
     retriever_config_data = {
         "name": retriever_name,
         "type": "hierarchical",
-        "hierarchical_index": retriever_name,
+        "embedding_index": index_name,  # Reference the index by its name
         "embedding_model": embedding_model,
         "embedding_backend": backend,
         "parent_chunk_size": parent_chunk_size,
@@ -437,5 +440,5 @@ def build_hierarchical_index(
     del chunker
     gc.collect()
 
-    print(f"✓ Saved hierarchical index: {retriever_name}")
-    return retriever_name
+    print(f"✓ Saved hierarchical index: {index_name}")
+    return index_name
