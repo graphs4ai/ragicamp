@@ -504,8 +504,11 @@ class Experiment:
         if spec.exp_type == "rag" and spec.retriever:
             # Load index configuration to get embedding model
             manager = get_artifact_manager()
-            retriever_path = manager.get_retriever_path(spec.retriever)
-            config_path = retriever_path / "config.json"
+            
+            # Use embedding_index if specified, else retriever name
+            index_name = spec.embedding_index or spec.retriever
+            index_path = manager.get_embedding_index_path(index_name)
+            config_path = index_path / "config.json"
             
             if config_path.exists():
                 with open(config_path) as f:
@@ -519,9 +522,6 @@ class Experiment:
                     backend=embedding_backend,
                 )
                 
-                # Load the index - use embedding_index if specified, else retriever name
-                index_name = spec.embedding_index or spec.retriever
-                index_path = manager.get_embedding_index_path(index_name)
                 index = VectorIndex.load(index_path)
 
         # Create dataset
