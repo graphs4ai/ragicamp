@@ -134,6 +134,10 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                 build_hierarchical_index(
                     retriever_config=config,
                     corpus_config=corpus_config,
+                    doc_batch_size=corpus_config.get("doc_batch_size", 5000),
+                    embedding_batch_size=corpus_config.get("embedding_batch_size", 4096),
+                    embedding_backend=corpus_config.get("embedding", {}).get("backend", "vllm"),
+                    vllm_gpu_memory_fraction=corpus_config.get("embedding", {}).get("vllm_gpu_memory_fraction", 0.9),
                 )
             else:
                 build_embedding_index(
