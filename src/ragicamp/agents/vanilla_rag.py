@@ -1,30 +1,30 @@
-"""Vanilla RAG agent - Simplest possible RAG baseline.
+"""Vanilla RAG Agent - Simplest possible RAG baseline.
 
-This agent implements the most basic RAG pipeline:
-1. Retrieve top-k documents
-2. Format context
-3. Generate answer
+Uses model providers for explicit lifecycle control:
+1. Load embedder → batch encode queries → batch search → unload embedder
+2. Load generator → batch generate answers → unload generator
 
-No query transformation, no reranking - just retrieve and generate.
-Use this for clean baseline comparisons.
+Each model gets full GPU when it runs.
+Identical to FixedRAGAgent but without any query transformation.
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import Callable
 
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
-from ragicamp.factory.agents import AgentFactory
-from ragicamp.models.base import LanguageModel
-from ragicamp.retrievers.base import Retriever
+import numpy as np
+from tqdm import tqdm
+
+from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
+from ragicamp.core.logging import get_logger
+from ragicamp.indexes.vector_index import VectorIndex, SearchResult
+from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
+from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
-if TYPE_CHECKING:
-    pass
+logger = get_logger(__name__)
 
 
-@AgentFactory.register("vanilla_rag")
-class VanillaRAGAgent(RAGAgent):
+class VanillaRAGAgent(Agent):
     """Simplest RAG agent: retrieve → generate.
 
     This agent provides a clean baseline for RAG experiments:
@@ -32,167 +32,175 @@ class VanillaRAGAgent(RAGAgent):
     - No reranking (uses retriever ordering)
     - Single retrieval step
 
-    Use this when you want:
-    - Clean baseline without any enhancements
-    - Fast inference (single retrieval, no extra LLM calls)
-    - Minimal complexity for debugging
-
-    Config:
-        agent_type: vanilla_rag
-        top_k: 5
+    Execution phases:
+    1. EMBED: Load embedder (full GPU) → encode all queries
+    2. SEARCH: Batch search index (CPU/mmap)
+    3. UNLOAD: Free embedder from GPU
+    4. GENERATE: Load generator (full GPU) → batch generate answers
+    5. UNLOAD: Free generator from GPU
     """
 
     def __init__(
         self,
         name: str,
-        model: LanguageModel,
-        retriever: Retriever,
+        embedder_provider: EmbedderProvider,
+        generator_provider: GeneratorProvider,
+        index: VectorIndex,
         top_k: int = 5,
-        prompt_builder: Optional[PromptBuilder] = None,
-        **kwargs: Any,
+        prompt_builder: PromptBuilder | None = None,
+        **config,
     ):
-        """Initialize the vanilla RAG agent.
+        """Initialize agent with providers (not loaded models).
 
         Args:
             name: Agent identifier
-            model: The language model to use for generation
-            retriever: The retriever for finding relevant documents
+            embedder_provider: Provides embedder with lazy loading
+            generator_provider: Provides generator with lazy loading
+            index: Vector index (just data, no models)
             top_k: Number of documents to retrieve
-            prompt_builder: Optional PromptBuilder for customizing prompts
-            **kwargs: Additional configuration
+            prompt_builder: For building prompts
         """
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.retriever = retriever
+        super().__init__(name, **config)
+
+        self.embedder_provider = embedder_provider
+        self.generator_provider = generator_provider
+        self.index = index
         self.top_k = top_k
+        self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
-        # Use provided prompt_builder or create default
-        if prompt_builder is not None:
-            self.prompt_builder = prompt_builder
-        else:
-            self.prompt_builder = PromptBuilder()
+    def run(
+        self,
+        queries: list[Query],
+        *,
+        on_result: Callable[[AgentResult], None] | None = None,
+        checkpoint_path: Path | None = None,
+        show_progress: bool = True,
+    ) -> list[AgentResult]:
+        """Process all queries with phase-based resource management.
 
-    def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-        """Generate an answer using simple retrieve → generate flow.
-
-        Args:
-            query: The input question
-            **kwargs: Additional generation parameters
-
-        Returns:
-            RAGResponse with the answer and retrieved context
+        Phase 1: Embed all queries (embedder gets full GPU)
+        Phase 2: Search index (CPU)
+        Phase 3: Generate all answers (generator gets full GPU)
         """
-        # Step 1: Retrieve documents
-        retrieved_docs = self.retriever.retrieve(query, top_k=self.top_k)
+        # Load checkpoint if resuming
+        results, completed_idx = [], set()
+        if checkpoint_path:
+            results, completed_idx = self._load_checkpoint(checkpoint_path)
 
-        # Step 2: Format context
-        context_text = ContextFormatter.format_numbered(retrieved_docs)
+        pending = [q for q in queries if q.idx not in completed_idx]
 
-        # Step 3: Build prompt
-        prompt = self.prompt_builder.build_rag(query, context_text)
+        if not pending:
+            logger.info("All queries already completed")
+            return results
 
-        # Step 4: Generate answer
-        answer = self.model.generate(prompt, **kwargs)
+        logger.info("VanillaRAG: Processing %d queries", len(pending))
 
-        # Build context object
-        context = RAGContext(
-            query=query,
-            retrieved_docs=retrieved_docs,
-            metadata={
-                "top_k": self.top_k,
-                "context_text": context_text,
-            },
+        # Phase 1 & 2: Encode and search
+        logger.info("=== Phase 1: Encoding & Searching ===")
+        query_texts = [q.text for q in pending]
+        retrievals, embed_steps = self._phase_retrieve(query_texts, show_progress)
+
+        # Phase 3: Generate
+        logger.info("=== Phase 2: Generating ===")
+        new_results = self._phase_generate(
+            pending, retrievals, embed_steps, show_progress
         )
 
-        # Build structured retrieved docs for metadata
-        retrieved_structured = [
-            RetrievedDoc(
-                rank=i + 1,
-                content=doc.text,
-                score=getattr(doc, "score", None),
-                doc_id=getattr(doc, "id", None),
-            )
-            for i, doc in enumerate(retrieved_docs)
-        ]
+        # Stream results and checkpoint
+        for result in new_results:
+            results.append(result)
+            if on_result:
+                on_result(result)
 
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            prompt=prompt,
-            metadata=RAGResponseMeta(
-                agent_type=AgentType.VANILLA_RAG,
-                num_docs_used=len(retrieved_docs),
-                retrieved_docs=retrieved_structured,
-            ),
-        )
+        if checkpoint_path:
+            self._save_checkpoint(results, checkpoint_path)
 
-    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
-        """Generate answers for multiple queries using batch processing.
+        logger.info("Completed %d queries", len(new_results))
+        return results
 
-        Optimized for speed:
-        - Batch retrieval (if supported by retriever)
-        - Batch LLM generation
+    def _phase_retrieve(
+        self,
+        query_texts: list[str],
+        show_progress: bool,
+    ) -> tuple[list[list[SearchResult]], list[Step]]:
+        """Phase 1: Encode queries and search index."""
+        steps: list[Step] = []
 
-        Args:
-            queries: List of input questions
-            **kwargs: Additional generation parameters
+        # Load embedder, encode, then unload
+        with self.embedder_provider.load() as embedder:
+            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
+                step.input = {"n_queries": len(query_texts)}
+                query_embeddings = embedder.batch_encode(query_texts)
+                step.output = {"embedding_shape": query_embeddings.shape}
+            steps.append(step)
 
-        Returns:
-            List of RAGResponse objects, one per query
-        """
-        # Step 1: Batch retrieve
-        if hasattr(self.retriever, "batch_retrieve"):
-            all_docs = self.retriever.batch_retrieve(queries, top_k=self.top_k)
-        else:
-            all_docs = [self.retriever.retrieve(q, top_k=self.top_k) for q in queries]
+            logger.info("Encoded %d queries", len(query_texts))
 
-        # Step 2: Format contexts and build prompts
-        prompts = []
-        contexts = []
-        context_texts = []
+        # Embedder is now unloaded
 
-        for query, docs in zip(queries, all_docs):
-            context_text = ContextFormatter.format_numbered(docs)
-            context_texts.append(context_text)
-            prompt = self.prompt_builder.build_rag(query, context_text)
+        # Batch search (CPU)
+        with StepTimer("batch_search") as step:
+            step.input = {"n_queries": len(query_texts), "top_k": self.top_k}
+            retrievals = self.index.batch_search(query_embeddings, top_k=self.top_k)
+            step.output = {"n_results": sum(len(r) for r in retrievals)}
+        steps.append(step)
+
+        logger.info("Retrieved documents for %d queries", len(query_texts))
+
+        return retrievals, steps
+
+    def _phase_generate(
+        self,
+        queries: list[Query],
+        retrievals: list[list[SearchResult]],
+        retrieve_steps: list[Step],
+        show_progress: bool,
+    ) -> list[AgentResult]:
+        """Phase 2: Generate answers for all queries."""
+        # Build all prompts
+        prompts: list[str] = []
+        for query, results in zip(queries, retrievals):
+            docs = [r.document for r in results]
+            context_text = ContextFormatter.format_numbered_from_docs(docs)
+            prompt = self.prompt_builder.build_rag(query.text, context_text)
             prompts.append(prompt)
-            contexts.append(
-                RAGContext(
-                    query=query,
-                    retrieved_docs=docs,
-                    metadata={"top_k": self.top_k, "context_text": context_text},
-                )
-            )
 
-        # Step 3: Batch generate
-        answers = self.model.generate(prompts, **kwargs)
+        # Load generator, generate, then unload
+        with self.generator_provider.load() as generator:
+            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+                step.input = {"n_prompts": len(prompts)}
+                answers = generator.batch_generate(prompts)
+                step.output = {"n_answers": len(answers)}
 
-        # Step 4: Build responses
-        responses = []
-        for _query, prompt, answer, context, docs in zip(
-            queries, prompts, answers, contexts, all_docs
-        ):
-            retrieved_structured = [
-                RetrievedDoc(
-                    rank=i + 1,
-                    content=doc.text,
-                    score=getattr(doc, "score", None),
-                    doc_id=getattr(doc, "id", None),
-                )
-                for i, doc in enumerate(docs)
-            ]
+        # Generator is now unloaded
 
-            response = RAGResponse(
+        # Build results
+        results: list[AgentResult] = []
+
+        iterator = zip(queries, retrievals, prompts, answers)
+        if show_progress:
+            iterator = tqdm(list(iterator), desc="Building results")
+
+        for query, search_results, prompt, answer in iterator:
+            query_steps = retrieve_steps.copy()
+            query_steps.append(Step(
+                type="generate",
+                input={"query": query.text},
+                output=answer,
+                model=self.generator_provider.model_name,
+            ))
+
+            result = AgentResult(
+                query=query,
                 answer=answer,
-                context=context,
+                steps=query_steps,
                 prompt=prompt,
-                metadata=RAGResponseMeta(
-                    agent_type=AgentType.VANILLA_RAG,
-                    num_docs_used=len(docs),
-                    batch_processing=True,
-                    retrieved_docs=retrieved_structured,
-                ),
+                metadata={
+                    "num_docs": len(search_results),
+                    "top_k": self.top_k,
+                    "doc_scores": [r.score for r in search_results],
+                },
             )
-            responses.append(response)
+            results.append(result)
 
-        return responses
+        return results

@@ -1,33 +1,28 @@
-"""Iterative RAG agent - Multi-turn query refinement.
+"""Iterative RAG Agent - Multi-turn query refinement.
 
-This agent implements an iterative retrieval strategy:
-1. Retrieve with original query
-2. LLM evaluates: "Is context sufficient to answer?"
-3. If not sufficient: LLM generates refined query → retrieve again
-4. Merge documents (deduplicate)
-5. Repeat until max_iterations or sufficient
-6. Generate final answer with accumulated context
+Uses model providers with proper lifecycle management:
+- Each iteration: load embedder → retrieve → unload → load generator → evaluate → unload
+- Final: load generator → generate answer → unload
+
+Interleaved pattern with clean resource management.
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import Any, Callable
 
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from tqdm import tqdm
+
+from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
 from ragicamp.core.logging import get_logger
-from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
-from ragicamp.factory import AgentFactory
-from ragicamp.models.base import LanguageModel
-from ragicamp.retrievers.base import Document, Retriever
+from ragicamp.indexes.vector_index import VectorIndex, SearchResult, Document
+from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
-
-if TYPE_CHECKING:
-    from ragicamp.rag.query_transform.base import QueryTransformer
-    from ragicamp.rag.rerankers.base import Reranker
+from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
 
 
-# Prompts for the iterative refinement process
+# Prompts for iterative refinement
 SUFFICIENCY_PROMPT = """Based on the following context, determine if it contains enough information to answer the question.
 
 Context:
@@ -56,181 +51,131 @@ Be specific and focus on the missing information, not what was already found.
 Refined Query:"""
 
 
-@AgentFactory.register("iterative_rag")
-class IterativeRAGAgent(RAGAgent):
+class IterativeRAGAgent(Agent):
     """Iterative RAG agent with multi-turn query refinement.
 
     This agent iteratively refines its search query based on retrieved context,
-    accumulating relevant documents until it has enough information to answer
-    or reaches the maximum number of iterations.
+    accumulating relevant documents until it has enough information.
 
-    Flow:
-    1. Initial retrieval with original query
-    2. Evaluate if context is sufficient
-    3. If insufficient and iterations remain:
-       - Generate refined query
-       - Retrieve more documents
-       - Merge with existing documents
-       - Repeat evaluation
-    4. Generate final answer with all accumulated context
+    Flow per query:
+    1. Load embedder → encode query → search → unload
+    2. Load generator → evaluate sufficiency → unload
+    3. If insufficient: load generator → refine query → unload
+    4. Repeat 1-3 until sufficient or max_iterations
+    5. Load generator → generate final answer → unload
 
-    Example:
-        >>> agent = IterativeRAGAgent(
-        ...     name="iterative",
-        ...     model=model,
-        ...     retriever=retriever,
-        ...     max_iterations=2,
-        ... )
-        >>> response = agent.answer("What year did Einstein win the Nobel Prize?")
+    Note: This is inherently sequential per query. For batch processing,
+    queries are processed one at a time.
     """
 
     def __init__(
         self,
         name: str,
-        model: LanguageModel,
-        retriever: Retriever,
+        embedder_provider: EmbedderProvider,
+        generator_provider: GeneratorProvider,
+        index: VectorIndex,
         top_k: int = 5,
         max_iterations: int = 2,
         stop_on_sufficient: bool = True,
-        prompt_builder: Optional[PromptBuilder] = None,
-        # Advanced options
-        query_transformer: Optional["QueryTransformer"] = None,
-        reranker: Optional["Reranker"] = None,
-        top_k_retrieve: Optional[int] = None,
-        # Legacy parameters
-        system_prompt: str = "You are a helpful assistant. Use the provided context to answer questions accurately.",
-        **kwargs: Any,
+        prompt_builder: PromptBuilder | None = None,
+        **config,
     ):
-        """Initialize the iterative RAG agent.
+        """Initialize agent with providers.
 
         Args:
             name: Agent identifier
-            model: Language model for generation and evaluation
-            retriever: Document retriever
-            top_k: Documents to use per iteration
-            max_iterations: Maximum refinement iterations (default: 2)
-            stop_on_sufficient: Stop early if context is sufficient (default: True)
-            prompt_builder: PromptBuilder for final answer generation
-            query_transformer: Optional initial query transformer
-            reranker: Optional reranker for retrieved documents
-            top_k_retrieve: Documents to retrieve before reranking
-            system_prompt: System prompt for answer generation
-            **kwargs: Additional configuration
+            embedder_provider: Provides embedder with lazy loading
+            generator_provider: Provides generator with lazy loading
+            index: Vector index (just data)
+            top_k: Documents to retrieve per iteration
+            max_iterations: Maximum refinement iterations
+            stop_on_sufficient: Stop early if context is sufficient
+            prompt_builder: For building prompts
         """
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.retriever = retriever
+        super().__init__(name, **config)
+
+        self.embedder_provider = embedder_provider
+        self.generator_provider = generator_provider
+        self.index = index
         self.top_k = top_k
         self.max_iterations = max_iterations
         self.stop_on_sufficient = stop_on_sufficient
+        self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
-        # Optional components
-        self.query_transformer = query_transformer
-        self.reranker = reranker
-        self.top_k_retrieve = top_k_retrieve or (top_k * 4 if reranker else top_k)
-
-        # Prompt builder for final answer
-        if prompt_builder is not None:
-            self.prompt_builder = prompt_builder
-        else:
-            from ragicamp.utils.prompts import PromptConfig
-
-            self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
-
-        self._system_prompt = system_prompt
-
-    def _retrieve(self, query: str) -> list[Document]:
-        """Retrieve documents for a query."""
-        # Apply query transformer if present
-        search_query = query
-        if self.query_transformer:
-            search_query = self.query_transformer.transform(query)
-
-        # Retrieve
-        docs = self.retriever.retrieve(search_query, top_k=self.top_k_retrieve)
-
-        # Rerank if present
-        if self.reranker:
-            docs = self.reranker.rerank(query, docs, top_k=self.top_k)
-        else:
-            docs = docs[: self.top_k]
-
-        return docs
-
-    def _evaluate_sufficiency(self, query: str, context: str) -> bool:
-        """Evaluate if the context is sufficient to answer the question."""
-        prompt = SUFFICIENCY_PROMPT.format(context=context, query=query)
-        response = self.model.generate(prompt, max_tokens=100)
-
-        # Parse response - look for SUFFICIENT/INSUFFICIENT
-        response_upper = response.upper()
-        is_sufficient = "SUFFICIENT" in response_upper and "INSUFFICIENT" not in response_upper
-
-        logger.debug("Sufficiency check: %s", "sufficient" if is_sufficient else "insufficient")
-        return is_sufficient
-
-    def _generate_refined_query(self, query: str, previous_query: str, context: str) -> str:
-        """Generate a refined search query based on insufficient context."""
-        prompt = REFINEMENT_PROMPT.format(
-            query=query,
-            previous_query=previous_query,
-            context=context[:2000],  # Limit context in prompt
-        )
-        refined = self.model.generate(prompt, max_tokens=100)
-
-        # Clean up the response
-        refined = refined.strip()
-        if refined.startswith('"') and refined.endswith('"'):
-            refined = refined[1:-1]
-
-        logger.debug("Refined query: %s -> %s", previous_query, refined)
-        return refined
-
-    def _merge_documents(
+    def run(
         self,
-        existing: list[Document],
-        new_docs: list[Document],
-    ) -> list[Document]:
-        """Merge documents, removing duplicates based on content hash."""
-        seen_content: set[str] = set()
-        merged: list[Document] = []
+        queries: list[Query],
+        *,
+        on_result: Callable[[AgentResult], None] | None = None,
+        checkpoint_path: Path | None = None,
+        show_progress: bool = True,
+    ) -> list[AgentResult]:
+        """Process queries with iterative refinement.
 
-        for doc in existing + new_docs:
-            # Use first 200 chars as content key for deduplication
-            content_key = doc.text[:200] if doc.text else ""
-            if content_key not in seen_content:
-                seen_content.add(content_key)
-                merged.append(doc)
-
-        return merged
-
-    def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-        """Generate an answer using iterative query refinement.
-
-        Args:
-            query: The input question
-            **kwargs: Additional generation parameters
-
-        Returns:
-            RAGResponse with answer and iteration metadata
+        Each query is processed sequentially due to the iterative nature.
         """
-        # Track iterations and accumulated documents
-        iterations: list[dict[str, Any]] = []
+        # Load checkpoint if resuming
+        results, completed_idx = [], set()
+        if checkpoint_path:
+            results, completed_idx = self._load_checkpoint(checkpoint_path)
+
+        pending = [q for q in queries if q.idx not in completed_idx]
+
+        if not pending:
+            logger.info("All queries already completed")
+            return results
+
+        logger.info("IterativeRAG: Processing %d queries (max %d iterations each)",
+                   len(pending), self.max_iterations)
+
+        iterator = pending
+        if show_progress:
+            iterator = tqdm(pending, desc="Processing queries")
+
+        for query in iterator:
+            result = self._process_single_query(query)
+            results.append(result)
+
+            if on_result:
+                on_result(result)
+
+            if checkpoint_path:
+                self._save_checkpoint(results, checkpoint_path)
+
+        logger.info("Completed %d queries", len(pending))
+        return results
+
+    def _process_single_query(self, query: Query) -> AgentResult:
+        """Process a single query with iterative refinement."""
+        steps: list[Step] = []
         all_docs: list[Document] = []
-        current_query = query
+        current_query_text = query.text
+        iterations_info: list[dict[str, Any]] = []
 
-        for iteration in range(self.max_iterations + 1):  # +1 for initial retrieval
-            # Retrieve with current query
-            new_docs = self._retrieve(current_query)
+        for iteration in range(self.max_iterations + 1):
+            # Step 1: Retrieve with current query
+            with self.embedder_provider.load() as embedder:
+                with StepTimer("encode", model=self.embedder_provider.model_name) as step:
+                    query_embedding = embedder.batch_encode([current_query_text])
+                    step.input = {"query": current_query_text, "iteration": iteration}
+                    step.output = {"embedding_shape": query_embedding.shape}
+                steps.append(step)
+
+            # Search index
+            with StepTimer("search") as step:
+                search_results = self.index.batch_search(query_embedding, top_k=self.top_k)[0]
+                new_docs = [r.document for r in search_results]
+                step.input = {"iteration": iteration, "top_k": self.top_k}
+                step.output = {"n_docs": len(new_docs)}
+            steps.append(step)
+
+            # Merge documents
             all_docs = self._merge_documents(all_docs, new_docs)
+            context_text = ContextFormatter.format_numbered_from_docs(all_docs[:self.top_k * 2])
 
-            # Format context
-            context_text = ContextFormatter.format_numbered(all_docs[: self.top_k * 2])
-
-            # Log iteration
             iteration_info = {
                 "iteration": iteration,
-                "query": current_query,
+                "query": current_query_text,
                 "docs_retrieved": len(new_docs),
                 "total_docs": len(all_docs),
             }
@@ -238,93 +183,108 @@ class IterativeRAGAgent(RAGAgent):
             # Check if we should stop
             if iteration >= self.max_iterations:
                 iteration_info["stopped"] = "max_iterations"
-                iterations.append(iteration_info)
+                iterations_info.append(iteration_info)
                 break
 
-            # Evaluate sufficiency
+            # Step 2: Evaluate sufficiency (requires generator)
             if self.stop_on_sufficient:
-                is_sufficient = self._evaluate_sufficiency(query, context_text)
+                with self.generator_provider.load() as generator:
+                    with StepTimer("evaluate_sufficiency", model=self.generator_provider.model_name) as step:
+                        is_sufficient = self._evaluate_sufficiency(
+                            generator, query.text, context_text
+                        )
+                        step.input = {"query": query.text}
+                        step.output = {"sufficient": is_sufficient}
+                    steps.append(step)
+
                 iteration_info["sufficient"] = is_sufficient
 
                 if is_sufficient:
                     iteration_info["stopped"] = "sufficient"
-                    iterations.append(iteration_info)
+                    iterations_info.append(iteration_info)
                     break
 
-            iterations.append(iteration_info)
+            iterations_info.append(iteration_info)
 
-            # Generate refined query for next iteration
+            # Step 3: Generate refined query (requires generator)
             if iteration < self.max_iterations:
-                current_query = self._generate_refined_query(
-                    query=query,
-                    previous_query=current_query,
-                    context=context_text,
-                )
+                with self.generator_provider.load() as generator:
+                    with StepTimer("refine_query", model=self.generator_provider.model_name) as step:
+                        current_query_text = self._generate_refined_query(
+                            generator, query.text, current_query_text, context_text
+                        )
+                        step.input = {"original_query": query.text}
+                        step.output = {"refined_query": current_query_text}
+                    steps.append(step)
 
-        # Use top documents for final answer
-        final_docs = all_docs[: self.top_k * 2]
-        context_text = ContextFormatter.format_numbered(final_docs)
+        # Final answer generation
+        final_docs = all_docs[:self.top_k * 2]
+        context_text = ContextFormatter.format_numbered_from_docs(final_docs)
+        prompt = self.prompt_builder.build_rag(query.text, context_text)
 
-        # Log iteration summary
-        stop_reason = iterations[-1].get("stopped", "continued") if iterations else "none"
-        logger.debug(
-            "Iterative RAG: %d iterations, %d docs, stopped=%s",
-            len(iterations),
-            len(final_docs),
-            stop_reason,
-        )
+        with self.generator_provider.load() as generator:
+            with StepTimer("generate", model=self.generator_provider.model_name) as step:
+                answer = generator.generate(prompt)
+                step.input = {"query": query.text}
+                step.output = answer
+            steps.append(step)
 
-        # Build final prompt
-        prompt = self.prompt_builder.build_rag(query, context_text)
-
-        # Generate answer
-        answer = self.model.generate(prompt, **kwargs)
-
-        # Build context object
-        context = RAGContext(
+        return AgentResult(
             query=query,
-            retrieved_docs=final_docs,
-            intermediate_steps=iterations,
+            answer=answer,
+            steps=steps,
+            prompt=prompt,
             metadata={
-                "iterations": len(iterations),
-                "total_docs_retrieved": len(all_docs),
+                "iterations": iterations_info,
+                "total_docs": len(all_docs),
                 "final_docs_used": len(final_docs),
             },
         )
 
-        # Build structured retrieved docs
-        retrieved_structured = [
-            RetrievedDoc(
-                rank=i + 1,
-                content=doc.text,
-                score=getattr(doc, "score", None),
-            )
-            for i, doc in enumerate(final_docs)
-        ]
+    def _evaluate_sufficiency(self, generator, query: str, context: str) -> bool:
+        """Evaluate if context is sufficient to answer the question."""
+        prompt = SUFFICIENCY_PROMPT.format(context=context, query=query)
+        response = generator.generate(prompt, max_tokens=100)
 
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            prompt=prompt,
-            metadata=RAGResponseMeta(
-                agent_type=AgentType.ITERATIVE_RAG,
-                num_docs_used=len(final_docs),
-                retrieved_docs=retrieved_structured,
-            ),
+        response_upper = response.upper()
+        is_sufficient = "SUFFICIENT" in response_upper and "INSUFFICIENT" not in response_upper
+
+        logger.debug("Sufficiency: %s", "sufficient" if is_sufficient else "insufficient")
+        return is_sufficient
+
+    def _generate_refined_query(
+        self, generator, original_query: str, previous_query: str, context: str
+    ) -> str:
+        """Generate a refined search query."""
+        prompt = REFINEMENT_PROMPT.format(
+            query=original_query,
+            previous_query=previous_query,
+            context=context[:2000],
         )
+        refined = generator.generate(prompt, max_tokens=100)
 
-    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
-        """Generate answers for multiple queries.
+        # Clean up
+        refined = refined.strip()
+        if refined.startswith('"') and refined.endswith('"'):
+            refined = refined[1:-1]
 
-        Note: Iterative refinement is inherently sequential per query,
-        so this uses a simple loop. Batch optimization is applied within
-        each iteration's retrieval and generation steps.
+        logger.debug("Refined query: %s -> %s", previous_query[:30], refined[:30])
+        return refined
 
-        Args:
-            queries: List of input questions
-            **kwargs: Additional generation parameters
+    def _merge_documents(
+        self,
+        existing: list[Document],
+        new_docs: list[Document],
+    ) -> list[Document]:
+        """Merge documents, removing duplicates based on content."""
+        seen_content: set[str] = set()
+        merged: list[Document] = []
 
-        Returns:
-            List of RAGResponse objects
-        """
-        return [self.answer(q, **kwargs) for q in queries]
+        for doc in existing + new_docs:
+            # Use first 200 chars as content key
+            content_key = doc.text[:200] if doc.text else ""
+            if content_key not in seen_content:
+                seen_content.add(content_key)
+                merged.append(doc)
+
+        return merged

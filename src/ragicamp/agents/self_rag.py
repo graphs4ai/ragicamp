@@ -1,28 +1,25 @@
-"""Self-RAG agent - Adaptive retrieval based on query analysis.
+"""Self-RAG Agent - Adaptive retrieval based on query analysis.
 
-This agent decides whether to use retrieval based on query characteristics:
-1. Assess query: "Do I need external information?"
-2. If confident (above threshold): generate directly (no retrieval)
-3. If unsure: use RAG path
-4. Optionally verify answer is supported by context
+Uses model providers with proper lifecycle management:
+1. Load generator → assess if retrieval needed → unload
+2. If needed: load embedder → retrieve → unload
+3. Load generator → generate answer → unload
+4. Optionally: load generator → verify answer → unload
 
-Based on the Self-RAG paper concept of adaptive retrieval.
+Interleaved pattern with clean resource management.
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from pathlib import Path
+from typing import Any, Callable
 
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
+from tqdm import tqdm
+
+from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
 from ragicamp.core.logging import get_logger
-from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
-from ragicamp.factory import AgentFactory
-from ragicamp.models.base import LanguageModel
-from ragicamp.retrievers.base import Document, Retriever
+from ragicamp.indexes.vector_index import VectorIndex, SearchResult, Document
+from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
-from ragicamp.utils.prompts import PromptBuilder
-
-if TYPE_CHECKING:
-    from ragicamp.rag.query_transform.base import QueryTransformer
-    from ragicamp.rag.rerankers.base import Reranker
+from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
 
@@ -67,113 +64,207 @@ Then briefly explain.
 Verification:"""
 
 
-@AgentFactory.register("self_rag")
-class SelfRAGAgent(RAGAgent):
+class SelfRAGAgent(Agent):
     """Self-RAG agent with adaptive retrieval decision.
 
     This agent dynamically decides whether to use retrieval based on
     the query and optionally verifies that answers are grounded in context.
 
-    Flow:
-    1. Analyze query to decide if retrieval is needed
-    2. If confidence > threshold: generate directly
-    3. If confidence <= threshold: retrieve and generate with context
-    4. Optionally verify answer is supported by context
-    5. If not supported and fallback enabled: regenerate or use direct answer
+    Flow per query:
+    1. Load generator → assess retrieval need → unload
+    2. If confidence <= threshold:
+       - Load embedder → retrieve → unload
+       - Load generator → generate with context → unload
+    3. Else:
+       - Load generator → generate directly → unload
+    4. If verify_answer:
+       - Load generator → verify grounding → unload
 
-    Example:
-        >>> agent = SelfRAGAgent(
-        ...     name="self_rag",
-        ...     model=model,
-        ...     retriever=retriever,
-        ...     retrieval_threshold=0.5,
-        ...     verify_answer=True,
-        ... )
-        >>> response = agent.answer("What is 2 + 2?")  # Likely no retrieval
-        >>> response = agent.answer("Who won the 2024 election?")  # Will retrieve
+    Note: Inherently sequential per query due to the decision-making.
     """
 
     def __init__(
         self,
         name: str,
-        model: LanguageModel,
-        retriever: Retriever,
+        embedder_provider: EmbedderProvider,
+        generator_provider: GeneratorProvider,
+        index: VectorIndex,
         top_k: int = 5,
         retrieval_threshold: float = 0.5,
         verify_answer: bool = False,
         fallback_to_direct: bool = True,
-        prompt_builder: Optional[PromptBuilder] = None,
-        # Advanced options
-        query_transformer: Optional["QueryTransformer"] = None,
-        reranker: Optional["Reranker"] = None,
-        top_k_retrieve: Optional[int] = None,
-        # Legacy parameters
-        system_prompt: str = "You are a helpful assistant. Answer questions accurately and concisely.",
-        **kwargs: Any,
+        prompt_builder: PromptBuilder | None = None,
+        **config,
     ):
-        """Initialize the self-RAG agent.
+        """Initialize agent with providers.
 
         Args:
             name: Agent identifier
-            model: Language model for generation and decision making
-            retriever: Document retriever
+            embedder_provider: Provides embedder with lazy loading
+            generator_provider: Provides generator with lazy loading
+            index: Vector index (just data)
             top_k: Number of documents to retrieve
-            retrieval_threshold: Confidence threshold for skipping retrieval.
-                                 Higher = more likely to skip retrieval.
-                                 Default 0.5 means retrieve unless very confident.
-            verify_answer: Whether to verify answer is grounded in context
-            fallback_to_direct: If verification fails, fall back to direct answer
-            prompt_builder: PromptBuilder for answer generation
-            query_transformer: Optional query transformer
-            reranker: Optional reranker
-            top_k_retrieve: Documents to retrieve before reranking
-            system_prompt: System prompt for direct answer generation
-            **kwargs: Additional configuration
+            retrieval_threshold: Confidence threshold for skipping retrieval
+            verify_answer: Whether to verify answer is grounded
+            fallback_to_direct: If verification fails, fall back to direct
+            prompt_builder: For building prompts
         """
-        super().__init__(name, **kwargs)
-        self.model = model
-        self.retriever = retriever
+        super().__init__(name, **config)
+
+        self.embedder_provider = embedder_provider
+        self.generator_provider = generator_provider
+        self.index = index
         self.top_k = top_k
         self.retrieval_threshold = retrieval_threshold
         self.verify_answer = verify_answer
         self.fallback_to_direct = fallback_to_direct
+        self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
-        # Optional components
-        self.query_transformer = query_transformer
-        self.reranker = reranker
-        self.top_k_retrieve = top_k_retrieve or (top_k * 4 if reranker else top_k)
+    def run(
+        self,
+        queries: list[Query],
+        *,
+        on_result: Callable[[AgentResult], None] | None = None,
+        checkpoint_path: Path | None = None,
+        show_progress: bool = True,
+    ) -> list[AgentResult]:
+        """Process queries with adaptive retrieval."""
+        # Load checkpoint if resuming
+        results, completed_idx = [], set()
+        if checkpoint_path:
+            results, completed_idx = self._load_checkpoint(checkpoint_path)
 
-        # Prompt builders
-        if prompt_builder is not None:
-            self.prompt_builder = prompt_builder
+        pending = [q for q in queries if q.idx not in completed_idx]
+
+        if not pending:
+            logger.info("All queries already completed")
+            return results
+
+        logger.info("SelfRAG: Processing %d queries (threshold=%.2f)",
+                   len(pending), self.retrieval_threshold)
+
+        iterator = pending
+        if show_progress:
+            iterator = tqdm(pending, desc="Processing queries")
+
+        for query in iterator:
+            result = self._process_single_query(query)
+            results.append(result)
+
+            if on_result:
+                on_result(result)
+
+            if checkpoint_path:
+                self._save_checkpoint(results, checkpoint_path)
+
+        logger.info("Completed %d queries", len(pending))
+        return results
+
+    def _process_single_query(self, query: Query) -> AgentResult:
+        """Process a single query with adaptive retrieval."""
+        steps: list[Step] = []
+
+        # Step 1: Assess retrieval need
+        with self.generator_provider.load() as generator:
+            with StepTimer("assess_retrieval", model=self.generator_provider.model_name) as step:
+                confidence = self._assess_retrieval_need(generator, query.text)
+                step.input = {"query": query.text}
+                step.output = {"confidence": confidence}
+            steps.append(step)
+
+        used_retrieval = confidence <= self.retrieval_threshold
+        logger.debug("SelfRAG: confidence=%.2f, threshold=%.2f -> %s",
+                    confidence, self.retrieval_threshold,
+                    "retrieve" if used_retrieval else "direct")
+
+        retrieved_docs: list[Document] = []
+        context_text = ""
+        verification_result = None
+
+        if used_retrieval:
+            # Step 2a: Retrieve
+            with self.embedder_provider.load() as embedder:
+                with StepTimer("encode", model=self.embedder_provider.model_name) as step:
+                    query_embedding = embedder.batch_encode([query.text])
+                    step.input = {"query": query.text}
+                    step.output = {"embedding_shape": query_embedding.shape}
+                steps.append(step)
+
+            with StepTimer("search") as step:
+                search_results = self.index.batch_search(query_embedding, top_k=self.top_k)[0]
+                retrieved_docs = [r.document for r in search_results]
+                step.input = {"top_k": self.top_k}
+                step.output = {"n_docs": len(retrieved_docs)}
+            steps.append(step)
+
+            context_text = ContextFormatter.format_numbered_from_docs(retrieved_docs)
+            prompt = self.prompt_builder.build_rag(query.text, context_text)
+
+            # Step 3a: Generate with context
+            with self.generator_provider.load() as generator:
+                with StepTimer("generate", model=self.generator_provider.model_name) as step:
+                    answer = generator.generate(prompt)
+                    step.input = {"query": query.text, "with_context": True}
+                    step.output = answer
+                steps.append(step)
+
+                # Step 4: Optionally verify
+                if self.verify_answer:
+                    with StepTimer("verify", model=self.generator_provider.model_name) as step:
+                        verification_result = self._verify_grounding(
+                            generator, query.text, answer, context_text
+                        )
+                        step.input = {"answer": answer[:100]}
+                        step.output = {"verification": verification_result}
+                    steps.append(step)
+
+                    # Fallback if not supported
+                    if verification_result == "NOT_SUPPORTED" and self.fallback_to_direct:
+                        logger.debug("Answer not supported, falling back to direct")
+                        with StepTimer("fallback_generate", model=self.generator_provider.model_name) as step:
+                            prompt = self.prompt_builder.build_direct(query.text)
+                            answer = generator.generate(prompt)
+                            step.input = {"query": query.text, "fallback": True}
+                            step.output = answer
+                        steps.append(step)
+                        retrieved_docs = []
+                        context_text = ""
         else:
-            from ragicamp.utils.prompts import PromptConfig
+            # Step 2b: Generate directly without retrieval
+            prompt = self.prompt_builder.build_direct(query.text)
 
-            self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
+            with self.generator_provider.load() as generator:
+                with StepTimer("generate", model=self.generator_provider.model_name) as step:
+                    answer = generator.generate(prompt)
+                    step.input = {"query": query.text, "with_context": False}
+                    step.output = answer
+                steps.append(step)
 
-        self._system_prompt = system_prompt
+        return AgentResult(
+            query=query,
+            answer=answer,
+            steps=steps,
+            prompt=prompt,
+            metadata={
+                "used_retrieval": used_retrieval,
+                "confidence": confidence,
+                "num_docs": len(retrieved_docs),
+                "verification": verification_result,
+            },
+        )
 
-    def _assess_retrieval_need(self, query: str) -> float:
-        """Assess whether retrieval is needed for this query.
-
-        Returns:
-            Confidence score (0-1) that query can be answered without retrieval.
-            Higher = more confident, less likely to retrieve.
-        """
+    def _assess_retrieval_need(self, generator, query: str) -> float:
+        """Assess whether retrieval is needed for this query."""
         prompt = RETRIEVAL_DECISION_PROMPT.format(query=query)
-        response = self.model.generate(prompt, max_tokens=150)
+        response = generator.generate(prompt, max_tokens=150)
 
-        # Parse confidence from response
-        confidence = 0.3  # Default to "uncertain, should retrieve"
+        confidence = 0.3  # Default: uncertain, should retrieve
 
-        # Look for "CONFIDENCE: X.X" pattern
         response_upper = response.upper()
         if "CONFIDENCE:" in response_upper:
             try:
-                # Find the number after CONFIDENCE:
                 idx = response_upper.index("CONFIDENCE:")
-                rest = response[idx + 11 : idx + 20]  # Get chars after "CONFIDENCE:"
-                # Extract first number-like substring
+                rest = response[idx + 11:idx + 20]
                 num_str = ""
                 for char in rest:
                     if char.isdigit() or char == ".":
@@ -182,45 +273,23 @@ class SelfRAGAgent(RAGAgent):
                         break
                 if num_str:
                     confidence = float(num_str)
-                    confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1]
+                    confidence = max(0.0, min(1.0, confidence))
             except (ValueError, IndexError):
                 pass
 
-        logger.debug("Retrieval need assessment for '%s': confidence=%.2f", query[:50], confidence)
         return confidence
 
-    def _retrieve(self, query: str) -> list[Document]:
-        """Retrieve documents for a query."""
-        # Apply query transformer if present
-        search_query = query
-        if self.query_transformer:
-            search_query = self.query_transformer.transform(query)
-
-        # Retrieve
-        docs = self.retriever.retrieve(search_query, top_k=self.top_k_retrieve)
-
-        # Rerank if present
-        if self.reranker:
-            docs = self.reranker.rerank(query, docs, top_k=self.top_k)
-        else:
-            docs = docs[: self.top_k]
-
-        return docs
-
-    def _verify_grounding(self, query: str, answer: str, context: str) -> str:
-        """Verify if the answer is grounded in the context.
-
-        Returns:
-            One of: "SUPPORTED", "PARTIALLY_SUPPORTED", "NOT_SUPPORTED"
-        """
+    def _verify_grounding(
+        self, generator, query: str, answer: str, context: str
+    ) -> str:
+        """Verify if the answer is grounded in the context."""
         prompt = VERIFICATION_PROMPT.format(
-            context=context[:3000],  # Limit context
+            context=context[:3000],
             query=query,
             answer=answer,
         )
-        response = self.model.generate(prompt, max_tokens=100)
+        response = generator.generate(prompt, max_tokens=100)
 
-        # Parse verification result
         response_upper = response.upper()
         if "NOT_SUPPORTED" in response_upper:
             return "NOT_SUPPORTED"
@@ -230,125 +299,3 @@ class SelfRAGAgent(RAGAgent):
             return "SUPPORTED"
         else:
             return "UNKNOWN"
-
-    def _generate_direct(self, query: str, **kwargs: Any) -> str:
-        """Generate answer directly without retrieval."""
-        prompt = self.prompt_builder.build_direct(query)
-        return self.model.generate(prompt, **kwargs)
-
-    def _generate_with_context(
-        self,
-        query: str,
-        context: str,
-        **kwargs: Any,
-    ) -> str:
-        """Generate answer using retrieved context."""
-        prompt = self.prompt_builder.build_rag(query, context)
-        return self.model.generate(prompt, **kwargs)
-
-    def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-        """Generate an answer with adaptive retrieval decision.
-
-        Args:
-            query: The input question
-            **kwargs: Additional generation parameters
-
-        Returns:
-            RAGResponse with answer and decision metadata
-        """
-        # Step 1: Assess if retrieval is needed
-        confidence = self._assess_retrieval_need(query)
-        used_retrieval = confidence <= self.retrieval_threshold
-
-        logger.debug(
-            "Self-RAG decision: confidence=%.2f, threshold=%.2f -> %s",
-            confidence,
-            self.retrieval_threshold,
-            "retrieve" if used_retrieval else "direct",
-        )
-
-        decision_info = {
-            "confidence": confidence,
-            "threshold": self.retrieval_threshold,
-            "used_retrieval": used_retrieval,
-        }
-
-        retrieved_docs: list[Document] = []
-        context_text = ""
-        verification_result = None
-
-        if used_retrieval:
-            # Step 2a: Retrieve and generate with context
-            retrieved_docs = self._retrieve(query)
-            context_text = ContextFormatter.format_numbered(retrieved_docs)
-            prompt = self.prompt_builder.build_rag(query, context_text)
-            answer = self.model.generate(prompt, **kwargs)
-
-            # Step 3: Optionally verify grounding
-            if self.verify_answer:
-                verification_result = self._verify_grounding(query, answer, context_text)
-                decision_info["verification"] = verification_result
-
-                # If not supported and fallback enabled, try direct answer
-                if verification_result == "NOT_SUPPORTED" and self.fallback_to_direct:
-                    logger.debug("Answer not supported by context, falling back to direct")
-                    direct_answer = self._generate_direct(query, **kwargs)
-                    decision_info["fallback_used"] = True
-                    answer = direct_answer
-                    # Clear retrieval info since we didn't use it
-                    retrieved_docs = []
-                    context_text = ""
-                    prompt = self.prompt_builder.build_direct(query)
-        else:
-            # Step 2b: Generate directly without retrieval
-            prompt = self.prompt_builder.build_direct(query)
-            answer = self.model.generate(prompt, **kwargs)
-
-        # Build context object
-        context = RAGContext(
-            query=query,
-            retrieved_docs=retrieved_docs,
-            intermediate_steps=[decision_info],
-            metadata={
-                "used_retrieval": used_retrieval,
-                "confidence": confidence,
-                "num_docs": len(retrieved_docs),
-            },
-        )
-
-        # Build structured retrieved docs
-        retrieved_structured = [
-            RetrievedDoc(
-                rank=i + 1,
-                content=doc.text,
-                score=getattr(doc, "score", None),
-            )
-            for i, doc in enumerate(retrieved_docs)
-        ]
-
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            prompt=prompt,
-            metadata=RAGResponseMeta(
-                agent_type=AgentType.SELF_RAG,
-                num_docs_used=len(retrieved_docs),
-                retrieved_docs=retrieved_structured if retrieved_structured else None,
-            ),
-        )
-
-    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
-        """Generate answers for multiple queries.
-
-        Note: Each query requires its own retrieval decision, so this
-        processes queries sequentially. Future optimization could batch
-        the decision-making step.
-
-        Args:
-            queries: List of input questions
-            **kwargs: Additional generation parameters
-
-        Returns:
-            List of RAGResponse objects
-        """
-        return [self.answer(q, **kwargs) for q in queries]

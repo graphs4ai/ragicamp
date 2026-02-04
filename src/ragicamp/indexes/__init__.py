@@ -1,13 +1,10 @@
 """Index classes for storing and searching document embeddings.
 
-Indexes are the reusable, expensive-to-build artifacts that store:
-- Document chunks
-- Embeddings
-- FAISS indices
-- Sparse (TF-IDF/BM25) indices
+New architecture:
+- VectorIndex: just data (FAISS + documents), no model ownership
+- Legacy: EmbeddingIndex, HierarchicalIndex (still supported)
 
 Retrievers are cheap strategy wrappers that use indexes.
-
 Index building utilities are in ragicamp.indexes.builder.
 """
 
@@ -22,8 +19,14 @@ from ragicamp.indexes.builder import (
 from ragicamp.indexes.embedding import EmbeddingIndex
 from ragicamp.indexes.hierarchical import HierarchicalIndex
 from ragicamp.indexes.sparse import SparseIndex, SparseMethod, get_sparse_index_name
+from ragicamp.indexes.vector_index import Document, SearchResult, VectorIndex
 
 __all__ = [
+    # New architecture (clean separation)
+    "VectorIndex",
+    "Document",
+    "SearchResult",
+    # Legacy indexes
     "Index",
     "EmbeddingIndex",
     "HierarchicalIndex",

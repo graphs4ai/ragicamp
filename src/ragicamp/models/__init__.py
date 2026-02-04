@@ -1,9 +1,21 @@
-"""Language model interfaces."""
+"""Language model interfaces.
+
+New architecture:
+- Providers: lazy loading with context managers
+- Legacy: direct model classes (still supported)
+"""
 
 from ragicamp.models.base import LanguageModel
 from ragicamp.models.embedder import Embedder, create_embedder
 from ragicamp.models.huggingface import HuggingFaceModel
 from ragicamp.models.openai import OpenAIModel
+from ragicamp.models.providers import (
+    EmbedderConfig,
+    EmbedderProvider,
+    GeneratorConfig,
+    GeneratorProvider,
+    ModelProvider,
+)
 
 # vLLM is optional - only import if available
 try:
@@ -15,6 +27,13 @@ except ImportError:
     _VLLM_AVAILABLE = False
 
 __all__ = [
+    # Providers (new architecture)
+    "ModelProvider",
+    "EmbedderProvider",
+    "EmbedderConfig",
+    "GeneratorProvider",
+    "GeneratorConfig",
+    # Legacy interfaces
     "LanguageModel",
     "HuggingFaceModel",
     "OpenAIModel",
