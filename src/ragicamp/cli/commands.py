@@ -390,6 +390,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         continue_on_error=args.continue_on_error,
         max_workers=args.workers,
+        sync=getattr(args, "sync", False),
     )
 
 
@@ -414,9 +415,12 @@ def cmd_download(args: argparse.Namespace) -> int:
         backup_name=args.backup,
         artifacts_only=args.artifacts_only,
         outputs_only=args.outputs_only,
+        indexes_only=getattr(args, "indexes_only", False),
         dry_run=args.dry_run,
         continue_on_error=args.continue_on_error,
         max_workers=args.workers,
+        skip_existing=getattr(args, "skip_existing", False),
+        migrate_indexes=not getattr(args, "no_migrate", False),
     )
 
 

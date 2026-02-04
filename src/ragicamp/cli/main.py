@@ -226,6 +226,12 @@ def create_parser() -> argparse.ArgumentParser:
         default=12,
         help="Number of parallel upload threads (default: 12)",
     )
+    backup_parser.add_argument(
+        "--sync",
+        "-s",
+        action="store_true",
+        help="Only upload new/modified files (compare by size)",
+    )
     backup_parser.set_defaults(func=cmd_backup)
 
     # Download command
@@ -260,6 +266,11 @@ def create_parser() -> argparse.ArgumentParser:
         help="Only download outputs/ (experiment results)",
     )
     download_parser.add_argument(
+        "--indexes-only",
+        action="store_true",
+        help="Only download artifacts/indexes/",
+    )
+    download_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview files without downloading",
@@ -275,6 +286,16 @@ def create_parser() -> argparse.ArgumentParser:
         type=int,
         default=12,
         help="Number of parallel download threads (default: 12)",
+    )
+    download_parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip files that already exist locally with same size",
+    )
+    download_parser.add_argument(
+        "--no-migrate",
+        action="store_true",
+        help="Don't auto-run index migration after download",
     )
     download_parser.set_defaults(func=cmd_download)
 

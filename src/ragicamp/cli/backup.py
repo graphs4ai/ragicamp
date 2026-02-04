@@ -10,6 +10,27 @@ from typing import Optional
 # Default number of parallel workers for upload/download
 DEFAULT_MAX_WORKERS = 12
 
+# Files/patterns to skip during backup
+SKIP_PATTERNS = {
+    ".tmp", ".temp", ".pyc", ".pyo", "__pycache__", ".git",
+    ".DS_Store", "Thumbs.db", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "*.log", "checkpoint.json", ".lock",
+}
+
+
+def should_skip_file(path: Path) -> bool:
+    """Check if file should be skipped during backup."""
+    name = path.name
+    if name.startswith("."):
+        return True
+    for pattern in SKIP_PATTERNS:
+        if pattern.startswith("*"):
+            if name.endswith(pattern[1:]):
+                return True
+        elif name == pattern or pattern in str(path):
+            return True
+    return False
+
 
 def get_b2_client():
     """Get B2 S3 client and credentials.
@@ -77,6 +98,7 @@ def backup(
     dry_run: bool = False,
     continue_on_error: bool = False,
     max_workers: int = DEFAULT_MAX_WORKERS,
+    sync: bool = False,
 ) -> int:
     """Upload directories to B2 with parallel uploads.
 
@@ -87,6 +109,7 @@ def backup(
         dry_run: If True, only preview files
         continue_on_error: If True, continue on upload errors
         max_workers: Number of parallel upload threads (default 12)
+        sync: If True, only upload new/modified files (compare by size)
 
     Returns:
         Exit code (0 on success)
@@ -100,27 +123,69 @@ def backup(
     print(f"Backing up to: s3://{bucket}/{prefix}/")
     print(f"Source directories: {', '.join(str(d) for d in dirs_to_backup)}")
     print(f"Parallel workers: {max_workers}")
+    if sync:
+        print("Sync mode: only uploading new/modified files")
+
+    # If sync mode, get existing files from B2
+    existing_files: dict[str, int] = {}
+    if sync:
+        print("Checking existing files in B2...")
+        try:
+            paginator = s3.get_paginator("list_objects_v2")
+            page_count = 0
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                page_count += 1
+                contents = page.get("Contents", [])
+                for obj in contents:
+                    existing_files[obj["Key"]] = obj["Size"]
+            print(f"Found {len(existing_files)} existing files in backup (scanned {page_count} pages)")
+        except Exception as e:
+            print(f"Warning: Could not list existing files: {e}")
+            print("Proceeding without sync (will upload all files)")
 
     # Collect files to upload
     files_to_upload = []
+    skipped_files = 0
+    skipped_temp = 0
     for backup_dir in dirs_to_backup:
         for root, dirs, files in os.walk(backup_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__pycache__"]
+            # Filter directories
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")]
             for file in files:
-                if file.startswith("."):
-                    continue
                 local_path = Path(root) / file
+                
+                # Skip temp/cache files
+                if should_skip_file(local_path):
+                    skipped_temp += 1
+                    continue
+                
                 relative_path = local_path.relative_to(backup_dir.parent)
                 s3_key = f"{prefix}/{relative_path}"
                 file_size = local_path.stat().st_size
+                
+                # In sync mode, skip if file exists with same size
+                if sync and s3_key in existing_files:
+                    if existing_files[s3_key] == file_size:
+                        skipped_files += 1
+                        continue
+                
                 files_to_upload.append((local_path, s3_key, file_size))
 
     if not files_to_upload:
-        print("No files to upload.")
+        if sync and skipped_files > 0:
+            print(f"All {skipped_files} files already up to date. Nothing to upload.")
+        else:
+            print("No files to upload.")
+        if skipped_temp > 0:
+            print(f"  (Skipped {skipped_temp} temp/cache files)")
         return 0
 
     total_bytes = sum(f[2] for f in files_to_upload)
-    print(f"Found {len(files_to_upload)} files ({total_bytes / (1024**3):.2f} GB)")
+    print(f"Found {len(files_to_upload)} files to upload ({total_bytes / (1024**3):.2f} GB)")
+    if sync and skipped_files > 0:
+        print(f"  Skipped {skipped_files} unchanged files")
+    if skipped_temp > 0:
+        print(f"  Skipped {skipped_temp} temp/cache files")
 
     if dry_run:
         print("\n[DRY RUN] Would upload:")
@@ -133,10 +198,10 @@ def backup(
 
     # Thread-safe counters
     lock = threading.Lock()
-    uploaded_bytes = [0]  # Use list for mutable reference in closure
+    uploaded_bytes = [0]
     uploaded_files = [0]
-    errors = []
-    early_exit = [False]  # Flag to stop workers on first error
+    errors: list[tuple[Path, str]] = []
+    early_exit = [False]
 
     def upload_file(local_path: Path, s3_key: str, file_size: int) -> tuple[bool, str | None]:
         """Upload a single file. Returns (success, error_message)."""
@@ -152,7 +217,6 @@ def backup(
 
     with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Uploading") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all upload tasks
             future_to_file = {
                 executor.submit(upload_file, local_path, s3_key, file_size): (
                     local_path,
@@ -162,7 +226,6 @@ def backup(
                 for local_path, s3_key, file_size in files_to_upload
             }
 
-            # Process completed uploads
             for future in as_completed(future_to_file):
                 local_path, s3_key, file_size = future_to_file[future]
                 success, error = future.result()
@@ -172,15 +235,13 @@ def backup(
                         uploaded_files[0] += 1
                         uploaded_bytes[0] += file_size
                     else:
-                        errors.append((local_path, error))
+                        errors.append((local_path, error or "Unknown error"))
                         if not continue_on_error:
                             early_exit[0] = True
                             print(f"\nError uploading {local_path}: {error}")
                     pbar.update(file_size)
 
-                # Exit early if we hit an error and continue_on_error is False
                 if early_exit[0] and not continue_on_error:
-                    # Cancel pending futures
                     for f in future_to_file:
                         f.cancel()
                     break
@@ -206,9 +267,12 @@ def download(
     backup_name: Optional[str] = None,
     artifacts_only: bool = False,
     outputs_only: bool = False,
+    indexes_only: bool = False,
     dry_run: bool = False,
     continue_on_error: bool = False,
     max_workers: int = DEFAULT_MAX_WORKERS,
+    skip_existing: bool = False,
+    migrate_indexes: bool = True,
 ) -> int:
     """Download backup from B2 with parallel downloads.
 
@@ -217,9 +281,12 @@ def download(
         backup_name: Specific backup to download (None = most recent)
         artifacts_only: Only download artifacts/
         outputs_only: Only download outputs/
+        indexes_only: Only download artifacts/indexes/
         dry_run: If True, only preview files
         continue_on_error: If True, continue on download errors
         max_workers: Number of parallel download threads (default 12)
+        skip_existing: Skip files that already exist locally with same size
+        migrate_indexes: Run index migration after download (default True)
 
     Returns:
         Exit code (0 on success)
@@ -242,38 +309,54 @@ def download(
     prefix = f"ragicamp-backup/{backup_name}"
     print(f"Downloading from: s3://{bucket}/{prefix}/")
     print(f"Parallel workers: {max_workers}")
+    if skip_existing:
+        print("Skip existing: will skip files that already exist with same size")
 
     # List all files in the backup
     files_to_download = []
+    skipped_existing = 0
     try:
         paginator = s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 s3_key = obj["Key"]
                 size = obj["Size"]
-                # Extract local path: remove prefix, keep artifacts/... or outputs/...
-                relative_path = s3_key[len(prefix) + 1 :]  # +1 for trailing /
+                relative_path = s3_key[len(prefix) + 1 :]
                 if not relative_path:
                     continue
 
-                # Filter by artifacts-only or outputs-only
+                # Filter by type
+                if indexes_only and not relative_path.startswith("artifacts/indexes"):
+                    continue
                 if artifacts_only and not relative_path.startswith("artifacts"):
                     continue
                 if outputs_only and not relative_path.startswith("outputs"):
                     continue
 
                 local_path = Path(relative_path)
+                
+                # Skip existing files with same size
+                if skip_existing and local_path.exists():
+                    if local_path.stat().st_size == size:
+                        skipped_existing += 1
+                        continue
+                
                 files_to_download.append((s3_key, local_path, size))
     except Exception as e:
         print(f"Error listing backup contents: {e}")
         return 1
 
     if not files_to_download:
-        print("No files to download.")
+        if skipped_existing > 0:
+            print(f"All {skipped_existing} files already exist. Nothing to download.")
+        else:
+            print("No files to download.")
         return 0
 
     total_bytes = sum(f[2] for f in files_to_download)
     print(f"Found {len(files_to_download)} files ({total_bytes / (1024**3):.2f} GB)")
+    if skipped_existing > 0:
+        print(f"  Skipped {skipped_existing} existing files")
 
     if dry_run:
         print("\n[DRY RUN] Would download:")
@@ -283,7 +366,7 @@ def download(
             print(f"  ... and {len(files_to_download) - 15} more files")
         return 0
 
-    # Pre-create all directories (avoid race conditions in threads)
+    # Pre-create all directories
     dirs_to_create = set()
     for _, local_path, _ in files_to_download:
         dirs_to_create.add(local_path.parent)
@@ -294,7 +377,7 @@ def download(
     lock = threading.Lock()
     downloaded_bytes = [0]
     downloaded_files = [0]
-    errors = []
+    errors: list[tuple[Path, str]] = []
     early_exit = [False]
 
     def download_file(s3_key: str, local_path: Path, size: int) -> tuple[bool, str | None]:
@@ -311,7 +394,6 @@ def download(
 
     with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Downloading") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all download tasks
             future_to_file = {
                 executor.submit(download_file, s3_key, local_path, size): (
                     s3_key,
@@ -321,7 +403,6 @@ def download(
                 for s3_key, local_path, size in files_to_download
             }
 
-            # Process completed downloads
             for future in as_completed(future_to_file):
                 s3_key, local_path, size = future_to_file[future]
                 success, error = future.result()
@@ -331,13 +412,12 @@ def download(
                         downloaded_files[0] += 1
                         downloaded_bytes[0] += size
                     else:
-                        errors.append((local_path, error))
+                        errors.append((local_path, error or "Unknown error"))
                         if not continue_on_error:
                             early_exit[0] = True
                             print(f"\nError downloading {s3_key}: {error}")
                     pbar.update(size)
 
-                # Exit early if we hit an error and continue_on_error is False
                 if early_exit[0] and not continue_on_error:
                     for f in future_to_file:
                         f.cancel()
@@ -347,9 +427,7 @@ def download(
     speed_mbps = (downloaded_bytes[0] / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
     print(f"\n✓ Downloaded {downloaded_files[0]}/{len(files_to_download)} files")
-    print(
-        f"  Total: {downloaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
-    )
+    print(f"  Total: {downloaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
     if errors:
         print(f"\n⚠️  {len(errors)} errors:")
@@ -364,5 +442,19 @@ def download(
         print(f"  artifacts/: {sum(1 for _ in Path('artifacts').rglob('*') if _.is_file())} files")
     if Path("outputs").exists():
         print(f"  outputs/: {sum(1 for _ in Path('outputs').rglob('*') if _.is_file())} files")
+
+    # Auto-migrate indexes after download
+    if migrate_indexes and (artifacts_only or indexes_only or not outputs_only):
+        indexes_dir = Path("artifacts/indexes")
+        if indexes_dir.exists():
+            print("\n🔄 Migrating indexes to new format...")
+            try:
+                from ragicamp.cli.commands import cmd_migrate_indexes
+                import argparse
+                migrate_args = argparse.Namespace(index_name=None, dry_run=False)
+                cmd_migrate_indexes(migrate_args)
+            except Exception as e:
+                print(f"  Warning: Index migration failed: {e}")
+                print("  Run manually: uv run ragicamp migrate-indexes")
 
     return 0
