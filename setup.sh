@@ -37,6 +37,15 @@ fi
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 log "Python version: $PYTHON_VERSION"
 
+# Install system libraries required by opencv-python-headless (vLLM 0.15+ dependency)
+if command -v apt-get &> /dev/null; then
+    if ! ldconfig -p 2>/dev/null | grep -q libxcb.so.1; then
+        log "Installing libxcb (required by opencv-python-headless)..."
+        sudo apt-get update -qq && sudo apt-get install -y -qq libxcb1 libxcb-xinerama0 > /dev/null 2>&1 || \
+            warn "Could not install libxcb. If vLLM fails, run: sudo apt-get install libxcb1 libxcb-xinerama0"
+    fi
+fi
+
 # ============================================================================
 # Step 1b: Check for GPU
 # ============================================================================
