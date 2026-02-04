@@ -3,11 +3,21 @@
 Uses vLLM's continuous batching for faster embedding than sentence-transformers.
 See: https://docs.vllm.ai/en/latest/getting_started/examples/embedding.html
 
-Supported models (examples):
-- intfloat/e5-mistral-7b-instruct
-- Alibaba-NLP/gte-Qwen2-7B-instruct
-- BAAI/bge-en-icl (instruction-following)
-- Salesforce/SFR-Embedding-Mistral
+Supported models (vLLM 0.15+):
+
+Top MTEB performers:
+- Qwen/Qwen3-Embedding-8B         # MTEB #1 (70.58), 8B params, 32k context, 100+ languages
+- Alibaba-NLP/gte-Qwen2-7B-instruct  # MTEB 70.24, 7B params
+- Alibaba-NLP/gte-Qwen2-1.5B-instruct  # Fast alternative, 1.5B params
+
+BGE family (BERT-based, fast):
+- BAAI/bge-large-en-v1.5          # Proven baseline, 335M params
+- BAAI/bge-m3                     # Multilingual, supports sparse/ColBERT (vLLM 0.15+)
+- BAAI/bge-en-icl                 # Instruction-following
+
+Decoder-based (large but powerful):
+- intfloat/e5-mistral-7b-instruct # 7B params, top MTEB retrieval
+- Salesforce/SFR-Embedding-Mistral  # MTEB 68.17
 
 Note: Not all sentence-transformer models are supported by vLLM.
 Check vLLM model compatibility before using.
@@ -70,16 +80,21 @@ class VLLMEmbedder:
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-                logger.info("GPU detected: %s (%.1f GB)", gpu_name, gpu_mem)
+                gpu_mem_allocated = torch.cuda.memory_allocated(0) / 1e9
+                logger.info("GPU detected: %s (%.1f GB total, %.2f GB allocated)", 
+                           gpu_name, gpu_mem, gpu_mem_allocated)
             else:
-                logger.warning("No GPU detected! vLLM will be slow.")
+                logger.warning("No GPU detected! vLLM will be slow on CPU.")
 
             logger.info(
-                "Loading vLLM embedding model: %s (gpu_mem=%.1f%%)",
+                "Loading vLLM embedding model: %s (gpu_mem_util=%.1f%%)",
                 self.model_name,
                 self.gpu_memory_fraction * 100,
             )
 
+            # NOTE: For embedding models, gpu_memory_utilization has limited effect
+            # since there's no KV cache to pre-allocate. Memory usage = model weights only.
+            # See: https://github.com/vllm-project/vllm/issues/12308
             self._llm = LLM(
                 model=self.model_name,
                 task="embed",
@@ -89,7 +104,11 @@ class VLLMEmbedder:
                 dtype="auto",  # Use bfloat16/float16 on GPU
             )
 
-            logger.info("vLLM embedding model loaded: %s", self.model_name)
+            # Log actual GPU memory after loading
+            if torch.cuda.is_available():
+                gpu_mem_after = torch.cuda.memory_allocated(0) / 1e9
+                logger.info("vLLM embedding model loaded: %s (GPU memory: %.2f GB)", 
+                           self.model_name, gpu_mem_after)
 
         return self._llm
 
@@ -123,6 +142,14 @@ class VLLMEmbedder:
         """
         if isinstance(sentences, str):
             sentences = [sentences]
+
+        # Log first encode to verify GPU is being used
+        if not hasattr(self, "_first_encode_logged"):
+            import torch
+            if torch.cuda.is_available():
+                gpu_mem_before = torch.cuda.memory_allocated(0) / 1e9
+                logger.debug("GPU memory before encode: %.2f GB", gpu_mem_before)
+            self._first_encode_logged = True
 
         # vLLM handles batching internally with continuous batching
         outputs = self.llm.embed(sentences)

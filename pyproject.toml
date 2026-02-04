@@ -42,7 +42,7 @@ dependencies = [
     "pytest>=8.4.2",
     "boto3>=1.42.39",
     "awscli>=1.30.0",  # For B2 backup download script
-    "vllm>=0.6.0",  # PagedAttention for efficient LLM inference
+    "vllm>=0.15.0",  # PagedAttention for efficient LLM inference (v0.15 adds BGE-M3 ColBERT, Qwen3-Embedding)
     # Visualization
     "matplotlib>=3.5.0",
     "seaborn>=0.12.0",

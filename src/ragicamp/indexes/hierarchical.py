@@ -2,17 +2,20 @@
 
 import pickle
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import faiss
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.base import Index
 from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
 from ragicamp.retrievers.base import Document
 from ragicamp.utils.artifacts import get_artifact_manager
+
+if TYPE_CHECKING:
+    from ragicamp.models.embedder import Embedder
 
 logger = get_logger(__name__)
 
@@ -38,6 +41,8 @@ class HierarchicalIndex(Index):
         child_chunk_size: int = 256,
         parent_overlap: int = 100,
         child_overlap: int = 50,
+        embedding_backend: str = "vllm",
+        vllm_gpu_memory_fraction: float = 0.7,
         **kwargs: Any,
     ):
         """Initialize hierarchical index.
@@ -49,6 +54,8 @@ class HierarchicalIndex(Index):
             child_chunk_size: Size of child chunks
             parent_overlap: Overlap between parent chunks
             child_overlap: Overlap between child chunks
+            embedding_backend: 'vllm' or 'sentence_transformers'
+            vllm_gpu_memory_fraction: GPU memory fraction for vLLM embeddings
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
@@ -58,9 +65,13 @@ class HierarchicalIndex(Index):
         self.child_chunk_size = child_chunk_size
         self.parent_overlap = parent_overlap
         self.child_overlap = child_overlap
+        
+        # Embedding backend configuration
+        self.embedding_backend = embedding_backend
+        self.vllm_gpu_memory_fraction = vllm_gpu_memory_fraction
 
         # Lazy load encoder
-        self._encoder: Optional[SentenceTransformer] = None
+        self._encoder: Optional["Embedder"] = None
         self._embedding_dim: Optional[int] = None
 
         # Chunker
@@ -76,37 +87,82 @@ class HierarchicalIndex(Index):
         self.index: Optional[faiss.Index] = None
 
     @property
-    def encoder(self) -> SentenceTransformer:
-        """Lazy load encoder with Flash Attention (if available) and torch.compile()."""
+    def encoder(self) -> "Embedder":
+        """Lazy load encoder with backend-specific optimizations.
+
+        Backends:
+        - vllm: Uses vLLM's continuous batching for high throughput
+        - sentence_transformers: Default, with Flash Attention, FP16, torch.compile
+        """
         if self._encoder is None:
-            # Try Flash Attention 2 if available, otherwise fall back to default
-            model_kwargs = {}
+            if self.embedding_backend == "vllm":
+                self._load_vllm_encoder()
+            else:
+                self._load_sentence_transformers_encoder()
+
+        return self._encoder
+
+    def _load_vllm_encoder(self):
+        """Load vLLM embedding model."""
+        from ragicamp.models.vllm_embedder import VLLMEmbedder
+
+        # For inference (query encoding), use lower GPU fraction to leave room for generator
+        gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
+
+        logger.info(
+            "Loading vLLM embedding model: %s (gpu_fraction=%.0f%% for inference)",
+            self.embedding_model_name,
+            gpu_fraction * 100,
+        )
+        self._encoder = VLLMEmbedder(
+            model_name=self.embedding_model_name,
+            gpu_memory_fraction=gpu_fraction,
+            enforce_eager=False,  # Use CUDA graphs for speed
+        )
+        self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+        logger.info("vLLM embedder loaded (dim=%d)", self._embedding_dim)
+
+    def _load_sentence_transformers_encoder(self):
+        """Load sentence-transformers model with optimizations."""
+        import torch
+        from sentence_transformers import SentenceTransformer
+
+        model_kwargs = {}
+
+        # Optimization 1: Flash Attention 2
+        if Defaults.EMBEDDING_USE_FLASH_ATTENTION:
             try:
                 import flash_attn  # noqa: F401
 
                 model_kwargs["attn_implementation"] = "flash_attention_2"
-                logger.info("Flash Attention 2 available, enabling for embeddings")
+                logger.info("Flash Attention 2 enabled for embeddings")
             except ImportError:
                 logger.debug("flash-attn not installed, using default attention")
 
-            self._encoder = SentenceTransformer(
-                self.embedding_model_name,
-                trust_remote_code=True,
-                model_kwargs=model_kwargs if model_kwargs else None,
-            )
-            self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+        # Optimization 2: FP16/BF16 precision
+        if Defaults.EMBEDDING_USE_FP16 and torch.cuda.is_available():
+            if torch.cuda.is_bf16_supported():
+                model_kwargs["torch_dtype"] = torch.bfloat16
+                logger.info("Using BF16 precision for embeddings")
+            else:
+                model_kwargs["torch_dtype"] = torch.float16
+                logger.info("Using FP16 precision for embeddings")
 
-            # Apply torch.compile() for additional speedup (PyTorch 2.0+)
+        self._encoder = SentenceTransformer(
+            self.embedding_model_name,
+            trust_remote_code=True,
+            model_kwargs=model_kwargs if model_kwargs else None,
+        )
+        self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
+
+        # Optimization 3: torch.compile() for kernel fusion
+        if Defaults.EMBEDDING_USE_TORCH_COMPILE:
             try:
-                import torch
-
                 if hasattr(torch, "compile") and torch.cuda.is_available():
                     self._encoder = torch.compile(self._encoder, mode="reduce-overhead")
                     logger.info("Applied torch.compile() to embedding model")
             except Exception as e:
                 logger.debug("torch.compile() not applied: %s", e)
-
-        return self._encoder
 
     @property
     def embedding_dim(self) -> int:
@@ -358,6 +414,7 @@ class HierarchicalIndex(Index):
             "name": self.name,
             "type": "hierarchical",
             "embedding_model": self.embedding_model_name,
+            "embedding_backend": self.embedding_backend,
             "parent_chunk_size": self.parent_chunk_size,
             "child_chunk_size": self.child_chunk_size,
             "parent_overlap": self.parent_overlap,
@@ -400,6 +457,7 @@ class HierarchicalIndex(Index):
             child_chunk_size=config["child_chunk_size"],
             parent_overlap=config.get("parent_overlap", 100),
             child_overlap=config.get("child_overlap", 50),
+            embedding_backend=config.get("embedding_backend", "vllm"),
         )
         index._embedding_dim = config.get("embedding_dim")
 

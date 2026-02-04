@@ -18,7 +18,7 @@
 # - Uses SINGLETON experiments for agent-based strategies (iterative, self-rag)
 # - Supports RANDOM SEARCH mode for efficient exploration (see sampling: section)
 #
-# Embeddings: BGE-large (BERT), BGE-M3 (multilingual)
+# Embeddings: BGE-large (BERT), BGE-M3 (multilingual), GTE-Qwen2-1.5B (fast + strong)
 # Advanced retrieval: Hybrid (TF-IDF/BM25), Hierarchical, reranking
 # Query transforms: HyDE, MultiQuery
 # Small generators: Llama-3.2-3B, Phi-3-mini, Qwen2.5-3B
@@ -85,14 +85,16 @@ rag:
   # --------------------------------------------------------------------------
   # Sampling Mode (Random Search)
   # --------------------------------------------------------------------------
-  # Sample ~260 RAG experiments from the grid to keep total around 300.
+  # Sample ~300 RAG experiments from the grid to keep total around 350.
+  # Grid: 3 models × 6 retrievers × 3 top_k × 3 query_transform × 3 reranker × 3 datasets
+  #     = 1,458 possible combinations
   # Fixed experiments (always included):
   #   - Direct baselines: 9 (3 models × 3 datasets)
   #   - Singleton experiments: 30 (iterative_rag, self_rag, premium × 3 datasets)
-  # Total: 9 + 30 + 260 = ~300 experiments
+  # Total: 9 + 30 + 300 = ~350 experiments
   sampling:
     mode: stratified        # Ensures coverage across all models × retrievers
-    n_experiments: 260      # Sample from 1,215 RAG grid combinations
+    n_experiments: 300      # Sample from 1,458 RAG grid combinations
     seed: 42                # Reproducible sampling
     stratify_by: [model, retriever]  # At least one experiment per model×retriever
   
@@ -146,10 +148,21 @@ rag:
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
-
-    # GTE models: Not supported by vLLM yet
-    # - gte-large-en-v1.5 uses NewModel architecture (not in vLLM)
-    # - thenlper/gte-large has 512 token limit (same chunking issues)
+    
+    # =========================================================================
+    # HIGH-PERFORMANCE EMBEDDING MODELS (vLLM 0.15+)
+    # =========================================================================
+    
+    # GTE-Qwen2-1.5B: Fast with strong MTEB scores (~67)
+    # 1.5B params, good balance of speed and quality
+    - type: dense
+      name: dense_gte_qwen2_1.5b_512
+      embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
+      embedding_backend: vllm
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+      index_type: hnsw
     
     # E5-Mistral: 7B decoder, top MTEB retrieval scores
     # TEMPORARILY DISABLED - sharded index build in progress
@@ -199,6 +212,17 @@ rag:
       chunk_overlap: 50
       index_type: hnsw
     
+    # Hybrid GTE-Qwen2 + BM25 - strong hybrid with fast embeddings
+    - type: hybrid
+      name: hybrid_gte_qwen2_bm25_07
+      embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
+      embedding_backend: vllm
+      sparse_method: bm25
+      alpha: 0.7
+      chunk_size: 512
+      chunk_overlap: 50
+      index_type: hnsw
+    
     # =========================================================================
     # HIERARCHICAL RETRIEVERS (Parent-Child Chunks)
     # =========================================================================
@@ -220,14 +244,17 @@ rag:
   # STRATEGY: Compare embedding models with different characteristics
   # - BGE Large: proven baseline, fast inference
   # - BGE M3: multilingual capability  
-  # - Hybrid: combines dense + BM25 (uses BGE Large index)
+  # - GTE-Qwen2-1.5B: fast with strong MTEB scores (requires vLLM 0.15+)
+  # - Hybrid: combines dense + BM25
   #
   retriever_names:
-    - dense_bge_large_512      # Built - proven baseline
-    - dense_bge_m3_512         # Built - multilingual
-    - hybrid_bge_large_bm25_07 # Built - uses BGE Large index
-    - hierarchical_bge_large   # Hierarchical retrieval
-    # - dense_e5_mistral_512   # PENDING - sharded index build in progress
+    - dense_bge_large_512           # Built - proven baseline
+    - dense_bge_m3_512              # Built - multilingual
+    - dense_gte_qwen2_1.5b_512      # NEW - fast, strong (1.5B params)
+    - hybrid_bge_large_bm25_07      # Built - uses BGE Large index
+    - hybrid_gte_qwen2_bm25_07      # NEW - hybrid with GTE embeddings
+    - hierarchical_bge_large        # Hierarchical retrieval
+    # - dense_e5_mistral_512        # PENDING - sharded index build in progress
   
   top_k_values:
     - 3
