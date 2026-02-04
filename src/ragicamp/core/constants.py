@@ -172,10 +172,12 @@ class Defaults:
     ARTIFACTS_DIR = "artifacts"
     CACHE_DIR = "data/datasets"
 
-    # GPU Memory Partitioning
-    # With FAISS on CPU, vLLM can use most of the GPU
-    VLLM_GPU_MEMORY_FRACTION = 0.70  # 70% for vLLM - reduced to leave room for other processes
+    # GPU Memory Partitioning for Multi-Model vLLM
+    # When running RAG with vLLM embedder + vLLM generator, we need to split GPU memory
+    VLLM_GPU_MEMORY_FRACTION = 0.50  # 50% for generator (main model)
+    VLLM_EMBEDDER_GPU_MEMORY_FRACTION = 0.25  # 25% for query embedder at inference
     FAISS_GPU_MEMORY_FRACTION = 0.0  # FAISS runs on CPU (B200 not yet supported)
+    # Total: 75% allocated, 25% headroom for PyTorch, etc.
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration

@@ -206,22 +206,33 @@ class EmbeddingIndex(Index):
         - BAAI/bge-en-icl
         """
         if self._encoder is None:
-            # IMPORTANT: For inference (query encoding), always use sentence-transformers
-            # vLLM allocates too much GPU memory and conflicts with the generator.
-            # vLLM is only beneficial for high-throughput index building.
-            # Both produce identical embeddings (same model weights).
-            self._load_sentence_transformers_encoder()
+            if self.embedding_backend == "vllm":
+                self._load_vllm_encoder()
+            else:
+                self._load_sentence_transformers_encoder()
 
         return self._encoder
 
     def _load_vllm_encoder(self):
-        """Load vLLM embedding model."""
+        """Load vLLM embedding model.
+        
+        Uses a lower GPU memory fraction for inference (query encoding) to leave
+        room for the generator model. Index building uses the full configured fraction.
+        """
         from ragicamp.models.vllm_embedder import VLLMEmbedder
 
-        logger.info("Loading vLLM embedding model: %s", self.embedding_model_name)
+        # For inference (query encoding), use lower GPU fraction to leave room for generator
+        # The index is already built, so we're just encoding queries
+        gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
+        
+        logger.info(
+            "Loading vLLM embedding model: %s (gpu_fraction=%.0f%% for inference)",
+            self.embedding_model_name,
+            gpu_fraction * 100,
+        )
         self._encoder = VLLMEmbedder(
             model_name=self.embedding_model_name,
-            gpu_memory_fraction=self.vllm_gpu_memory_fraction,
+            gpu_memory_fraction=gpu_fraction,
             enforce_eager=False,  # Use CUDA graphs for speed
         )
         self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
