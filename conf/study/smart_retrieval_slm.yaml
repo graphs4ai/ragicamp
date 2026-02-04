@@ -67,7 +67,8 @@ direct:
   enabled: true
   models: *slm_models
   prompts:
-    - concise
+    - concise       # Baseline
+    - fewshot_3     # Few-shot for comparison with RAG
   quantization:
     - none
 
@@ -85,18 +86,18 @@ rag:
   # --------------------------------------------------------------------------
   # Sampling Mode (Random Search)
   # --------------------------------------------------------------------------
-  # Sample ~300 RAG experiments from the grid to keep total around 350.
-  # Grid: 3 models × 6 retrievers × 3 top_k × 3 query_transform × 3 reranker × 3 datasets
-  #     = 1,458 possible combinations
+  # Sample ~400 RAG experiments from the grid to keep total manageable.
+  # Grid: 3 models × 6 retrievers × 3 top_k × 3 query_transform × 3 reranker × 4 prompts × 3 datasets
+  #     = 5,832 possible combinations
   # Fixed experiments (always included):
-  #   - Direct baselines: 9 (3 models × 3 datasets)
+  #   - Direct baselines: 18 (3 models × 2 prompts × 3 datasets)
   #   - Singleton experiments: 30 (iterative_rag, self_rag, premium × 3 datasets)
-  # Total: 9 + 30 + 300 = ~350 experiments
+  # Total: 18 + 30 + 400 = ~450 experiments
   sampling:
     mode: stratified        # Ensures coverage across all models × retrievers
-    n_experiments: 300      # Sample from 1,458 RAG grid combinations
+    n_experiments: 400      # Sample from 5,832 RAG grid combinations
     seed: 42                # Reproducible sampling
-    stratify_by: [model, retriever]  # At least one experiment per model×retriever
+    stratify_by: [model, retriever, prompt]  # Coverage across key dimensions
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)
@@ -295,7 +296,10 @@ rag:
   fetch_k_multiplier: 5  # fetch_k = top_k * 5 when reranking
   
   prompts:
-    - concise
+    - concise       # Baseline - minimal "just answer" style
+    - structured    # Clear ### delimiters for instruction-tuned models
+    - cot           # Chain-of-thought - good for HotpotQA multi-hop
+    - fewshot_3     # 3 few-shot examples from training set
   
   quantization:
     - none
