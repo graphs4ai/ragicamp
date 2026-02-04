@@ -12,6 +12,7 @@ Usage:
 # CRITICAL: Configure environment BEFORE any imports!
 # ============================================================================
 import os
+import shutil
 
 # TensorFlow: Prevent grabbing all GPU memory on import
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
@@ -21,6 +22,11 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF info logs
 # See: https://github.com/vllm-project/vllm/issues/6152
 if "VLLM_WORKER_MULTIPROC_METHOD" not in os.environ:
     os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+# vLLM: Use TORCH_SDPA attention backend if nvcc is not available
+# FlashInfer requires nvcc for JIT compilation
+if not shutil.which("nvcc") and "VLLM_ATTENTION_BACKEND" not in os.environ:
+    os.environ["VLLM_ATTENTION_BACKEND"] = "TORCH_SDPA"
 
 import argparse
 import json

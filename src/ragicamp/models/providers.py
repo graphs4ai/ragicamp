@@ -7,6 +7,14 @@ Design principles:
 - True batch operations for throughput
 """
 
+import os
+import shutil
+
+# Set vLLM attention backend fallback if nvcc is not available
+# This must happen before vLLM is imported
+if not shutil.which("nvcc") and "VLLM_ATTENTION_BACKEND" not in os.environ:
+    os.environ["VLLM_ATTENTION_BACKEND"] = "TORCH_SDPA"
+
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
