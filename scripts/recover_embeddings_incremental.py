@@ -96,6 +96,8 @@ def main():
         print(f"Resuming: loading existing index from {index_path}...", flush=True)
         index = faiss.read_index(str(index_path))
         print(f"  Loaded index with {index.ntotal} vectors", flush=True)
+        mem_after_load = get_memory_gb()
+        print(f"  Memory after loading index: {mem_after_load:.1f} GB", flush=True)
     else:
         if args.index_type == "hnsw":
             print(f"Creating new FAISS HNSW index (dim={args.embedding_dim})...", flush=True)
