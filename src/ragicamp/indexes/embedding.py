@@ -191,6 +191,11 @@ class EmbeddingIndex(Index):
         # Storage
         self.documents: list[Document] = []
         self.index: Optional[faiss.Index] = None
+        
+        # Sharded index support (for large indexes split across multiple files)
+        self._shard_indexes: Optional[list[faiss.Index]] = None
+        self._shard_doc_offsets: Optional[list[int]] = None  # Cumulative doc counts per shard
+        self._is_sharded: bool = False
 
     @property
     def encoder(self) -> Any:
@@ -435,6 +440,9 @@ class EmbeddingIndex(Index):
         Returns:
             List of (document_idx, score) tuples
         """
+        if self._is_sharded:
+            return self._search_sharded(query_embedding, top_k)
+        
         if self.index is None or self.index.ntotal == 0:
             return []
 
@@ -447,6 +455,38 @@ class EmbeddingIndex(Index):
                 results.append((int(idx), float(score)))
 
         return results
+    
+    def _search_sharded(self, query_embedding: np.ndarray, top_k: int) -> list[tuple[int, float]]:
+        """Search across all shards and merge results.
+        
+        Queries all shards, adjusts indices to global document space,
+        and returns top-k across all shards.
+        """
+        if not self._shard_indexes:
+            return []
+        
+        query = query_embedding.astype("float32").reshape(1, -1)
+        all_results = []
+        
+        # Query each shard and collect results
+        for shard_idx, shard_index in enumerate(self._shard_indexes):
+            if shard_index.ntotal == 0:
+                continue
+            
+            scores, indices = shard_index.search(query, top_k)
+            doc_offset = self._shard_doc_offsets[shard_idx]
+            
+            for idx, score in zip(indices[0], scores[0]):
+                if idx >= 0:  # FAISS returns -1 for missing results
+                    global_idx = doc_offset + int(idx)
+                    if 0 <= global_idx < len(self.documents):
+                        all_results.append((global_idx, float(score)))
+        
+        # Sort by score (descending for inner product, ascending for L2)
+        # For normalized embeddings with inner product, higher is better
+        all_results.sort(key=lambda x: x[1], reverse=True)
+        
+        return all_results[:top_k]
 
     def encode_query(self, query: str) -> np.ndarray:
         """Encode a query string to embedding.
@@ -486,6 +526,9 @@ class EmbeddingIndex(Index):
         Returns:
             List of (document_idx, score) tuples for each query
         """
+        if self._is_sharded:
+            return self._batch_search_sharded(query_embeddings, top_k)
+        
         if self.index is None or self.index.ntotal == 0:
             return [[] for _ in range(len(query_embeddings))]
 
@@ -500,6 +543,47 @@ class EmbeddingIndex(Index):
             all_results.append(results)
 
         return all_results
+    
+    def _batch_search_sharded(
+        self, query_embeddings: np.ndarray, top_k: int
+    ) -> list[list[tuple[int, float]]]:
+        """Batch search across all shards and merge results.
+        
+        For each query, searches all shards, adjusts indices to global
+        document space, and returns top-k across all shards.
+        """
+        if not self._shard_indexes:
+            return [[] for _ in range(len(query_embeddings))]
+        
+        n_queries = len(query_embeddings)
+        queries = query_embeddings.astype("float32")
+        
+        # Collect results from all shards for all queries
+        # all_shard_results[query_idx] = list of (global_doc_idx, score)
+        all_shard_results: list[list[tuple[int, float]]] = [[] for _ in range(n_queries)]
+        
+        for shard_idx, shard_index in enumerate(self._shard_indexes):
+            if shard_index.ntotal == 0:
+                continue
+            
+            scores, indices = shard_index.search(queries, top_k)
+            doc_offset = self._shard_doc_offsets[shard_idx]
+            
+            for q_idx in range(n_queries):
+                for idx, score in zip(indices[q_idx], scores[q_idx]):
+                    if idx >= 0:  # FAISS returns -1 for missing results
+                        global_idx = doc_offset + int(idx)
+                        if 0 <= global_idx < len(self.documents):
+                            all_shard_results[q_idx].append((global_idx, float(score)))
+        
+        # Sort and truncate results for each query
+        final_results = []
+        for q_results in all_shard_results:
+            # Sort by score descending (for inner product similarity)
+            q_results.sort(key=lambda x: x[1], reverse=True)
+            final_results.append(q_results[:top_k])
+        
+        return final_results
 
     def get_document(self, idx: int) -> Optional[Document]:
         """Get document by index."""
@@ -568,6 +652,9 @@ class EmbeddingIndex(Index):
     ) -> "EmbeddingIndex":
         """Load index from disk.
 
+        Supports both single-file indexes and sharded indexes.
+        Sharded indexes are detected by the presence of shard_0/, shard_1/, etc. directories.
+
         Args:
             name: Index name
             path: Optional custom path
@@ -600,7 +687,28 @@ class EmbeddingIndex(Index):
             nprobe=config.get("nprobe", Defaults.FAISS_IVF_NPROBE),
         )
         index._embedding_dim = config.get("embedding_dim")
+        
+        # Check for sharded index (shard_0/, shard_1/, etc.)
+        shard_dirs = sorted([d for d in path.iterdir() if d.is_dir() and d.name.startswith("shard_")])
+        
+        if shard_dirs:
+            # Load sharded index - all shards kept in memory for max throughput
+            index._load_sharded_index(path, shard_dirs, use_gpu, config)
+        else:
+            # Load single-file index (original behavior)
+            index._load_single_index(path, use_gpu, config)
 
+        logger.info(
+            "Loaded embedding index: %s (%d docs, GPU=%s, sharded=%s)",
+            name,
+            len(index.documents),
+            index._is_gpu_index,
+            index._is_sharded,
+        )
+        return index
+    
+    def _load_single_index(self, path: Path, use_gpu: bool, config: dict) -> None:
+        """Load a single-file (non-sharded) index."""
         # Load FAISS index (always saved as CPU)
         cpu_index = faiss.read_index(str(path / "index.faiss"))
 
@@ -612,34 +720,90 @@ class EmbeddingIndex(Index):
                 try:
                     co = faiss.GpuClonerOptions()
                     co.useFloat16 = True
-                    index.index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
-                    index._is_gpu_index = True
-                    logger.info("Loaded index to GPU: %s (%d docs)", name, cpu_index.ntotal)
+                    self.index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
+                    self._is_gpu_index = True
+                    logger.info("Loaded index to GPU: %s (%d vectors)", self.name, cpu_index.ntotal)
                 except Exception as e:
                     logger.warning("Failed to load index to GPU, using CPU: %s", e)
-                    index.index = cpu_index
-                    index._is_gpu_index = False
+                    self.index = cpu_index
+                    self._is_gpu_index = False
             else:
-                index.index = cpu_index
-                index._is_gpu_index = False
+                self.index = cpu_index
+                self._is_gpu_index = False
         else:
-            index.index = cpu_index
-            index._is_gpu_index = False
+            self.index = cpu_index
+            self._is_gpu_index = False
 
         # Set search parameters
-        index._set_search_params()
+        self._set_search_params()
 
         # Load documents
         with open(path / "documents.pkl", "rb") as f:
-            index.documents = pickle.load(f)
-
+            self.documents = pickle.load(f)
+    
+    def _load_sharded_index(self, path: Path, shard_dirs: list[Path], use_gpu: bool, config: dict) -> None:
+        """Load a sharded index - all shards kept in memory for max throughput.
+        
+        For large GPUs (B200, H100), keeping all shards in memory provides
+        the best query performance by avoiding shard loading/unloading overhead.
+        """
+        self._is_sharded = True
+        self._shard_indexes = []
+        self._shard_doc_offsets = [0]  # Cumulative document offsets
+        
+        index_type = config.get("index_type", "flat")
+        gpu_res = get_faiss_gpu_resources() if use_gpu and index_type != "hnsw" else None
+        
+        total_vectors = 0
+        for shard_dir in shard_dirs:
+            shard_index_path = shard_dir / "index.faiss"
+            if not shard_index_path.exists():
+                logger.warning("Shard missing index.faiss: %s", shard_dir)
+                continue
+            
+            cpu_index = faiss.read_index(str(shard_index_path))
+            
+            # Optionally move to GPU
+            if gpu_res is not None:
+                try:
+                    co = faiss.GpuClonerOptions()
+                    co.useFloat16 = True
+                    gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
+                    self._shard_indexes.append(gpu_index)
+                    self._is_gpu_index = True
+                except Exception as e:
+                    logger.warning("Failed to load shard to GPU: %s", e)
+                    self._shard_indexes.append(cpu_index)
+            else:
+                self._shard_indexes.append(cpu_index)
+            
+            total_vectors += cpu_index.ntotal
+            self._shard_doc_offsets.append(total_vectors)
+            logger.debug("Loaded shard %s: %d vectors", shard_dir.name, cpu_index.ntotal)
+        
         logger.info(
-            "Loaded embedding index: %s (%d docs, GPU=%s)",
-            name,
-            len(index.documents),
-            index._is_gpu_index,
+            "Loaded %d shards with %d total vectors (GPU=%s)",
+            len(self._shard_indexes), total_vectors, self._is_gpu_index
         )
-        return index
+        
+        # Load documents - either combined or from shards
+        docs_path = path / "documents.pkl"
+        if docs_path.exists():
+            with open(docs_path, "rb") as f:
+                self.documents = pickle.load(f)
+        else:
+            # Load documents from each shard and combine
+            self.documents = []
+            for shard_dir in shard_dirs:
+                shard_docs_path = shard_dir / "documents.pkl"
+                if shard_docs_path.exists():
+                    with open(shard_docs_path, "rb") as f:
+                        self.documents.extend(pickle.load(f))
+        
+        # Also set self.index to the first shard for compatibility with _set_search_params
+        if self._shard_indexes:
+            self.index = self._shard_indexes[0]
+            self._set_search_params()
 
     def convert_to(self, new_index_type: str, save: bool = True) -> "EmbeddingIndex":
         """Convert index to a different type without re-embedding.
