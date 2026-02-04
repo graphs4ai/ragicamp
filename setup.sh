@@ -47,10 +47,19 @@ if command -v apt-get &> /dev/null; then
 fi
 
 # ============================================================================
-# Step 1b: Check for GPU
+# Step 1b: Check for GPU and CUDA toolkit
 # ============================================================================
 if command -v nvidia-smi &> /dev/null; then
     log "GPU detected: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
+    
+    # Check if CUDA toolkit is installed (needed for flashinfer JIT)
+    if ! command -v nvcc &> /dev/null; then
+        warn "CUDA toolkit (nvcc) not found - flashinfer JIT compilation won't work"
+        warn "Setting VLLM_ATTENTION_BACKEND=FLASH_ATTN as fallback"
+        export VLLM_ATTENTION_BACKEND=FLASH_ATTN
+    else
+        log "CUDA toolkit: $(nvcc --version 2>/dev/null | grep release | sed 's/.*release //' | sed 's/,.*//')"
+    fi
 else
     log "No GPU detected"
 fi
