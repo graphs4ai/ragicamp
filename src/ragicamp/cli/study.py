@@ -172,7 +172,12 @@ def run_study(
     rag_config = config.get("rag", {})
     if rag_config.get("enabled"):
         corpus_config = rag_config.get("corpus", {})
-        retriever_configs = rag_config.get("retrievers", [])
+        all_retrievers = rag_config.get("retrievers", [])
+        # Only build indexes for retrievers that are actually used in the study
+        active_retriever_names = set(rag_config.get("retriever_names", []))
+        retriever_configs = [
+            r for r in all_retrievers if r.get("name") in active_retriever_names
+        ]
         ensure_indexes_exist(retriever_configs, corpus_config)
 
     # When sampling, exclude already-completed experiments from the pool
