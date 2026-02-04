@@ -119,6 +119,28 @@ class ContextFormatter:
         return "\n\n".join(formatted)
 
     @staticmethod
+    def format_numbered_from_docs(docs: list) -> str:
+        """Format documents with .text attribute as numbered passages.
+        
+        Works with any object that has a .text attribute.
+        
+        Args:
+            docs: List of document-like objects with .text attribute
+        
+        Returns:
+            Numbered list of documents
+        """
+        if not docs:
+            return "No relevant passages found."
+
+        formatted = []
+        for i, doc in enumerate(docs, 1):
+            text = doc.text if hasattr(doc, 'text') else str(doc)
+            formatted.append(f"--- Passage {i} ---\n{text}")
+
+        return "\n\n".join(formatted)
+
+    @staticmethod
     def format_with_titles(docs: list[Document], title_key: str = "title") -> str:
         """Format documents with titles from metadata.
 
