@@ -56,6 +56,8 @@ def main():
                         help="Resume from this batch (auto-detects from checkpoint if not specified)")
     parser.add_argument("--num-threads", type=int, default=32, help="FAISS threads (default: 32)")
     parser.add_argument("--checkpoint-every", type=int, default=1, help="Checkpoint every N batches")
+    parser.add_argument("--index-type", choices=["hnsw", "flat"], default="flat",
+                        help="Index type: 'flat' (less memory, slower search) or 'hnsw' (more memory, faster search)")
     args = parser.parse_args()
 
     emb_path = Path(args.emb_file)
@@ -95,9 +97,14 @@ def main():
         index = faiss.read_index(str(index_path))
         print(f"  Loaded index with {index.ntotal} vectors", flush=True)
     else:
-        print(f"Creating new FAISS HNSW index (dim={args.embedding_dim})...", flush=True)
-        index = faiss.IndexHNSWFlat(args.embedding_dim, 32)
-        index.hnsw.efConstruction = 200
+        if args.index_type == "hnsw":
+            print(f"Creating new FAISS HNSW index (dim={args.embedding_dim})...", flush=True)
+            index = faiss.IndexHNSWFlat(args.embedding_dim, 32)
+            index.hnsw.efConstruction = 200
+        else:
+            print(f"Creating new FAISS Flat index (dim={args.embedding_dim})...", flush=True)
+            print(f"  (Flat uses less memory but slower search - can convert to HNSW later)", flush=True)
+            index = faiss.IndexFlatIP(args.embedding_dim)
         print(f"  Index created", flush=True)
 
     # =========================================================================
@@ -222,7 +229,7 @@ def main():
         "type": "embedding",
         "embedding_model": "intfloat/e5-mistral-7b-instruct",
         "embedding_backend": "vllm",
-        "index_type": "hnsw",
+        "index_type": args.index_type,
         "chunk_size": 512,
         "chunk_overlap": 50,
         "chunking_strategy": "recursive",
