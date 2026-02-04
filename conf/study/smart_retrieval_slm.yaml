@@ -158,6 +158,7 @@ rag:
       embedding_model: NovaSearch/stella_en_1.5B_v5
       embedding_backend: vllm  # Stella is Qwen2-based, vLLM supports via Transformers
       embedding_dim: 1024  # MRL allows flexible dims; 1024 is optimal
+      max_model_len: 1024  # Stella default is 512, but chunks may be slightly longer
       chunk_size: 512
       chunk_overlap: 50
       chunking_strategy: recursive

@@ -64,6 +64,7 @@ def create_embedder(
     enforce_eager: bool = False,
     use_flash_attn: bool = True,
     use_compile: bool = True,
+    max_model_len: int | None = None,
     **kwargs,
 ) -> Embedder:
     """Create an embedder using the specified backend.
@@ -78,6 +79,8 @@ def create_embedder(
         enforce_eager: Use eager mode instead of CUDA graphs (vLLM only)
         use_flash_attn: Use Flash Attention 2 if available (sentence_transformers only)
         use_compile: Apply torch.compile (sentence_transformers only)
+        max_model_len: Maximum sequence length for embeddings (vLLM only).
+                      Set higher if chunks exceed model's default (e.g., 512 for Stella).
         **kwargs: Additional backend-specific arguments
 
     Returns:
@@ -91,6 +94,7 @@ def create_embedder(
             model_name=model_name,
             gpu_memory_fraction=gpu_memory_fraction,
             enforce_eager=enforce_eager,
+            max_model_len=max_model_len,
         )
     else:
         from .st_embedder import SentenceTransformerEmbedder

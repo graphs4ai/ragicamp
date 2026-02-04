@@ -42,6 +42,7 @@ class VLLMEmbedder:
         gpu_memory_fraction: float = 0.7,
         enforce_eager: bool = False,
         trust_remote_code: bool = True,
+        max_model_len: Optional[int] = None,
     ):
         """Initialize vLLM embedder.
 
@@ -50,11 +51,14 @@ class VLLMEmbedder:
             gpu_memory_fraction: Fraction of GPU memory to use (0.7 default)
             enforce_eager: Use eager mode (False = use CUDA graphs for speed)
             trust_remote_code: Trust remote code in model
+            max_model_len: Maximum sequence length. If None, uses model's default.
+                          Set higher if you get "prompt longer than max" errors.
         """
         self.model_name = model_name
         self.gpu_memory_fraction = gpu_memory_fraction
         self.enforce_eager = enforce_eager
         self.trust_remote_code = trust_remote_code
+        self.max_model_len = max_model_len
 
         self._llm: Optional[vllm.LLM] = None
         self._embedding_dim: Optional[int] = None
@@ -65,19 +69,26 @@ class VLLMEmbedder:
         if self._llm is None:
             from vllm import LLM
 
+            max_len_info = f", max_len={self.max_model_len}" if self.max_model_len else ""
             logger.info(
-                "Loading vLLM embedding model: %s (gpu_mem=%.1f%%)",
+                "Loading vLLM embedding model: %s (gpu_mem=%.1f%%%s)",
                 self.model_name,
                 self.gpu_memory_fraction * 100,
+                max_len_info,
             )
 
-            self._llm = LLM(
-                model=self.model_name,
-                task="embed",
-                trust_remote_code=self.trust_remote_code,
-                gpu_memory_utilization=self.gpu_memory_fraction,
-                enforce_eager=self.enforce_eager,
-            )
+            kwargs = {
+                "model": self.model_name,
+                "task": "embed",
+                "trust_remote_code": self.trust_remote_code,
+                "gpu_memory_utilization": self.gpu_memory_fraction,
+                "enforce_eager": self.enforce_eager,
+            }
+
+            if self.max_model_len is not None:
+                kwargs["max_model_len"] = self.max_model_len
+
+            self._llm = LLM(**kwargs)
 
             logger.info("vLLM embedding model loaded: %s", self.model_name)
 

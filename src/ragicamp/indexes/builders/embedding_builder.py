@@ -53,6 +53,7 @@ def build_embedding_index(
     nprobe: int = None,
     embedding_backend: str = "vllm",
     vllm_gpu_memory_fraction: float = 0.7,
+    max_model_len: int | None = None,
 ) -> str:
     """Build a shared embedding index with batched processing.
 
@@ -82,6 +83,8 @@ def build_embedding_index(
         nprobe: Number of clusters to search. Default: Defaults.FAISS_IVF_NPROBE
         embedding_backend: 'vllm' or 'sentence_transformers'
         vllm_gpu_memory_fraction: GPU memory fraction for vLLM (default 0.9)
+        max_model_len: Maximum sequence length for embeddings (vLLM only).
+                      Set higher if chunks exceed model's default (e.g., 1024 for Stella's 512 default).
 
     Returns:
         Path to the saved index
@@ -145,6 +148,7 @@ def build_embedding_index(
         backend=embedding_backend,
         gpu_memory_fraction=vllm_gpu_memory_fraction,
         enforce_eager=False,
+        max_model_len=max_model_len,
     )
     embedding_dim = encoder.get_sentence_embedding_dimension()
     print(f"  Embedder loaded (dim={embedding_dim})")

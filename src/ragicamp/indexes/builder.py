@@ -235,6 +235,11 @@ def ensure_indexes_exist(
                     embedding_cfg.get("backend", "vllm"),
                 )
                 vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.7)
+                # max_model_len: retriever-specific > embedding config > None (use model default)
+                max_model_len = first_retriever.get(
+                    "max_model_len",
+                    embedding_cfg.get("max_model_len"),
+                )
 
                 build_embedding_index(
                     index_name=index_name,
@@ -248,6 +253,7 @@ def ensure_indexes_exist(
                     index_type=first_retriever.get("index_type"),
                     embedding_backend=embedding_backend,
                     vllm_gpu_memory_fraction=vllm_gpu_fraction,
+                    max_model_len=max_model_len,
                 )
                 ready_indexes.append(index_name)
                 ResourceManager.clear_gpu_memory()
