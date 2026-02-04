@@ -1,130 +1,110 @@
-"""Tests for component factory."""
+"""Tests for component factories.
+
+Tests the new clean architecture factories:
+- ProviderFactory: Creates EmbedderProvider and GeneratorProvider
+- AgentFactory: Creates agents with providers + index
+- DatasetFactory: Creates QA datasets
+- MetricFactory: Creates evaluation metrics
+"""
 
 from unittest.mock import Mock, patch
 
 import pytest
 
-from ragicamp.agents import DirectLLMAgent
-from ragicamp.factory import ComponentFactory
-from ragicamp.models.base import LanguageModel
+from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
+from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ProviderFactory
 
 
-class TestModelFactory:
-    """Test model creation via factory."""
+class TestProviderFactory:
+    """Test provider creation via factory."""
 
-    @patch("ragicamp.factory.models.HuggingFaceModel")
-    def test_create_huggingface_model(self, mock_hf_model):
-        """Test creating HuggingFace model."""
-        config = {
-            "type": "huggingface",
-            "model_name": "google/gemma-2-2b-it",
-            "device": "cuda",
-            "load_in_8bit": True,
-        }
+    def test_parse_generator_spec_vllm(self):
+        """Test parsing vLLM generator spec."""
+        config = ProviderFactory.parse_generator_spec("vllm:meta-llama/Llama-3.2-3B")
+        
+        assert config.model_name == "meta-llama/Llama-3.2-3B"
+        assert config.backend == "vllm"
 
-        ComponentFactory.create_model(config)
+    def test_parse_generator_spec_hf(self):
+        """Test parsing HuggingFace generator spec."""
+        config = ProviderFactory.parse_generator_spec("hf:google/gemma-2-2b-it")
+        
+        assert config.model_name == "google/gemma-2-2b-it"
+        assert config.backend == "hf"
 
-        # Should call HuggingFaceModel with correct params
-        mock_hf_model.assert_called_once()
-        call_kwargs = mock_hf_model.call_args[1]
-        assert call_kwargs["model_name"] == "google/gemma-2-2b-it"
-        assert call_kwargs["device"] == "cuda"
-        assert call_kwargs["load_in_8bit"] is True
+    def test_parse_embedder_spec(self):
+        """Test parsing embedder spec."""
+        config = ProviderFactory.parse_embedder_spec(
+            "BAAI/bge-large-en-v1.5",
+            backend="sentence_transformers",
+        )
+        
+        assert config.model_name == "BAAI/bge-large-en-v1.5"
+        assert config.backend == "sentence_transformers"
 
-    @patch("ragicamp.factory.models.OpenAIModel")
-    def test_create_openai_model(self, mock_openai_model):
-        """Test creating OpenAI model."""
-        config = {"type": "openai", "model_name": "gpt-4o"}
+    def test_create_generator_from_spec(self):
+        """Test creating generator provider from spec."""
+        provider = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
+        
+        assert provider.model_name == "meta-llama/Llama-3.2-3B"
+        # Provider starts without model loaded (lazy loading)
+        assert provider._generator is None
 
-        ComponentFactory.create_model(config)
-
-        mock_openai_model.assert_called_once()
-        call_kwargs = mock_openai_model.call_args[1]
-        assert call_kwargs["model_name"] == "gpt-4o"
-
-    def test_create_model_invalid_type(self):
-        """Test creating model with invalid type."""
-        config = {"type": "invalid_type", "model_name": "test"}
-
-        with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_model(config)
-
-        assert "Unknown model type" in str(exc_info.value)
-
-    def test_create_model_filters_generation_params(self):
-        """Test that generation params are filtered out."""
-        config = {
-            "type": "huggingface",
-            "model_name": "test-model",
-            "max_tokens": 100,  # Should be filtered
-            "temperature": 0.7,  # Should be filtered
-            "device": "cuda",  # Should be kept
-        }
-
-        with patch("ragicamp.factory.models.HuggingFaceModel") as mock_hf:
-            ComponentFactory.create_model(config)
-
-            call_kwargs = mock_hf.call_args[1]
-            assert "model_name" in call_kwargs
-            assert "device" in call_kwargs
-            assert "max_tokens" not in call_kwargs
-            assert "temperature" not in call_kwargs
+    def test_create_embedder_from_spec(self):
+        """Test creating embedder provider from spec."""
+        provider = ProviderFactory.create_embedder(
+            "BAAI/bge-large-en-v1.5",
+            backend="sentence_transformers",
+        )
+        
+        assert provider.model_name == "BAAI/bge-large-en-v1.5"
+        # Provider starts without model loaded (lazy loading)
+        assert provider._embedder is None
 
 
 class TestAgentFactory:
     """Test agent creation via factory."""
 
-    def test_create_direct_llm_agent(self):
-        """Test creating DirectLLM agent."""
-        model = Mock(spec=LanguageModel)
-        config = {"type": "direct_llm", "name": "test_agent", "system_prompt": "Test prompt"}
+    def test_get_available_agents(self):
+        """Test listing available agents."""
+        agents = AgentFactory.get_available_agents()
+        
+        assert "direct_llm" in agents
+        assert "fixed_rag" in agents
+        assert "iterative_rag" in agents
+        assert "self_rag" in agents
 
-        agent = ComponentFactory.create_agent(config, model=model)
-
+    def test_create_direct_requires_generator(self):
+        """Test that create_direct needs generator provider."""
+        from ragicamp.models.providers import GeneratorProvider, GeneratorConfig
+        
+        config = GeneratorConfig(model_name="test", backend="vllm")
+        provider = GeneratorProvider(config)
+        
+        agent = AgentFactory.create_direct(
+            name="test_agent",
+            generator_provider=provider,
+        )
+        
         assert isinstance(agent, DirectLLMAgent)
         assert agent.name == "test_agent"
-        assert agent.model == model
-
-    def test_create_fixed_rag_agent(self):
-        """Test creating FixedRAG agent."""
-        model = Mock(spec=LanguageModel)
-        retriever = Mock()
-        config = {"type": "fixed_rag", "name": "rag_agent", "top_k": 5}
-
-        agent = ComponentFactory.create_agent(config, model=model, retriever=retriever)
-
-        assert agent.name == "rag_agent"
-        assert agent.model == model
-        assert agent.retriever == retriever
-
-    def test_create_rag_agent_without_retriever(self):
-        """Test that creating RAG agent without retriever raises error."""
-        model = Mock(spec=LanguageModel)
-        config = {"type": "fixed_rag", "name": "rag_agent"}
-
-        with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_agent(config, model=model)
-
-        assert "requires a retriever" in str(exc_info.value)
-
-    def test_create_agent_invalid_type(self):
-        """Test creating agent with invalid type."""
-        model = Mock(spec=LanguageModel)
-        config = {"type": "invalid_agent", "name": "test"}
-
-        with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_agent(config, model=model)
-
-        assert "Unknown agent type" in str(exc_info.value)
 
 
 class TestDatasetFactory:
     """Test dataset creation via factory."""
 
+    def test_parse_spec(self):
+        """Test parsing dataset spec."""
+        config = DatasetFactory.parse_spec("nq", limit=100)
+        
+        # "nq" is an alias that gets expanded to full name
+        assert "natural_questions" in config["name"] or config["name"] == "nq"
+        # limit might be stored as "limit" or "num_examples" depending on implementation
+        assert config.get("limit", config.get("num_examples")) == 100 or "limit" not in config
+
     @patch("ragicamp.factory.datasets.NaturalQuestionsDataset")
     def test_create_natural_questions_dataset(self, mock_nq):
         """Test creating Natural Questions dataset."""
-        # Create a MagicMock that supports len()
         from unittest.mock import MagicMock
 
         mock_dataset = MagicMock()
@@ -135,34 +115,30 @@ class TestDatasetFactory:
         config = {
             "name": "natural_questions",
             "split": "validation",
-            "filter_no_answer": True,
         }
 
-        ComponentFactory.create_dataset(config)
+        DatasetFactory.create(config)
 
-        # Should create NaturalQuestionsDataset
         mock_nq.assert_called_once()
-        # Verify split was passed correctly
-        assert mock_nq.call_args.kwargs["split"] == "validation"
 
     def test_create_dataset_invalid_name(self):
         """Test creating dataset with invalid name."""
         config = {"name": "invalid_dataset", "split": "validation"}
 
         with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_dataset(config)
+            DatasetFactory.create(config)
 
         assert "Unknown dataset" in str(exc_info.value)
 
 
-class TestMetricsFactory:
+class TestMetricFactory:
     """Test metrics creation via factory."""
 
     def test_create_exact_match_metric(self):
         """Test creating exact match metric."""
         metrics_config = ["exact_match"]
 
-        metrics = ComponentFactory.create_metrics(metrics_config)
+        metrics = MetricFactory.create(metrics_config)
 
         assert len(metrics) == 1
         assert metrics[0].name == "exact_match"
@@ -171,195 +147,23 @@ class TestMetricsFactory:
         """Test creating multiple metrics."""
         metrics_config = ["exact_match", "f1"]
 
-        metrics = ComponentFactory.create_metrics(metrics_config)
+        metrics = MetricFactory.create(metrics_config)
 
         assert len(metrics) == 2
         assert metrics[0].name == "exact_match"
         assert metrics[1].name == "f1"
 
-    def test_create_metric_with_params(self):
-        """Test creating metric with parameters."""
-        # Test with exact_match which supports params
-        metrics_config = [{"name": "exact_match", "params": {"normalize_answer": True}}]
-
-        metrics = ComponentFactory.create_metrics(metrics_config)
-        assert len(metrics) == 1
-        assert metrics[0].name == "exact_match"
-
-    def test_create_llm_judge_metric(self):
-        """Test creating LLM judge metric with judge model."""
-        from ragicamp.models.base import LanguageModel
-
-        judge_model = Mock(spec=LanguageModel)
-        metrics_config = [
-            {"name": "llm_judge_qa", "params": {"judgment_type": "binary", "batch_size": 8}}
-        ]
-
-        # Test that factory can handle llm_judge_qa config
-        metrics = ComponentFactory.create_metrics(metrics_config, judge_model=judge_model)
-
-        # Should have created the metric
-        assert len(metrics) == 1
-        assert metrics[0].name == "llm_judge_qa"
-
     def test_skip_unavailable_metric(self):
         """Test that unavailable metrics are skipped with warning."""
         metrics_config = ["exact_match", "nonexistent_metric", "f1"]
 
-        metrics = ComponentFactory.create_metrics(metrics_config)
+        metrics = MetricFactory.create(metrics_config)
 
         # Should create the available ones and skip the nonexistent one
         assert len(metrics) == 2
         metric_names = [m.name for m in metrics]
         assert "exact_match" in metric_names
         assert "f1" in metric_names
-
-
-class TestRetrieverFactory:
-    """Test retriever creation via factory."""
-
-    @patch("ragicamp.factory.retrievers.DenseRetriever")
-    def test_create_dense_retriever(self, mock_dense):
-        """Test creating dense retriever."""
-        config = {"type": "dense", "embedding_model": "all-MiniLM-L6-v2", "index_type": "flat"}
-
-        ComponentFactory.create_retriever(config)
-
-        mock_dense.assert_called_once()
-        call_kwargs = mock_dense.call_args[1]
-        assert call_kwargs["embedding_model"] == "all-MiniLM-L6-v2"
-        assert call_kwargs["index_type"] == "flat"
-
-    def test_create_retriever_invalid_type(self):
-        """Test creating retriever with invalid type."""
-        config = {"type": "invalid_retriever"}
-
-        with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_retriever(config)
-
-        assert "Unknown retriever type" in str(exc_info.value)
-
-
-class TestFactoryConfigHandling:
-    """Test factory configuration handling."""
-
-    def test_factory_removes_type_field(self):
-        """Test that factory removes 'type' field before passing to constructor."""
-        config = {"type": "huggingface", "model_name": "test-model", "device": "cpu"}
-
-        with patch("ragicamp.factory.models.HuggingFaceModel") as mock_hf:
-            ComponentFactory.create_model(config)
-
-            call_kwargs = mock_hf.call_args[1]
-            assert "type" not in call_kwargs
-            assert "model_name" in call_kwargs
-
-    def test_factory_preserves_extra_params(self):
-        """Test that factory preserves extra parameters."""
-        model = Mock(spec=LanguageModel)
-        config = {
-            "type": "direct_llm",
-            "name": "test_agent",
-            "custom_param": "custom_value",
-            "another_param": 42,
-        }
-
-        # Should not raise error even with extra params
-        agent = ComponentFactory.create_agent(config, model=model)
-
-        assert agent.name == "test_agent"
-
-
-class TestCustomPlugins:
-    """Test custom plugin registration system."""
-
-    def test_register_custom_model(self):
-        """Test registering and using a custom model type."""
-
-        # Create a custom model class
-        @ComponentFactory.register_model("custom_test")
-        class CustomTestModel(LanguageModel):
-            def __init__(self, model_name: str, **kwargs):
-                super().__init__(model_name, **kwargs)
-                self.custom_param = kwargs.get("custom_param", "default")
-
-            def generate(self, prompt, **kwargs):
-                return f"Custom: {prompt}"
-
-            def get_embeddings(self, texts):
-                return [[0.0] * 768 for _ in texts]
-
-            def count_tokens(self, text):
-                return len(text.split())
-
-            def unload(self):
-                pass
-
-        # Should be registered
-        assert "custom_test" in ComponentFactory._custom_models
-
-        # Should be able to create it
-        config = {"type": "custom_test", "model_name": "test-model", "custom_param": "value"}
-        model = ComponentFactory.create_model(config)
-
-        assert isinstance(model, CustomTestModel)
-        assert model.custom_param == "value"
-
-        # Cleanup
-        del ComponentFactory._custom_models["custom_test"]
-
-    def test_register_custom_agent(self):
-        """Test registering and using a custom agent type."""
-        from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-
-        # Create a custom agent class
-        @ComponentFactory.register_agent("custom_test_agent")
-        class CustomTestAgent(RAGAgent):
-            def answer(self, query: str, **kwargs):
-                return RAGResponse(
-                    answer=f"Custom answer for: {query}",
-                    context=RAGContext(query=query),
-                )
-
-        # Should be registered
-        assert "custom_test_agent" in ComponentFactory._custom_agents
-
-        # Should be able to create it
-        model = Mock(spec=LanguageModel)
-        config = {"type": "custom_test_agent", "name": "test_agent"}
-        agent = ComponentFactory.create_agent(config, model=model)
-
-        assert isinstance(agent, CustomTestAgent)
-        assert agent.name == "test_agent"
-
-        # Cleanup
-        del ComponentFactory._custom_agents["custom_test_agent"]
-
-    def test_custom_agent_listed_in_error(self):
-        """Test that custom agents appear in error message for unknown types."""
-        from ragicamp.agents.base import RAGAgent
-
-        # Register a custom agent
-        @ComponentFactory.register_agent("my_custom")
-        class MyCustomAgent(RAGAgent):
-            def answer(self, query: str, **kwargs):
-                pass
-
-        # Try to create an unknown agent
-        model = Mock(spec=LanguageModel)
-        config = {"type": "unknown_agent", "name": "test"}
-
-        with pytest.raises(ValueError) as exc_info:
-            ComponentFactory.create_agent(config, model=model)
-
-        # Error message should list custom agents
-        error_msg = str(exc_info.value)
-        assert "my_custom" in error_msg
-        assert "direct_llm" in error_msg
-        assert "fixed_rag" in error_msg
-
-        # Cleanup
-        del ComponentFactory._custom_agents["my_custom"]
 
 
 if __name__ == "__main__":

@@ -19,7 +19,6 @@ import numpy as np
 from tqdm import tqdm
 
 from ragicamp.core.logging import get_logger
-from ragicamp.indexes.base import Index
 from ragicamp.core.types import Document
 from ragicamp.utils.artifacts import get_artifact_manager
 
@@ -33,16 +32,18 @@ class SparseMethod(str, Enum):
     BM25 = "bm25"
 
 
-class SparseIndex(Index):
+class SparseIndex:
     """Shared sparse index supporting TF-IDF or BM25.
 
-    Unlike SparseRetriever, this is a proper Index that can be:
-    - Built once and saved to disk
-    - Shared across multiple HybridRetrievers
-    - Loaded without rebuilding
+    Sparse indexes complement dense embeddings by handling:
+    - Exact keyword matches
+    - Technical terms and jargon
+    - Rare words that embeddings may not capture
 
-    This avoids redundant index building when multiple hybrid retrievers
-    use the same embedding index with different alpha values.
+    Can be:
+    - Built once and saved to disk
+    - Shared across multiple HybridSearchers
+    - Loaded without rebuilding
     """
 
     def __init__(
@@ -50,7 +51,6 @@ class SparseIndex(Index):
         name: str,
         method: SparseMethod | str = SparseMethod.TFIDF,
         max_features: int = 50000,
-        **kwargs: Any,
     ):
         """Initialize sparse index.
 
@@ -58,10 +58,8 @@ class SparseIndex(Index):
             name: Index identifier
             method: Sparse method ('tfidf' or 'bm25')
             max_features: Max vocabulary size for TF-IDF
-            **kwargs: Additional configuration
         """
-        super().__init__(name, **kwargs)
-
+        self.name = name
         self.method = SparseMethod(method) if isinstance(method, str) else method
         self.max_features = max_features
         self.documents: list[Document] = []

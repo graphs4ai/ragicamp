@@ -19,11 +19,57 @@ from ragicamp.config.validation import (
     validate_model_spec,
 )
 from ragicamp.execution.runner import run_spec
-from ragicamp.indexes.builder import (
-    ensure_indexes_exist,
-)
+from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
 from ragicamp.models import OpenAIModel
 from ragicamp.spec.builder import build_specs
+from ragicamp.core.logging import get_logger
+from ragicamp.utils.artifacts import get_artifact_manager
+
+_study_logger = get_logger(__name__)
+
+
+def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
+    """Ensure all required indexes exist, building them if necessary.
+    
+    Args:
+        retriever_configs: List of retriever configuration dicts
+        corpus_config: Corpus configuration dict
+    """
+    manager = get_artifact_manager()
+    
+    for config in retriever_configs:
+        retriever_type = config.get("type", "dense")
+        name = config.get("name", "")
+        
+        # Check if index already exists
+        if retriever_type == "hierarchical":
+            index_path = manager.get_embedding_index_path(name)
+        else:
+            # Dense or hybrid - use embedding index name
+            index_name = config.get("embedding_index", name)
+            index_path = manager.get_embedding_index_path(index_name)
+        
+        if (index_path / "config.json").exists():
+            _study_logger.info("Index exists: %s", name)
+            continue
+        
+        # Build the index
+        _study_logger.info("Building index: %s", name)
+        
+        if retriever_type == "hierarchical":
+            build_hierarchical_index(
+                retriever_config=config,
+                corpus_config=corpus_config,
+            )
+        else:
+            build_embedding_index(
+                index_name=config.get("embedding_index", name),
+                embedding_model=config.get("embedding_model", "all-MiniLM-L6-v2"),
+                chunk_size=config.get("chunk_size", 512),
+                chunk_overlap=config.get("chunk_overlap", 50),
+                corpus_config=corpus_config,
+                embedding_backend=config.get("embedding_backend", "vllm"),
+            )
 
 
 def get_prompt_builder(prompt_type: str, dataset: str):

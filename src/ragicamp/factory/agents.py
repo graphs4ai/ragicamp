@@ -85,9 +85,9 @@ class AgentFactory:
         Returns:
             DirectLLMAgent
         """
-        from ragicamp.utils.prompts import PromptBuilder
+        from ragicamp.utils.prompts import PromptBuilder, PromptConfig
         
-        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder()
+        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder(PromptConfig())
         
         return DirectLLMAgent(
             name=name,
@@ -121,12 +121,12 @@ class AgentFactory:
         Returns:
             Agent instance
         """
-        from ragicamp.utils.prompts import PromptBuilder
+        from ragicamp.utils.prompts import PromptBuilder, PromptConfig
         
         # Resolve aliases
         agent_type = cls._aliases.get(agent_type, agent_type)
         
-        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder()
+        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder(PromptConfig())
         
         common_kwargs = {
             "name": name,

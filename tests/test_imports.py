@@ -2,6 +2,8 @@
 
 These tests ensure all key modules can be imported without errors.
 This catches issues like missing re-exports or incorrect import paths.
+
+Updated for clean architecture migration.
 """
 
 
@@ -54,37 +56,123 @@ class TestModelImports:
 
         assert OpenAIModel is not None
 
+    def test_import_providers(self):
+        """Test importing provider classes."""
+        from ragicamp.models import EmbedderProvider, GeneratorProvider
+
+        assert EmbedderProvider is not None
+        assert GeneratorProvider is not None
+
 
 class TestIndexImports:
     """Test that index modules import correctly."""
 
-    def test_import_embedding_index(self):
-        """Test importing EmbeddingIndex."""
-        from ragicamp.indexes import EmbeddingIndex
+    def test_import_vector_index(self):
+        """Test importing VectorIndex."""
+        from ragicamp.indexes import VectorIndex
 
-        assert EmbeddingIndex is not None
+        assert VectorIndex is not None
 
-    def test_import_hierarchical_index(self):
-        """Test importing HierarchicalIndex."""
-        from ragicamp.indexes import HierarchicalIndex
+    def test_import_index_builder(self):
+        """Test importing IndexBuilder."""
+        from ragicamp.indexes import IndexBuilder
 
-        assert HierarchicalIndex is not None
+        assert IndexBuilder is not None
+
+    def test_import_index_config(self):
+        """Test importing IndexConfig."""
+        from ragicamp.indexes import IndexConfig
+
+        assert IndexConfig is not None
+
+
+class TestRetrieverImports:
+    """Test that retriever modules import correctly."""
+
+    def test_import_hybrid_searcher(self):
+        """Test importing HybridSearcher."""
+        from ragicamp.retrievers import HybridSearcher
+
+        assert HybridSearcher is not None
+
+    def test_import_sparse_index(self):
+        """Test importing SparseIndex."""
+        from ragicamp.retrievers import SparseIndex
+
+        assert SparseIndex is not None
 
 
 class TestFactoryImports:
     """Test that factory modules import correctly."""
 
-    def test_import_model_factory(self):
-        """Test importing ModelFactory."""
-        from ragicamp.factory import ModelFactory
+    def test_import_provider_factory(self):
+        """Test importing ProviderFactory."""
+        from ragicamp.factory import ProviderFactory
 
-        assert ModelFactory is not None
+        assert ProviderFactory is not None
 
     def test_import_agent_factory(self):
         """Test importing AgentFactory."""
         from ragicamp.factory import AgentFactory
 
         assert AgentFactory is not None
+
+    def test_import_metric_factory(self):
+        """Test importing MetricFactory."""
+        from ragicamp.factory import MetricFactory
+
+        assert MetricFactory is not None
+
+    def test_import_dataset_factory(self):
+        """Test importing DatasetFactory."""
+        from ragicamp.factory import DatasetFactory
+
+        assert DatasetFactory is not None
+
+
+class TestAgentImports:
+    """Test that agent modules import correctly."""
+
+    def test_import_agent_protocol(self):
+        """Test importing Agent protocol."""
+        from ragicamp.agents import Agent
+
+        assert Agent is not None
+
+    def test_import_direct_llm_agent(self):
+        """Test importing DirectLLMAgent."""
+        from ragicamp.agents import DirectLLMAgent
+
+        assert DirectLLMAgent is not None
+
+    def test_import_fixed_rag_agent(self):
+        """Test importing FixedRAGAgent."""
+        from ragicamp.agents import FixedRAGAgent
+
+        assert FixedRAGAgent is not None
+
+    def test_import_query_and_result(self):
+        """Test importing Query and AgentResult."""
+        from ragicamp.agents import Query, AgentResult
+
+        assert Query is not None
+        assert AgentResult is not None
+
+
+class TestCoreImports:
+    """Test that core type imports work."""
+
+    def test_import_document(self):
+        """Test importing Document."""
+        from ragicamp.core.types import Document
+
+        assert Document is not None
+
+    def test_import_search_result(self):
+        """Test importing SearchResult."""
+        from ragicamp.core.types import SearchResult
+
+        assert SearchResult is not None
 
 
 class TestSpecImports:

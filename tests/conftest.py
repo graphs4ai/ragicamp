@@ -19,9 +19,9 @@ from typing import Any, Optional
 import pytest
 
 # Import RAGiCamp components
+from ragicamp.core.types import Document
 from ragicamp.datasets.base import QADataset, QAExample
 from ragicamp.metrics.base import Metric
-from ragicamp.retrievers.base import Document
 
 # === Mock Model ===
 

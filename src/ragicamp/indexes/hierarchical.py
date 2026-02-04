@@ -9,9 +9,8 @@ import numpy as np
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
-from ragicamp.indexes.base import Index
-from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
 from ragicamp.core.types import Document
+from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
 from ragicamp.utils.artifacts import get_artifact_manager
 
 if TYPE_CHECKING:
@@ -20,7 +19,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class HierarchicalIndex(Index):
+class HierarchicalIndex:
     """Index for hierarchical (parent-child) chunk retrieval.
 
     Stores:
@@ -43,7 +42,6 @@ class HierarchicalIndex(Index):
         child_overlap: int = 50,
         embedding_backend: str = "vllm",
         vllm_gpu_memory_fraction: float = 0.7,
-        **kwargs: Any,
     ):
         """Initialize hierarchical index.
 
@@ -56,10 +54,8 @@ class HierarchicalIndex(Index):
             child_overlap: Overlap between child chunks
             embedding_backend: 'vllm' or 'sentence_transformers'
             vllm_gpu_memory_fraction: GPU memory fraction for vLLM embeddings
-            **kwargs: Additional configuration
         """
-        super().__init__(name, **kwargs)
-
+        self.name = name
         self.embedding_model_name = embedding_model
         self.parent_chunk_size = parent_chunk_size
         self.child_chunk_size = child_chunk_size
