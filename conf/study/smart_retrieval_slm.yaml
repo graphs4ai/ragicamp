@@ -18,7 +18,7 @@
 # - Uses SINGLETON experiments for agent-based strategies (iterative, self-rag)
 # - Supports RANDOM SEARCH mode for efficient exploration (see sampling: section)
 #
-# Embeddings: BGE-large (BERT), BGE-M3 (multilingual), E5-Mistral-7B (decoder)
+# Embeddings: BGE-large (BERT), BGE-M3 (multilingual), Stella-1.5B (distilled SOTA)
 # Advanced retrieval: Hybrid (TF-IDF/BM25), Hierarchical, reranking
 # Query transforms: HyDE, MultiQuery
 # Small generators: Llama-3.2-3B, Phi-3-mini, Qwen2.5-3B
@@ -150,8 +150,20 @@ rag:
       chunking_strategy: recursive
       index_type: hnsw
     
+    # Stella 1.5B: Distilled SOTA, excellent MTEB scores
+    # Using 1024d (authors recommend - only 0.001 lower than 8192d)
+    - type: dense
+      name: dense_stella_1.5b_512
+      embedding_model: NovaSearch/stella_en_1.5B_v5
+      embedding_backend: sentence_transformers  # vLLM doesn't support Stella yet
+      embedding_dim: 1024  # MRL allows flexible dims; 1024 is optimal
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+      index_type: hnsw
+    
     # E5-Mistral: 7B decoder, top MTEB retrieval scores
-    # TEMPORARILY DISABLED - index being recovered
+    # TEMPORARILY DISABLED - sharded index build in progress
     # - type: dense
     #   name: dense_e5_mistral_512
     #   embedding_model: intfloat/e5-mistral-7b-instruct
@@ -215,12 +227,20 @@ rag:
   # Grid Search Dimensions
   # --------------------------------------------------------------------------
   # Which retrievers to test in grid search (by name)
+  # 
+  # STRATEGY: Start with what's built, add Stella for SOTA comparison
+  # - BGE Large: proven baseline, fast inference
+  # - BGE M3: multilingual capability  
+  # - Stella 1.5B: distilled SOTA from MTEB leaderboard
+  # - Hybrid: combines dense + BM25 (uses BGE Large index)
+  #
   retriever_names:
-    - dense_bge_large_512
-    - dense_bge_m3_512
-    # - dense_e5_mistral_512  # TEMPORARILY DISABLED - index being recovered
-    - hybrid_bge_large_bm25_07
-    # - hierarchical_bge_large  # TEMPORARILY DISABLED - needs GPU for embedding
+    - dense_bge_large_512      # Built - proven baseline
+    - dense_bge_m3_512         # Built - multilingual
+    - dense_stella_1.5b_512    # NEW - SOTA distilled, needs index build
+    - hybrid_bge_large_bm25_07 # Built - uses BGE Large index
+    # - dense_e5_mistral_512   # PENDING - sharded index build in progress
+    # - hierarchical_bge_large # PENDING - high memory for query-time embedding
   
   top_k_values:
     - 3
