@@ -95,9 +95,12 @@ class VLLMEmbedder:
             # NOTE: For embedding models, gpu_memory_utilization has limited effect
             # since there's no KV cache to pre-allocate. Memory usage = model weights only.
             # See: https://github.com/vllm-project/vllm/issues/12308
+            #
+            # vLLM 0.15+ API: use runner="pooling" instead of task="embed"
+            # See: https://docs.vllm.ai/en/stable/models/pooling_models/
             self._llm = LLM(
                 model=self.model_name,
-                task="embed",
+                runner="pooling",  # vLLM 0.15+ pooling mode for embedding models
                 trust_remote_code=self.trust_remote_code,
                 gpu_memory_utilization=self.gpu_memory_fraction,
                 enforce_eager=self.enforce_eager,
