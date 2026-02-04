@@ -126,12 +126,15 @@ rag:
     # =========================================================================
     # DENSE RETRIEVERS
     # =========================================================================
+    # NOTE: embedding_index maps logical names to actual index directories
+    # Index naming convention: {lang}_{model_shortname}_c{chunk}_o{overlap}
     
     # BGE-large: BERT-based, proven MTEB performer
     # vLLM supports BERT-based embedding models via BertEmbeddingModel
     # See: https://docs.vllm.ai/en/latest/api/vllm/model_executor/models/bert/
     - type: dense
       name: dense_bge_large_512
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Actual index on disk
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       chunk_size: 512
@@ -142,6 +145,7 @@ rag:
     # BGE-M3: Multilingual, good for diverse queries
     - type: dense
       name: dense_bge_m3_512
+      embedding_index: en_bge_m3_c512_o50  # Actual index on disk
       embedding_model: BAAI/bge-m3
       embedding_backend: vllm
       chunk_size: 512
@@ -157,6 +161,7 @@ rag:
     # 1.5B params, good balance of speed and quality
     - type: dense
       name: dense_gte_qwen2_1.5b_512
+      embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50  # Actual index on disk
       embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
       embedding_backend: vllm
       chunk_size: 512
@@ -165,23 +170,26 @@ rag:
       index_type: hnsw
     
     # E5-Mistral: 7B decoder, top MTEB retrieval scores
-    # TEMPORARILY DISABLED - sharded index build in progress
-    # - type: dense
-    #   name: dense_e5_mistral_512
-    #   embedding_model: intfloat/e5-mistral-7b-instruct
-    #   embedding_backend: vllm
-    #   chunk_size: 512
-    #   chunk_overlap: 50
-    #   chunking_strategy: recursive
-    #   index_type: hnsw
+    - type: dense
+      name: dense_e5_mistral_512
+      embedding_index: en_e5_mistral_7b_instruct_c512_o50  # Actual index on disk
+      embedding_model: intfloat/e5-mistral-7b-instruct
+      embedding_backend: vllm
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+      index_type: hnsw
     
     # =========================================================================
     # HYBRID RETRIEVERS (Dense + Sparse)
     # =========================================================================
+    # Hybrid retrievers reuse the dense index + add sparse index
     
     # Hybrid BM25 - 50/50 blend
     - type: hybrid
       name: hybrid_bge_large_bm25_05
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
+      sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       sparse_method: bm25
@@ -193,6 +201,8 @@ rag:
     # Hybrid BM25 - 70/30 dense-heavy (typically best)
     - type: hybrid
       name: hybrid_bge_large_bm25_07
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
+      sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       sparse_method: bm25
@@ -204,6 +214,8 @@ rag:
     # Hybrid TF-IDF - alternative sparse method
     - type: hybrid
       name: hybrid_bge_large_tfidf_07
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
+      sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_tfidf
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       sparse_method: tfidf
@@ -215,6 +227,7 @@ rag:
     # Hybrid GTE-Qwen2 + BM25 - strong hybrid with fast embeddings
     - type: hybrid
       name: hybrid_gte_qwen2_bm25_07
+      embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50  # Reuses GTE dense index
       embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
       embedding_backend: vllm
       sparse_method: bm25
@@ -230,6 +243,7 @@ rag:
     # Hierarchical: Search small chunks, return larger context
     - type: hierarchical
       name: hierarchical_bge_large
+      embedding_index: hierarchical_bge_large  # Hierarchical uses its own index
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       parent_chunk_size: 2048
@@ -250,11 +264,11 @@ rag:
   retriever_names:
     - dense_bge_large_512           # Built - proven baseline
     - dense_bge_m3_512              # Built - multilingual
-    - dense_gte_qwen2_1.5b_512      # NEW - fast, strong (1.5B params)
-    - hybrid_bge_large_bm25_07      # Built - uses BGE Large index
-    - hybrid_gte_qwen2_bm25_07      # NEW - hybrid with GTE embeddings
+    - dense_gte_qwen2_1.5b_512      # Built - fast, strong (1.5B params)
+    - dense_e5_mistral_512          # Built - 7B decoder, top MTEB scores
+    - hybrid_bge_large_bm25_07      # Built - uses BGE Large index + BM25
+    - hybrid_gte_qwen2_bm25_07      # Uses GTE index + BM25 (needs sparse)
     - hierarchical_bge_large        # Hierarchical retrieval
-    # - dense_e5_mistral_512        # PENDING - sharded index build in progress
   
   top_k_values:
     - 3
