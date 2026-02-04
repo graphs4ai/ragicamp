@@ -3,15 +3,17 @@
 Multi-query generates multiple variations of the original query
 to capture different phrasings and aspects of the user's intent.
 Results from all queries are merged and deduplicated.
+
+Uses GeneratorProvider for clean GPU lifecycle management.
 """
 
 import re
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ragicamp.rag.query_transform.base import QueryTransformer
 
 if TYPE_CHECKING:
-    from ragicamp.models.base import LanguageModel
+    from ragicamp.models.providers import GeneratorProvider
 
 
 class MultiQueryTransformer(QueryTransformer):
@@ -22,6 +24,8 @@ class MultiQueryTransformer(QueryTransformer):
     - Capture different vocabulary (synonyms, technical terms)
     - Address different aspects of the question
     - Improve recall by diversifying the search
+
+    Uses GeneratorProvider pattern for clean GPU lifecycle.
     """
 
     DEFAULT_PROMPT = """You are an AI assistant helping to improve search queries.
@@ -36,22 +40,22 @@ Alternative questions:"""
 
     def __init__(
         self,
-        llm: "LanguageModel",
+        generator_provider: "GeneratorProvider",
         num_queries: int = 3,
-        prompt_template: Optional[str] = None,
+        prompt_template: str | None = None,
         include_original: bool = True,
         max_tokens: int = 200,
     ):
         """Initialize multi-query transformer.
 
         Args:
-            llm: Language model to generate query variations
+            generator_provider: Provider for the LLM (lazy loading)
             num_queries: Number of alternative queries to generate
             prompt_template: Custom prompt template with {query} and {num_queries} placeholders
             include_original: Whether to include the original query
             max_tokens: Maximum tokens for generation
         """
-        self.llm = llm
+        self.generator_provider = generator_provider
         self.num_queries = num_queries
         self.prompt_template = prompt_template or self.DEFAULT_PROMPT
         self.include_original = include_original
@@ -72,14 +76,16 @@ Alternative questions:"""
         if self.include_original:
             queries.append(query)
 
-        # Generate variations
+        # Generate variations using provider
         prompt = self.prompt_template.format(query=query, num_queries=self.num_queries)
 
-        response = self.llm.generate(
-            prompt,
-            max_tokens=self.max_tokens,
-            temperature=0.7,
-        )
+        with self.generator_provider.load() as generator:
+            responses = generator.batch_generate(
+                [prompt],
+                max_tokens=self.max_tokens,
+                temperature=0.7,
+            )
+            response = responses[0] if responses else ""
 
         # Parse the response into individual queries
         variations = self._parse_variations(response)
@@ -146,11 +152,12 @@ Alternative questions:"""
         ]
 
         # Batch generate variations (single batched LLM call!)
-        responses = self.llm.generate(
-            prompts,
-            max_tokens=self.max_tokens,
-            temperature=0.7,
-        )
+        with self.generator_provider.load() as generator:
+            responses = generator.batch_generate(
+                prompts,
+                max_tokens=self.max_tokens,
+                temperature=0.7,
+            )
 
         # Parse each response
         results = []

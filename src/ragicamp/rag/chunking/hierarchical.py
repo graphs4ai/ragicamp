@@ -13,10 +13,9 @@ This gives the best of both worlds: precise matching with rich context.
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Optional
 
-from ragicamp.corpus.chunking import ChunkConfig, RecursiveChunker
 from ragicamp.core.types import Document
+from ragicamp.corpus.chunking import ChunkConfig, RecursiveChunker
 
 
 @dataclass
@@ -32,9 +31,9 @@ class HierarchicalChunk:
     """
 
     text: str
-    parent_text: Optional[str] = None
+    parent_text: str | None = None
     is_parent: bool = False
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     child_ids: list[str] = None
 
     def __post_init__(self):

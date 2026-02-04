@@ -2,28 +2,39 @@
 
 The RAGPipeline combines:
 - Query transformation (HyDE, multi-query, or passthrough)
-- Retrieval (dense, sparse, hybrid, or hierarchical)
+- Retrieval (using VectorIndex + EmbedderProvider)
 - Reranking (cross-encoder)
 
-This modular design allows mixing and matching components to find
-the best configuration for your use case.
+Clean architecture with provider-based GPU lifecycle management.
 
 Example usage:
+    from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
+    from ragicamp.indexes import VectorIndex
+
+    # Create providers
+    embedder = EmbedderProvider(EmbedderConfig("BAAI/bge-large-en"))
+    generator = GeneratorProvider(GeneratorConfig("meta-llama/Llama-3.2-3B"))
+    index = VectorIndex.load("my_index")
+
+    # Create pipeline with optional components
     pipeline = RAGPipeline(
-        retriever=HybridRetriever("my_index"),
-        query_transformer=HyDETransformer(llm),
-        reranker=CrossEncoderReranker("bge"),
+        embedder_provider=embedder,
+        index=index,
+        query_transformer=HyDETransformer(generator),  # Optional
+        reranker=CrossEncoderReranker("bge"),  # Optional
         top_k_retrieve=20,
         top_k_final=5,
     )
 
-    docs, log = pipeline.retrieve_with_log("What is the capital of France?")
-    # log contains all pipeline stages with scores
+    # Retrieve documents
+    docs = pipeline.retrieve("What is the capital of France?")
 """
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
+
+import numpy as np
 
 from ragicamp.core.logging import get_logger
 from ragicamp.core.schemas import (
@@ -32,12 +43,13 @@ from ragicamp.core.schemas import (
     RerankStep,
     RetrievalStep,
 )
+from ragicamp.core.types import Document
 from ragicamp.rag.query_transform.base import PassthroughTransformer, QueryTransformer
 from ragicamp.rag.rerankers.base import Reranker
 
 if TYPE_CHECKING:
-    from ragicamp.core.types import Document
     from ragicamp.indexes.vector_index import VectorIndex
+    from ragicamp.models.providers import EmbedderProvider
 
 logger = get_logger(__name__)
 
@@ -51,8 +63,8 @@ class RetrievalResult:
         pipeline_log: Log of all pipeline stages with scores and latencies
     """
 
-    documents: list["Document"] = field(default_factory=list)
-    pipeline_log: Optional[PipelineLog] = None
+    documents: list[Document] = field(default_factory=list)
+    pipeline_log: PipelineLog | None = None
 
 
 class RAGPipeline:
@@ -60,38 +72,44 @@ class RAGPipeline:
 
     The pipeline executes in stages:
     1. Query Transformation: Expand/modify the query (HyDE, multi-query)
-    2. Retrieval: Get candidate documents from all query variations
-    3. Deduplication: Merge results from multiple queries
-    4. Reranking: Reorder candidates using a cross-encoder
-    5. Top-K Selection: Return final documents
+    2. Embedding: Encode queries using EmbedderProvider
+    3. Retrieval: Search VectorIndex for candidates
+    4. Deduplication: Merge results from multiple queries
+    5. Reranking: Reorder candidates using a cross-encoder
+    6. Top-K Selection: Return final documents
 
     Each component is optional and can be swapped out.
+    Uses provider pattern for clean GPU lifecycle management.
     """
 
     def __init__(
         self,
-        retriever: "Retriever",
-        query_transformer: Optional[QueryTransformer] = None,
-        reranker: Optional[Reranker] = None,
+        embedder_provider: "EmbedderProvider",
+        index: "VectorIndex",
+        query_transformer: QueryTransformer | None = None,
+        reranker: Reranker | None = None,
         top_k_retrieve: int = 20,
         top_k_final: int = 5,
     ):
         """Initialize the RAG pipeline.
 
         Args:
-            retriever: The retriever to use (dense, hybrid, hierarchical)
+            embedder_provider: Provider for embedding model (lazy loading)
+            index: Vector index with documents
             query_transformer: Optional query transformer (HyDE, multi-query)
             reranker: Optional reranker (cross-encoder)
             top_k_retrieve: Number of docs to retrieve per query (before reranking)
             top_k_final: Final number of docs to return (after reranking)
         """
-        self.retriever = retriever
+        self.embedder_provider = embedder_provider
+        self.index = index
         self.query_transformer = query_transformer or PassthroughTransformer()
         self.reranker = reranker
         self.top_k_retrieve = top_k_retrieve
         self.top_k_final = top_k_final
+        self.name = f"pipeline_{index.config.embedding_model.split('/')[-1]}"
 
-    def retrieve(self, query: str) -> list["Document"]:
+    def retrieve(self, query: str) -> list[Document]:
         """Execute the full retrieval pipeline.
 
         Args:
@@ -152,43 +170,39 @@ class RAGPipeline:
             len(transformed_queries),
         )
 
-        # Stage 2: Retrieval from all query variations
+        # Stage 2: Embed queries and search
         retrieval_start = time.perf_counter()
         all_docs: list[Document] = []
         seen_ids: set[str] = set()
 
-        for q in transformed_queries:
-            docs = self.retriever.retrieve(q, top_k=self.top_k_retrieve)
-            for doc in docs:
-                # Deduplicate by document ID
-                if doc.id not in seen_ids:
-                    all_docs.append(doc)
-                    seen_ids.add(doc.id)
+        with self.embedder_provider.load() as embedder:
+            # Batch encode all transformed queries
+            query_embeddings = embedder.batch_encode(transformed_queries)
+            if not isinstance(query_embeddings, np.ndarray):
+                query_embeddings = np.array(query_embeddings)
+
+            # Search index
+            all_results = self.index.batch_search(query_embeddings, top_k=self.top_k_retrieve)
+
+            # Flatten and deduplicate
+            for query_results in all_results:
+                for result in query_results:
+                    doc = result.document
+                    doc.score = result.score
+                    if doc.id not in seen_ids:
+                        all_docs.append(doc)
+                        seen_ids.add(doc.id)
 
         retrieval_ms = (time.perf_counter() - retrieval_start) * 1000
 
         # Capture retrieval scores before any reranking
-        # Store original score and rank on each doc for later comparison
         for rank, doc in enumerate(
             sorted(all_docs, key=lambda d: getattr(d, "score", 0), reverse=True), 1
         ):
             doc._retrieval_score = getattr(doc, "score", None)
             doc._retrieval_rank = rank
 
-        # Get retriever type
-        retriever_type = getattr(self.retriever, "retriever_type", "unknown")
-        if not retriever_type or retriever_type == "unknown":
-            retriever_name = self.retriever.__class__.__name__.lower()
-            if "hybrid" in retriever_name:
-                retriever_type = "hybrid"
-            elif "hierarchical" in retriever_name:
-                retriever_type = "hierarchical"
-            elif "sparse" in retriever_name or "bm25" in retriever_name:
-                retriever_type = "sparse"
-            else:
-                retriever_type = "dense"
-
-        # Build candidates list for logging (top candidates only to keep log small)
+        # Build candidates list for logging
         candidates = [
             {
                 "doc_id": doc.id,
@@ -199,13 +213,13 @@ class RAGPipeline:
                 sorted(all_docs, key=lambda d: getattr(d, "score", 0), reverse=True)[
                     : self.top_k_final * 2
                 ]
-            )  # Log top 2x final for analysis
+            )
         ]
 
         pipeline_log.add_step(
             RetrievalStep(
-                retriever_type=retriever_type,
-                retriever_name=getattr(self.retriever, "name", "unknown"),
+                retriever_type="dense",
+                retriever_name=self.name,
                 num_queries=len(transformed_queries),
                 num_candidates=len(all_docs),
                 top_k_requested=self.top_k_retrieve,
@@ -228,9 +242,7 @@ class RAGPipeline:
                 reverse=True,
             )
             final_docs = sorted_docs[: self.top_k_final]
-            pipeline_log.total_latency_ms = round(
-                (time.perf_counter() - total_start) * 1000, 2
-            )
+            pipeline_log.total_latency_ms = round((time.perf_counter() - total_start) * 1000, 2)
             return RetrievalResult(documents=final_docs, pipeline_log=pipeline_log)
 
         # Stage 3: Reranking
@@ -252,31 +264,24 @@ class RAGPipeline:
             retrieval_rank = getattr(doc, "_retrieval_rank", None)
             rerank_score = getattr(doc, "score", None)
 
-            # Store both scores on doc for later use
             doc._rerank_score = rerank_score
 
             score_changes.append(
                 {
                     "doc_id": doc.id,
-                    "retrieval_score": (
-                        round(retrieval_score, 4) if retrieval_score else None
-                    ),
+                    "retrieval_score": (round(retrieval_score, 4) if retrieval_score else None),
                     "rerank_score": round(rerank_score, 4) if rerank_score else None,
                     "retrieval_rank": retrieval_rank,
                     "final_rank": new_rank,
-                    "rank_change": (
-                        (retrieval_rank - new_rank) if retrieval_rank else None
-                    ),
+                    "rank_change": ((retrieval_rank - new_rank) if retrieval_rank else None),
                 }
             )
 
-        # Get reranker info
-        reranker_type = "cross_encoder"  # Default
         reranker_model = getattr(self.reranker, "model_name", "unknown")
 
         pipeline_log.add_step(
             RerankStep(
-                reranker_type=reranker_type,
+                reranker_type="cross_encoder",
                 reranker_model=reranker_model,
                 num_input_docs=len(all_docs),
                 num_output_docs=len(reranked_docs),
@@ -285,22 +290,17 @@ class RAGPipeline:
             )
         )
 
-        logger.debug(
-            "Reranked to %d documents",
-            len(reranked_docs),
-        )
+        logger.debug("Reranked to %d documents", len(reranked_docs))
 
-        pipeline_log.total_latency_ms = round(
-            (time.perf_counter() - total_start) * 1000, 2
-        )
+        pipeline_log.total_latency_ms = round((time.perf_counter() - total_start) * 1000, 2)
         return RetrievalResult(documents=reranked_docs, pipeline_log=pipeline_log)
 
-    def batch_retrieve(self, queries: list[str]) -> list[list["Document"]]:
+    def batch_retrieve(self, queries: list[str]) -> list[list[Document]]:
         """Retrieve documents for multiple queries with batched operations.
 
         Optimizations:
-        - Batch query transformation (e.g., HyDE generates all hypotheticals in one LLM call)
-        - Batch retrieval for all transformed queries
+        - Batch query transformation
+        - Batch embedding + search
         - Sequential reranking (cross-encoders can't easily batch multiple queries)
 
         Args:
@@ -313,51 +313,46 @@ class RAGPipeline:
             return []
 
         # Stage 1: Batch query transformation
-        # This uses batch_transform() which is much faster for HyDE
         transformed_query_lists = self.query_transformer.batch_transform(queries)
 
-        # Stage 2: Collect all transformed queries for batch retrieval
-        # We need to track which original query each transformed query belongs to
+        # Stage 2: Collect all transformed queries for batch embedding
         all_transformed = []
-        query_indices = []  # Maps each transformed query to its original index
+        query_indices = []
 
         for orig_idx, transformed in enumerate(transformed_query_lists):
             for t_query in transformed:
                 all_transformed.append(t_query)
                 query_indices.append(orig_idx)
 
-        # Stage 3: Batch retrieve for all transformed queries at once
-        if hasattr(self.retriever, "batch_retrieve") and all_transformed:
-            all_retrieved = self.retriever.batch_retrieve(
-                all_transformed, top_k=self.top_k_retrieve
-            )
-        else:
-            # Fallback to sequential
-            all_retrieved = [
-                self.retriever.retrieve(q, top_k=self.top_k_retrieve) for q in all_transformed
-            ]
+        # Stage 3: Batch embed and search
+        with self.embedder_provider.load() as embedder:
+            query_embeddings = embedder.batch_encode(all_transformed)
+            if not isinstance(query_embeddings, np.ndarray):
+                query_embeddings = np.array(query_embeddings)
 
-        # Stage 4: Aggregate and deduplicate per original query
+            all_results = self.index.batch_search(query_embeddings, top_k=self.top_k_retrieve)
+
+        # Stage 4: Aggregate per original query
         results_per_query: list[list[Document]] = [[] for _ in queries]
         seen_per_query: list[set[str]] = [set() for _ in queries]
 
-        for docs, orig_idx in zip(all_retrieved, query_indices):
-            for doc in docs:
+        for search_results, orig_idx in zip(all_results, query_indices):
+            for result in search_results:
+                doc = result.document
+                doc.score = result.score
                 if doc.id not in seen_per_query[orig_idx]:
                     results_per_query[orig_idx].append(doc)
                     seen_per_query[orig_idx].add(doc.id)
 
-        # Stage 5: Rerank (batch if supported, else sequential)
+        # Stage 5: Rerank
         if self.reranker is not None:
             if hasattr(self.reranker, "batch_rerank"):
-                # Use batch reranking for efficiency
                 return self.reranker.batch_rerank(
                     queries=queries,
                     documents_list=results_per_query,
                     top_k=self.top_k_final,
                 )
             else:
-                # Fallback to sequential reranking
                 reranked = []
                 for orig_query, docs in zip(queries, results_per_query):
                     reranked_docs = self.reranker.rerank(
@@ -382,7 +377,8 @@ class RAGPipeline:
     def get_config(self) -> dict:
         """Get pipeline configuration for logging/debugging."""
         return {
-            "retriever": repr(self.retriever),
+            "embedder": self.embedder_provider.model_name,
+            "index": self.index.config.embedding_model,
             "query_transformer": repr(self.query_transformer),
             "reranker": repr(self.reranker) if self.reranker else None,
             "top_k_retrieve": self.top_k_retrieve,
@@ -390,7 +386,7 @@ class RAGPipeline:
         }
 
     def __repr__(self) -> str:
-        components = [f"retriever={self.retriever.name}"]
+        components = [f"index={self.index.config.embedding_model}"]
         if not isinstance(self.query_transformer, PassthroughTransformer):
             components.append(f"transformer={self.query_transformer.__class__.__name__}")
         if self.reranker:

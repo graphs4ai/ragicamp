@@ -10,7 +10,7 @@ Use cross-encoders as a second stage after initial retrieval:
 3. Return top-k reranked results
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ragicamp.core.logging import get_logger
 from ragicamp.rag.rerankers.base import Reranker
@@ -47,7 +47,7 @@ class CrossEncoderReranker(Reranker):
     def __init__(
         self,
         model_name: str = "bge",
-        device: Optional[str] = None,
+        device: str | None = None,
         batch_size: int = 32,
     ):
         """Initialize cross-encoder reranker.

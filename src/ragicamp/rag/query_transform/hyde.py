@@ -6,14 +6,16 @@ of the original question. This often improves retrieval because
 the hypothetical answer is more similar to actual documents.
 
 Reference: https://arxiv.org/abs/2212.10496
+
+Uses GeneratorProvider for clean GPU lifecycle management.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ragicamp.rag.query_transform.base import QueryTransformer
 
 if TYPE_CHECKING:
-    from ragicamp.models.base import LanguageModel
+    from ragicamp.models.providers import GeneratorProvider
 
 
 class HyDETransformer(QueryTransformer):
@@ -27,6 +29,8 @@ class HyDETransformer(QueryTransformer):
     - The hypothetical answer is written in "document style"
     - It contains domain vocabulary that matches real documents
     - Embedding similarity works better for document-document matching
+
+    Uses GeneratorProvider pattern for clean GPU lifecycle.
     """
 
     DEFAULT_PROMPT = """Please write a short paragraph that directly answers the following question.
@@ -39,8 +43,8 @@ Answer:"""
 
     def __init__(
         self,
-        llm: "LanguageModel",
-        prompt_template: Optional[str] = None,
+        generator_provider: "GeneratorProvider",
+        prompt_template: str | None = None,
         include_original: bool = True,
         num_hypothetical: int = 1,
         max_tokens: int = 150,
@@ -48,17 +52,18 @@ Answer:"""
         """Initialize HyDE transformer.
 
         Args:
-            llm: Language model to generate hypothetical answers
+            generator_provider: Provider for the LLM (lazy loading)
             prompt_template: Custom prompt template with {query} placeholder
             include_original: Whether to also search with the original query
             num_hypothetical: Number of hypothetical answers to generate
             max_tokens: Maximum tokens for hypothetical answer generation
         """
-        self.llm = llm
+        self.generator_provider = generator_provider
         self.prompt_template = prompt_template or self.DEFAULT_PROMPT
         self.include_original = include_original
         self.num_hypothetical = num_hypothetical
         self.max_tokens = max_tokens
+        self.last_hypothetical: str | None = None
 
     def transform(self, query: str) -> list[str]:
         """Generate hypothetical answer(s) and return as search queries.
@@ -75,19 +80,20 @@ Answer:"""
         if self.include_original:
             queries.append(query)
 
-        # Generate hypothetical answer(s)
+        # Generate hypothetical answer(s) using provider
         prompt = self.prompt_template.format(query=query)
 
-        for _ in range(self.num_hypothetical):
-            hypothetical = self.llm.generate(
-                prompt,
-                max_tokens=self.max_tokens,
-                temperature=0.7,  # Some variation if generating multiple
-            )
-            # Clean up the response
-            hypothetical = hypothetical.strip()
-            if hypothetical:
-                queries.append(hypothetical)
+        with self.generator_provider.load() as generator:
+            for _ in range(self.num_hypothetical):
+                hypotheticals = generator.batch_generate(
+                    [prompt],
+                    max_tokens=self.max_tokens,
+                    temperature=0.7,
+                )
+                hypothetical = hypotheticals[0].strip() if hypotheticals else ""
+                if hypothetical:
+                    queries.append(hypothetical)
+                    self.last_hypothetical = hypothetical
 
         return queries
 
@@ -110,11 +116,12 @@ Answer:"""
         prompts = [self.prompt_template.format(query=q) for q in queries]
 
         # Batch generate hypothetical answers (single batched LLM call!)
-        hypotheticals = self.llm.generate(
-            prompts,
-            max_tokens=self.max_tokens,
-            temperature=0.7,
-        )
+        with self.generator_provider.load() as generator:
+            hypotheticals = generator.batch_generate(
+                prompts,
+                max_tokens=self.max_tokens,
+                temperature=0.7,
+            )
 
         # Build result: for each query, return [original, hypothetical]
         results = []
