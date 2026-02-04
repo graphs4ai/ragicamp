@@ -104,15 +104,14 @@ class PromptBuilder:
         Key insight: LLMs follow the LAST instruction more reliably.
         So we put format constraints (reply with just the answer) at the END.
 
-        Important: We explicitly tell the model to ONLY use the passages,
-        not its own knowledge. This ensures we measure retrieval quality,
-        not the model's parametric memory.
+        RAG is ADDITIVE: passages augment model knowledge, not replace it.
+        If passages don't have the answer, model can still use its own knowledge.
         """
         parts = []
 
-        # Task context - emphasize ONLY using passages, not own knowledge
-        task = "Answer the question using ONLY the retrieved passages below."
-        task += " Do not use your own knowledge."
+        # Task context - passages are helpful context, not exclusive source
+        task = "Answer the question using the retrieved passages below."
+        task += " If the passages don't contain the answer, you may use your own knowledge."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
         parts.append(task)
@@ -133,7 +132,7 @@ class PromptBuilder:
             format_instruction.append(self.config.style)
         if self.config.stop_instruction:
             format_instruction.append(self.config.stop_instruction)
-        format_instruction.append("If the answer is not in the passages, answer 'Unknown'.")
+        format_instruction.append("If you don't know, answer 'Unknown'.")
 
         parts.append(" ".join(format_instruction) + "\nAnswer:")
 
