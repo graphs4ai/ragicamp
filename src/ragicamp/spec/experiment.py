@@ -23,6 +23,8 @@ class ExperimentSpec:
         dataset: Dataset name (e.g., 'nq', 'triviaqa')
         prompt: Prompt style name (e.g., 'default', 'cot')
         retriever: Retriever name (for RAG experiments)
+        embedding_index: Actual index directory name (if different from retriever name)
+        sparse_index: Sparse index name for hybrid retrieval
         top_k: Number of documents to use for generation (after reranking if applicable)
         fetch_k: Number of documents to retrieve before reranking (None = auto)
         query_transform: Query transformation type ('hyde', 'multiquery', None)
@@ -42,6 +44,8 @@ class ExperimentSpec:
     dataset: str
     prompt: str
     retriever: Optional[str] = None
+    embedding_index: Optional[str] = None  # Actual index path (if different from retriever)
+    sparse_index: Optional[str] = None  # For hybrid retrieval
     top_k: int = 5
     fetch_k: Optional[int] = None
     query_transform: Optional[str] = None
@@ -69,6 +73,8 @@ class ExperimentSpec:
             "dataset": self.dataset,
             "prompt": self.prompt,
             "retriever": self.retriever,
+            "embedding_index": self.embedding_index,
+            "sparse_index": self.sparse_index,
             "top_k": self.top_k,
             "fetch_k": self.fetch_k,
             "query_transform": self.query_transform,
@@ -101,6 +107,8 @@ class ExperimentSpec:
             dataset=data["dataset"],
             prompt=data["prompt"],
             retriever=data.get("retriever"),
+            embedding_index=data.get("embedding_index"),
+            sparse_index=data.get("sparse_index"),
             top_k=data.get("top_k", 5),
             fetch_k=data.get("fetch_k"),
             query_transform=data.get("query_transform"),

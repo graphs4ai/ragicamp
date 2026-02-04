@@ -89,6 +89,8 @@ def main():
         dataset=spec_dict["dataset"],
         prompt=spec_dict["prompt"],
         retriever=spec_dict.get("retriever"),
+        embedding_index=spec_dict.get("embedding_index"),
+        sparse_index=spec_dict.get("sparse_index"),
         top_k=spec_dict.get("top_k", 5),
         fetch_k=spec_dict.get("fetch_k"),
         query_transform=spec_dict.get("query_transform"),

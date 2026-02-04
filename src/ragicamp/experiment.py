@@ -519,8 +519,9 @@ class Experiment:
                     backend=embedding_backend,
                 )
                 
-                # Load the index
-                index_path = manager.get_embedding_index_path(spec.retriever)
+                # Load the index - use embedding_index if specified, else retriever name
+                index_name = spec.embedding_index or spec.retriever
+                index_path = manager.get_embedding_index_path(index_name)
                 index = VectorIndex.load(index_path)
 
         # Create dataset

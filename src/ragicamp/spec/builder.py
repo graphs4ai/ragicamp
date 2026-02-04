@@ -269,18 +269,18 @@ def _build_rag_specs(
     top_k_values = rag_config.get("top_k_values", [5])
     prompts = rag_config.get("prompts", ["default"])
 
+    # Build retriever config lookup
+    retrievers = rag_config.get("retrievers", [])
+    retriever_configs: dict[str, dict[str, Any]] = {}
+    for ret_config in retrievers:
+        if isinstance(ret_config, dict):
+            retriever_configs[ret_config["name"]] = ret_config
+
     # Get retriever names for grid search
     # Priority: retriever_names > extracting names from retrievers list
     retriever_names = rag_config.get("retriever_names")
     if retriever_names is None:
-        # Fall back to extracting names from retrievers list
-        retrievers = rag_config.get("retrievers", [])
-        retriever_names = []
-        for ret_config in retrievers:
-            if isinstance(ret_config, dict):
-                retriever_names.append(ret_config["name"])
-            else:
-                retriever_names.append(ret_config)
+        retriever_names = list(retriever_configs.keys())
 
     # If no retrievers specified, return empty (indexes only, no experiments)
     if not retriever_names or not models:
@@ -311,6 +311,11 @@ def _build_rag_specs(
 
     for model in models:
         for ret_name in retriever_names:
+            # Get embedding_index and sparse_index from retriever config
+            ret_cfg = retriever_configs.get(ret_name, {})
+            embedding_index = ret_cfg.get("embedding_index")
+            sparse_index = ret_cfg.get("sparse_index")
+
             for top_k in top_k_values:
                 for prompt in prompts:
                     for qt in query_transforms:
@@ -348,6 +353,8 @@ def _build_rag_specs(
                                         dataset=dataset,
                                         prompt=prompt,
                                         retriever=ret_name,
+                                        embedding_index=embedding_index,
+                                        sparse_index=sparse_index,
                                         top_k=top_k,
                                         fetch_k=fetch_k,
                                         query_transform=qt if qt != "none" else None,
@@ -402,6 +409,14 @@ def _build_singleton_specs(
     default_datasets = config.get("datasets", ["nq"])
     default_prompt = "concise"
 
+    # Build retriever config lookup for embedding_index resolution
+    rag_config = config.get("rag", {})
+    retrievers = rag_config.get("retrievers", [])
+    retriever_configs: dict[str, dict[str, Any]] = {}
+    for ret_config in retrievers:
+        if isinstance(ret_config, dict):
+            retriever_configs[ret_config["name"]] = ret_config
+
     for exp in experiments:
         # Required field
         base_name = exp["name"]
@@ -433,6 +448,11 @@ def _build_singleton_specs(
         query_transform = exp.get("query_transform")
         reranker = exp.get("reranker")
         reranker_model = exp.get("reranker_model")
+
+        # Get embedding_index and sparse_index from retriever config
+        ret_cfg = retriever_configs.get(retriever, {}) if retriever else {}
+        embedding_index = ret_cfg.get("embedding_index")
+        sparse_index = ret_cfg.get("sparse_index")
 
         # If reranker is specified as short name, map to model
         if reranker and not reranker_model:
@@ -487,6 +507,8 @@ def _build_singleton_specs(
                     dataset=dataset,
                     prompt=prompt,
                     retriever=retriever,
+                    embedding_index=embedding_index,
+                    sparse_index=sparse_index,
                     top_k=top_k,
                     fetch_k=fetch_k,
                     query_transform=query_transform,
