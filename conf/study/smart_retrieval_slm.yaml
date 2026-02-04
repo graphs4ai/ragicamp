@@ -149,6 +149,18 @@ rag:
       chunk_overlap: 50
       chunking_strategy: recursive
       index_type: hnsw
+
+    # GTE-large-en-v1.5: 434M, 8192 tokens, 1024d, MTEB 65.39
+    # Good balance of quality and efficiency
+    - type: dense
+      name: dense_gte_large_512
+      embedding_model: Alibaba-NLP/gte-large-en-v1.5
+      embedding_backend: vllm
+      embedding_dim: 1024
+      chunk_size: 512
+      chunk_overlap: 50
+      chunking_strategy: recursive
+      index_type: hnsw
     
     # Stella 1.5B: Distilled SOTA, excellent MTEB scores
     # TEMPORARILY DISABLED - Qwen tokenizer too aggressive (448 chars → 555 tokens)
@@ -238,6 +250,7 @@ rag:
   retriever_names:
     - dense_bge_large_512      # Built - proven baseline
     - dense_bge_m3_512         # Built - multilingual
+    - dense_gte_large_512      # NEW - 8192 tokens, 1024d, needs index build
     # - dense_stella_1.5b_448  # DISABLED - tokenizer issues
     - hybrid_bge_large_bm25_07 # Built - uses BGE Large index
     # - dense_e5_mistral_512   # PENDING - sharded index build in progress
