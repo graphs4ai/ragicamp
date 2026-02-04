@@ -15,6 +15,8 @@ from ragicamp.models.providers import (
     GeneratorConfig,
     GeneratorProvider,
     ModelProvider,
+    RerankerConfig,
+    RerankerProvider,
 )
 
 # vLLM is optional - only import if available
@@ -33,6 +35,8 @@ __all__ = [
     "EmbedderConfig",
     "GeneratorProvider",
     "GeneratorConfig",
+    "RerankerProvider",
+    "RerankerConfig",
     # Legacy interfaces
     "LanguageModel",
     "HuggingFaceModel",

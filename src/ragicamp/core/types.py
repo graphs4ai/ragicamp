@@ -4,29 +4,32 @@ Single source of truth for Document, Chunk, and related types.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
 
 
 @dataclass
 class Document:
     """A document or chunk in the retrieval system.
-    
+
     Used for:
     - Raw documents from corpus
     - Chunked text for indexing
     - Search results (with score)
-    
+
     Attributes:
         id: Unique identifier
         text: Document text content
         metadata: Additional info (source, title, parent_id, etc.)
         score: Retrieval score (only set in search results)
     """
+
     id: str
     text: str
     metadata: dict[str, Any] = field(default_factory=dict)
     score: float | None = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format."""
         return {
@@ -35,7 +38,7 @@ class Document:
             "metadata": self.metadata,
             "score": self.score,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Document":
         """Create from dictionary."""
@@ -50,13 +53,14 @@ class Document:
 @dataclass
 class SearchResult:
     """Result from index search.
-    
+
     Contains the document and its relevance score.
     """
+
     document: Document
     score: float
     rank: int = 0
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format."""
         return {
@@ -64,3 +68,33 @@ class SearchResult:
             "score": self.score,
             "rank": self.rank,
         }
+
+
+@runtime_checkable
+class Searcher(Protocol):
+    """Protocol for all search backends.
+
+    Implemented by:
+    - VectorIndex: Dense semantic search
+    - HybridSearcher: Dense + sparse with RRF fusion
+    - HierarchicalSearcher: Child search, parent return
+
+    Searchers take embeddings externally (from EmbedderProvider)
+    so they don't own any GPU resources.
+    """
+
+    def batch_search(
+        self,
+        query_embeddings: np.ndarray,
+        top_k: int = 10,
+    ) -> list[list[SearchResult]]:
+        """Search for multiple queries at once.
+
+        Args:
+            query_embeddings: Query vectors, shape (n_queries, dim)
+            top_k: Number of results per query
+
+        Returns:
+            List of SearchResult lists, one per query
+        """
+        ...

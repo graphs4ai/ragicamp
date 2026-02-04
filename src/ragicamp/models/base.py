@@ -1,4 +1,16 @@
-"""Base class for language models."""
+"""Base class for language models.
+
+LEGACY INTERFACE: For new code, prefer using providers:
+- GeneratorProvider: For text generation with GPU lifecycle management
+- EmbedderProvider: For embeddings with GPU lifecycle management
+- RerankerProvider: For cross-encoder reranking
+
+This LanguageModel base class is still used for:
+- OpenAIModel: External API calls (no GPU lifecycle needed)
+- LLM Judge metric: Uses OpenAI for evaluation
+
+See ragicamp.models.providers for the new architecture.
+"""
 
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union
@@ -7,8 +19,14 @@ from typing import Any, Optional, Union
 class LanguageModel(ABC):
     """Base class for all language models.
 
-    This abstraction allows us to work with different LLM providers
-    (HuggingFace, OpenAI, Anthropic, etc.) through a unified interface.
+    LEGACY: For local GPU models, prefer GeneratorProvider which provides:
+    - Lazy loading (model not loaded until needed)
+    - Context manager for automatic cleanup
+    - Sequential resource management (one model at a time)
+    
+    This class is still appropriate for:
+    - OpenAI/Anthropic API calls (no local GPU)
+    - LLM-as-judge evaluation
     """
 
     def __init__(self, model_name: str, **kwargs: Any):
