@@ -226,8 +226,8 @@ rag:
     - dense_bge_large_512      # Built - proven baseline
     - dense_bge_m3_512         # Built - multilingual
     - hybrid_bge_large_bm25_07 # Built - uses BGE Large index
+    - hierarchical_bge_large   # Hierarchical retrieval
     # - dense_e5_mistral_512   # PENDING - sharded index build in progress
-    # - hierarchical_bge_large # PENDING - high memory for query-time embedding
   
   top_k_values:
     - 3
