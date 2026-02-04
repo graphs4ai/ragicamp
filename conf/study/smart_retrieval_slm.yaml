@@ -69,8 +69,6 @@ direct:
   prompts:
     - concise       # Baseline
     - fewshot_3     # Few-shot for comparison with RAG
-  quantization:
-    - none
 
 # =============================================================================
 # RAG Configuration (Grid Search)
@@ -300,9 +298,6 @@ rag:
     - structured    # Clear ### delimiters for instruction-tuned models
     - cot           # Chain-of-thought - good for HotpotQA multi-hop
     - fewshot_3     # 3 few-shot examples from training set
-  
-  quantization:
-    - none
 
 # =============================================================================
 # SINGLETON EXPERIMENTS (Agent-Based Strategies)
