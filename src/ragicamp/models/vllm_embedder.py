@@ -92,10 +92,15 @@ class VLLMEmbedder:
         gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         
         # Scale batch params based on GPU memory
-        # B200/H100 (80-192GB): max throughput
-        # A100 (40-80GB): high throughput
-        # Consumer GPUs (8-24GB): moderate
-        if gpu_mem_gb >= 80:
+        # B200 (192GB): maximum throughput - can handle massive batches
+        # H100/A100-80GB (80GB): high throughput
+        # A100-40GB (40GB): moderate throughput
+        # Consumer GPUs (8-24GB): conservative
+        if gpu_mem_gb >= 160:
+            # B200 with 192GB - push to the max
+            max_num_seqs = 16384
+            max_num_batched_tokens = 262144  # 256k tokens
+        elif gpu_mem_gb >= 80:
             max_num_seqs = 8192
             max_num_batched_tokens = 131072  # 128k tokens
         elif gpu_mem_gb >= 40:

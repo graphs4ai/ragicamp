@@ -240,16 +240,36 @@ class GeneratorProvider(ModelProvider):
             self._unload()
 
     def _load_vllm(self, gpu_fraction: float) -> "Generator":
-        """Load vLLM generator."""
+        """Load vLLM generator with B200-optimized settings."""
+        import torch
         from vllm import LLM
 
-        llm = LLM(
-            model=self.config.model_name,
-            dtype=self.config.dtype,
-            gpu_memory_utilization=gpu_fraction,
-            trust_remote_code=self.config.trust_remote_code,
-            max_model_len=self.config.max_model_len,
-        )
+        # Auto-detect optimal settings based on GPU
+        gpu_mem_gb = 0
+        if torch.cuda.is_available():
+            gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+
+        llm_kwargs = {
+            "model": self.config.model_name,
+            "dtype": self.config.dtype,
+            "gpu_memory_utilization": gpu_fraction,
+            "trust_remote_code": self.config.trust_remote_code,
+            "enable_prefix_caching": True,  # Cache common prompt prefixes
+        }
+
+        if self.config.max_model_len:
+            llm_kwargs["max_model_len"] = self.config.max_model_len
+
+        # B200 (192GB) optimizations
+        if gpu_mem_gb >= 160:
+            llm_kwargs["max_num_seqs"] = 512  # More concurrent sequences
+            llm_kwargs["max_num_batched_tokens"] = 32768  # 32k tokens per batch
+            logger.info("B200 detected (%.0fGB): using high-throughput settings", gpu_mem_gb)
+        elif gpu_mem_gb >= 80:
+            llm_kwargs["max_num_seqs"] = 256
+            llm_kwargs["max_num_batched_tokens"] = 16384
+
+        llm = LLM(**llm_kwargs)
         return VLLMGeneratorWrapper(llm, self.config.model_name)
 
     def _load_hf(self) -> "Generator":
