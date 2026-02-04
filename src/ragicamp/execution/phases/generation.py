@@ -99,9 +99,12 @@ class GenerationHandler(PhaseHandler):
                         "prompt": r.get("prompt"),
                         "metrics": {},
                     }
-                    # Include retrieved docs for RAG experiments
-                    if "retrieved_docs" in r:
-                        pred_item["retrieved_docs"] = r["retrieved_docs"]
+                    # Include metadata (agent_type, retrieved_docs with scores, etc.)
+                    if "metadata" in r and r["metadata"]:
+                        pred_item["metadata"] = r["metadata"]
+                    # Include intermediate steps (for iterative/self-rag agents)
+                    if "intermediate_steps" in r and r["intermediate_steps"]:
+                        pred_item["intermediate_steps"] = r["intermediate_steps"]
                     predictions_data["predictions"].append(pred_item)
                     completed_indices.add(r["idx"])
 
@@ -129,9 +132,15 @@ class GenerationHandler(PhaseHandler):
                     "prompt": r.get("prompt"),
                     "metrics": {},
                 }
-                # Include retrieved context for RAG experiments
+                # Include retrieved context for RAG experiments (legacy)
                 if "retrieved_context" in r:
                     pred_item["retrieved_context"] = r["retrieved_context"]
+                # Include metadata (agent_type, retrieved_docs with scores, etc.)
+                if "metadata" in r and r["metadata"]:
+                    pred_item["metadata"] = r["metadata"]
+                # Include intermediate steps (for iterative/self-rag agents)
+                if "intermediate_steps" in r and r["intermediate_steps"]:
+                    pred_item["intermediate_steps"] = r["intermediate_steps"]
                 predictions_data["predictions"].append(pred_item)
 
         # Final save
