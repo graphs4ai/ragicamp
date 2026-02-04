@@ -68,6 +68,8 @@ direct:
   models: *slm_models
   prompts:
     - concise
+  quantization:
+    - none
 
 # =============================================================================
 # RAG Configuration (Grid Search)
@@ -131,7 +133,8 @@ rag:
     # vLLM supports BERT-based embedding models via BertEmbeddingModel
     # See: https://docs.vllm.ai/en/latest/api/vllm/model_executor/models/bert/
     - type: dense
-      name: en_bge_large_en_v1.5_c512_o50
+      name: dense_bge_large_512
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Actual index on disk
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       chunk_size: 512
@@ -141,7 +144,8 @@ rag:
     
     # BGE-M3: Multilingual, good for diverse queries
     - type: dense
-      name: en_bge_m3_c512_o50
+      name: dense_bge_m3_512
+      embedding_index: en_bge_m3_c512_o50  # Actual index on disk
       embedding_model: BAAI/bge-m3
       embedding_backend: vllm
       chunk_size: 512
@@ -156,7 +160,8 @@ rag:
     # GTE-Qwen2-1.5B: Fast with strong MTEB scores (~67)
     # 1.5B params, good balance of speed and quality
     - type: dense
-      name: en_gte_qwen2_1.5b_instruct_c512_o50
+      name: dense_gte_qwen2_1.5b_512
+      embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50  # Actual index on disk
       embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
       embedding_backend: vllm
       chunk_size: 512
@@ -166,7 +171,8 @@ rag:
     
     # E5-Mistral: 7B decoder, top MTEB retrieval scores
     - type: dense
-      name: en_e5_mistral_7b_instruct_c512_o50
+      name: dense_e5_mistral_512
+      embedding_index: en_e5_mistral_7b_instruct_c512_o50  # Actual index on disk
       embedding_model: intfloat/e5-mistral-7b-instruct
       embedding_backend: vllm
       chunk_size: 512
@@ -181,8 +187,8 @@ rag:
     
     # Hybrid BM25 - 50/50 blend
     - type: hybrid
-      name: en_bge_large_en_v1.5_c512_o50_hybrid_bm25_05
-      embedding_index: en_bge_large_en_v1.5_c512_o50
+      name: hybrid_bge_large_bm25_05
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
       sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
@@ -194,8 +200,8 @@ rag:
     
     # Hybrid BM25 - 70/30 dense-heavy (typically best)
     - type: hybrid
-      name: en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07
-      embedding_index: en_bge_large_en_v1.5_c512_o50
+      name: hybrid_bge_large_bm25_07
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
       sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
@@ -207,8 +213,8 @@ rag:
     
     # Hybrid TF-IDF - alternative sparse method
     - type: hybrid
-      name: en_bge_large_en_v1.5_c512_o50_hybrid_tfidf_07
-      embedding_index: en_bge_large_en_v1.5_c512_o50
+      name: hybrid_bge_large_tfidf_07
+      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
       sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_tfidf
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
@@ -220,9 +226,8 @@ rag:
     
     # Hybrid GTE-Qwen2 + BM25 - strong hybrid with fast embeddings
     - type: hybrid
-      name: en_gte_qwen2_1.5b_instruct_c512_o50_hybrid_bm25_07
-      embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50
-      sparse_index: en_gte_qwen2_1.5b_instruct_c512_o50_sparse_bm25
+      name: hybrid_gte_qwen2_bm25_07
+      embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50  # Reuses GTE dense index
       embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
       embedding_backend: vllm
       sparse_method: bm25
@@ -238,6 +243,7 @@ rag:
     # Hierarchical: Search small chunks, return larger context
     - type: hierarchical
       name: hierarchical_bge_large
+      embedding_index: hierarchical_bge_large  # Hierarchical uses its own index
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       parent_chunk_size: 2048
@@ -256,13 +262,13 @@ rag:
   # - Hybrid: combines dense + BM25
   #
   retriever_names:
-    - en_bge_large_en_v1.5_c512_o50              # Dense BGE Large
-    - en_bge_m3_c512_o50                         # Dense BGE M3
-    - en_gte_qwen2_1.5b_instruct_c512_o50        # Dense GTE-Qwen2
-    # - en_e5_mistral_7b_instruct_c512_o50       # Dense E5-Mistral (7B - too large for RAM)
-    - en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07  # Hybrid BGE + BM25
-    - en_gte_qwen2_1.5b_instruct_c512_o50_hybrid_bm25_07  # Hybrid GTE + BM25
-    - hierarchical_bge_large                     # Hierarchical
+    - dense_bge_large_512           # Built - proven baseline
+    - dense_bge_m3_512              # Built - multilingual
+    - dense_gte_qwen2_1.5b_512      # Built - fast, strong (1.5B params)
+    # - dense_e5_mistral_512        # 7B decoder - too large for RAM
+    - hybrid_bge_large_bm25_07      # Built - uses BGE Large index + BM25
+    - hybrid_gte_qwen2_bm25_07      # Uses GTE index + BM25 (needs sparse)
+    - hierarchical_bge_large        # Hierarchical retrieval
   
   top_k_values:
     - 3
@@ -288,23 +294,11 @@ rag:
   # Fetch K multiplier (documents to retrieve before reranking)
   fetch_k_multiplier: 5  # fetch_k = top_k * 5 when reranking
   
-  # --------------------------------------------------------------------------
-  # Prompt Strategies
-  # --------------------------------------------------------------------------
-  # Testing different prompt formats to find what works best with SLMs
-  #
-  # Available prompts:
-  # - concise: Minimal instructions, just answer (baseline)
-  # - structured: Clear ### delimiters, explicit sections
-  # - extractive: Strict context-only, no model knowledge
-  # - cot: Chain-of-thought reasoning (good for HotpotQA)
-  # - cited: Answers with passage citations [1], [2]
-  # - fewshot_3: 3 in-context examples
-  #
   prompts:
-    - concise       # Baseline - minimal prompt
-    - structured    # Clear delimiters, better for instruction-tuned models
-    - extractive    # Strict extraction, reduces hallucination
+    - concise
+  
+  quantization:
+    - none
 
 # =============================================================================
 # SINGLETON EXPERIMENTS (Agent-Based Strategies)
@@ -322,7 +316,7 @@ experiments:
     hypothesis: "Llama + 1 iteration refinement"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: iterative_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     max_iterations: 1
     stop_on_sufficient: true
@@ -332,7 +326,7 @@ experiments:
     hypothesis: "Phi-3 + 1 iteration - better reasoning?"
     model: vllm:microsoft/Phi-3-mini-4k-instruct
     agent_type: iterative_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     max_iterations: 1
     stop_on_sufficient: true
@@ -342,7 +336,7 @@ experiments:
     hypothesis: "Qwen + 1 iteration refinement"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
     agent_type: iterative_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     max_iterations: 1
     stop_on_sufficient: true
@@ -353,7 +347,7 @@ experiments:
     hypothesis: "Qwen + 2 iterations - more refinement helps?"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
     agent_type: iterative_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     max_iterations: 2
     stop_on_sufficient: true
@@ -368,7 +362,7 @@ experiments:
     hypothesis: "Llama + Self-RAG adaptive retrieval"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
     agent_type: self_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     prompt: concise
   
@@ -376,7 +370,7 @@ experiments:
     hypothesis: "Phi-3 + Self-RAG - better self-assessment?"
     model: vllm:microsoft/Phi-3-mini-4k-instruct
     agent_type: self_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     prompt: concise
   
@@ -384,7 +378,7 @@ experiments:
     hypothesis: "Qwen + Self-RAG adaptive retrieval"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
     agent_type: self_rag
-    retriever: en_bge_large_en_v1.5_c512_o50
+    retriever: dense_bge_large_512
     top_k: 5
     prompt: concise
 
@@ -396,7 +390,7 @@ experiments:
   - name: premium_llama
     hypothesis: "Llama + hybrid + rerank + hyde (maximum retrieval)"
     model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07
+    retriever: hybrid_bge_large_bm25_07
     query_transform: hyde
     top_k: 5
     fetch_k: 25
@@ -406,7 +400,7 @@ experiments:
   - name: premium_phi3
     hypothesis: "Phi-3 + premium stack"
     model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07
+    retriever: hybrid_bge_large_bm25_07
     query_transform: hyde
     top_k: 5
     fetch_k: 25
@@ -416,7 +410,7 @@ experiments:
   - name: premium_qwen
     hypothesis: "Qwen + premium stack - best overall?"
     model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: en_bge_large_en_v1.5_c512_o50_hybrid_bm25_07
+    retriever: hybrid_bge_large_bm25_07
     query_transform: hyde
     top_k: 5
     fetch_k: 25

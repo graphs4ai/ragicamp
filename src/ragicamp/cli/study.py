@@ -96,6 +96,46 @@ def _build_sparse_index(
     _study_logger.info("Sparse index saved to: %s", saved_path)
 
 
+def _save_retriever_config(
+    manager,
+    retriever_name: str,
+    config: dict,
+    index_name: str,
+    sparse_name: str | None = None,
+) -> None:
+    """Save retriever config to artifacts/retrievers/{name}/config.json.
+    
+    This creates a retriever config that references the actual index paths,
+    enabling experiment.py to load the correct indexes at runtime.
+    """
+    retriever_path = manager.get_retriever_path(retriever_name)
+    config_path = retriever_path / "config.json"
+    
+    retriever_type = config.get("type", "dense")
+    
+    retriever_cfg = {
+        "name": retriever_name,
+        "type": retriever_type,
+        "embedding_index": index_name,
+        "embedding_model": config.get("embedding_model", "all-MiniLM-L6-v2"),
+        "embedding_backend": config.get("embedding_backend", "sentence_transformers"),
+        "chunk_size": config.get("chunk_size", 512),
+        "chunk_overlap": config.get("chunk_overlap", 50),
+    }
+    
+    if retriever_type == "hybrid" and sparse_name:
+        retriever_cfg["sparse_index"] = sparse_name
+        retriever_cfg["sparse_method"] = config.get("sparse_method", "bm25")
+        retriever_cfg["alpha"] = config.get("alpha", 0.7)
+    
+    if retriever_type == "hierarchical":
+        retriever_cfg["parent_chunk_size"] = config.get("parent_chunk_size", 2048)
+        retriever_cfg["child_chunk_size"] = config.get("child_chunk_size", 448)
+    
+    manager.save_json(retriever_cfg, config_path)
+    _study_logger.info("Saved retriever config: %s -> %s", retriever_name, config_path)
+
+
 def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
     """Ensure all required indexes exist, building them if necessary.
     
@@ -152,6 +192,7 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
         # ===================================================================
         # Step 2: For hybrid retrievers, check/build sparse index
         # ===================================================================
+        sparse_name = None
         if retriever_type == "hybrid":
             sparse_method = config.get("sparse_method", "tfidf")
             
@@ -173,6 +214,11 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                     embedding_index_path=index_path,
                     sparse_method=sparse_method,
                 )
+        
+        # ===================================================================
+        # Step 3: Save retriever config to artifacts/retrievers/{name}/
+        # ===================================================================
+        _save_retriever_config(manager, name, config, index_name, sparse_name)
 
 
 def get_prompt_builder(prompt_type: str, dataset: str):
