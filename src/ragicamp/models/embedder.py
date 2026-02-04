@@ -62,9 +62,9 @@ def create_embedder(
     backend: str = "vllm",
     gpu_memory_fraction: float = 0.95,  # Max VRAM for throughput
     enforce_eager: bool = False,  # CUDA graphs improve throughput
-    max_num_seqs: int = 8192,  # Massive batch concurrency for large GPUs
-    max_num_batched_tokens: int = 131072,  # 128k tokens per batch
-    max_model_len: int = 2048,  # Shorter context = more parallelism
+    max_num_seqs: int | None = None,  # None = auto-detect from GPU memory
+    max_num_batched_tokens: int | None = None,  # None = auto-detect
+    max_model_len: int | None = None,  # None = use model default
     use_flash_attn: bool = True,
     use_compile: bool = True,
     **kwargs,
@@ -79,9 +79,9 @@ def create_embedder(
         backend: 'vllm' or 'sentence_transformers'
         gpu_memory_fraction: GPU memory fraction (vLLM only, 0.95 for max throughput)
         enforce_eager: Use eager mode instead of CUDA graphs (False = enable graphs)
-        max_num_seqs: Max concurrent sequences for batching (8192 for large GPUs)
-        max_num_batched_tokens: Max tokens per batch (131072 = 128k tokens)
-        max_model_len: Max sequence length (2048 is enough for 512-token chunks)
+        max_num_seqs: Max concurrent sequences (None = auto-detect from GPU memory)
+        max_num_batched_tokens: Max tokens per batch (None = auto-detect)
+        max_model_len: Max sequence length (None = use model's default context length)
         use_flash_attn: Use Flash Attention 2 if available (sentence_transformers only)
         use_compile: Apply torch.compile (sentence_transformers only)
         **kwargs: Additional backend-specific arguments

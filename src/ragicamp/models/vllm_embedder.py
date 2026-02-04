@@ -52,9 +52,9 @@ class VLLMEmbedder:
         gpu_memory_fraction: float = 0.95,  # Use almost all VRAM
         enforce_eager: bool = False,  # CUDA graphs improve throughput
         trust_remote_code: bool = True,
-        max_num_seqs: int = 8192,  # Massive batch concurrency for large GPUs
-        max_num_batched_tokens: int = 131072,  # 128k tokens per batch (B200 can handle it)
-        max_model_len: int = 2048,  # Shorter context = more sequences in parallel
+        max_num_seqs: Optional[int] = None,  # Auto-detect based on GPU memory
+        max_num_batched_tokens: Optional[int] = None,  # Auto-detect based on GPU memory
+        max_model_len: Optional[int] = None,  # None = use model default
     ):
         """Initialize vLLM embedder optimized for maximum throughput.
 
@@ -63,20 +63,56 @@ class VLLMEmbedder:
             gpu_memory_fraction: Fraction of GPU memory to use (0.95 = max throughput)
             enforce_eager: Use CUDA graphs for throughput (False = enable graphs)
             trust_remote_code: Trust remote code in model
-            max_num_seqs: Max concurrent sequences (8192 for large GPUs like B200)
-            max_num_batched_tokens: Max tokens per batch (higher = better GPU utilization)
-            max_model_len: Max sequence length (2048 is enough for 512-token chunks)
+            max_num_seqs: Max concurrent sequences (None = auto-detect from GPU memory)
+            max_num_batched_tokens: Max tokens per batch (None = auto-detect)
+            max_model_len: Max sequence length (None = use model's default)
         """
         self.model_name = model_name
         self.gpu_memory_fraction = gpu_memory_fraction
         self.enforce_eager = enforce_eager
         self.trust_remote_code = trust_remote_code
-        self.max_num_seqs = max_num_seqs
-        self.max_num_batched_tokens = max_num_batched_tokens
-        self.max_model_len = max_model_len
+        self._max_num_seqs = max_num_seqs
+        self._max_num_batched_tokens = max_num_batched_tokens
+        self._max_model_len = max_model_len
 
         self._llm: Optional[vllm.LLM] = None
         self._embedding_dim: Optional[int] = None
+
+    def _auto_detect_batch_params(self) -> tuple[int, int]:
+        """Auto-detect optimal batch parameters based on GPU memory.
+        
+        Returns:
+            (max_num_seqs, max_num_batched_tokens) tuned for the GPU
+        """
+        import torch
+        
+        if not torch.cuda.is_available():
+            return 256, 8192  # Conservative CPU defaults
+        
+        gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        
+        # Scale batch params based on GPU memory
+        # B200/H100 (80-192GB): max throughput
+        # A100 (40-80GB): high throughput
+        # Consumer GPUs (8-24GB): moderate
+        if gpu_mem_gb >= 80:
+            max_num_seqs = 8192
+            max_num_batched_tokens = 131072  # 128k tokens
+        elif gpu_mem_gb >= 40:
+            max_num_seqs = 4096
+            max_num_batched_tokens = 65536  # 64k tokens
+        elif gpu_mem_gb >= 16:
+            max_num_seqs = 1024
+            max_num_batched_tokens = 16384  # 16k tokens
+        else:
+            max_num_seqs = 256
+            max_num_batched_tokens = 4096  # 4k tokens
+        
+        logger.info(
+            "Auto-detected batch params for %.0fGB GPU: max_num_seqs=%d, max_batched_tokens=%d",
+            gpu_mem_gb, max_num_seqs, max_num_batched_tokens
+        )
+        return max_num_seqs, max_num_batched_tokens
 
     @property
     def llm(self):
@@ -104,31 +140,40 @@ class VLLMEmbedder:
             # vLLM 0.15+ API: use runner="pooling" instead of task="embed"
             # See: https://docs.vllm.ai/en/stable/models/pooling_models/
             #
-            # THROUGHPUT OPTIMIZATIONS for large GPUs (B200, H100, etc.):
-            # - max_num_seqs=8192: Massive batch concurrency
-            # - max_num_batched_tokens=131072: Process 128k tokens per forward pass
-            # - max_model_len=2048: Shorter context = more sequences fit in memory
+            # THROUGHPUT OPTIMIZATIONS:
+            # - Auto-detect batch params based on GPU memory
             # - enforce_eager=False: CUDA graphs reduce kernel launch overhead
             # - gpu_memory_utilization=0.95: Use all available VRAM
             
+            # Auto-detect or use provided batch parameters
+            max_num_seqs, max_num_batched_tokens = self._auto_detect_batch_params()
+            if self._max_num_seqs is not None:
+                max_num_seqs = self._max_num_seqs
+            if self._max_num_batched_tokens is not None:
+                max_num_batched_tokens = self._max_num_batched_tokens
+            
+            llm_kwargs = {
+                "model": self.model_name,
+                "runner": "pooling",  # vLLM 0.15+ pooling mode
+                "trust_remote_code": self.trust_remote_code,
+                "gpu_memory_utilization": self.gpu_memory_fraction,
+                "enforce_eager": self.enforce_eager,
+                "dtype": "bfloat16",  # bfloat16 for fastest inference on modern GPUs
+                "max_num_seqs": max_num_seqs,
+                "max_num_batched_tokens": max_num_batched_tokens,
+            }
+            
+            # Only set max_model_len if explicitly provided (otherwise use model default)
+            if self._max_model_len is not None:
+                llm_kwargs["max_model_len"] = self._max_model_len
+                logger.info("Using custom max_model_len=%d", self._max_model_len)
+            
             logger.info(
-                "Throughput config: max_num_seqs=%d, max_batched_tokens=%d, max_model_len=%d",
-                self.max_num_seqs,
-                self.max_num_batched_tokens,
-                self.max_model_len,
+                "Throughput config: max_num_seqs=%d, max_batched_tokens=%d",
+                max_num_seqs, max_num_batched_tokens,
             )
             
-            self._llm = LLM(
-                model=self.model_name,
-                runner="pooling",  # vLLM 0.15+ pooling mode
-                trust_remote_code=self.trust_remote_code,
-                gpu_memory_utilization=self.gpu_memory_fraction,
-                enforce_eager=self.enforce_eager,
-                dtype="bfloat16",  # bfloat16 for fastest inference on modern GPUs
-                max_num_seqs=self.max_num_seqs,
-                max_num_batched_tokens=self.max_num_batched_tokens,
-                max_model_len=self.max_model_len,
-            )
+            self._llm = LLM(**llm_kwargs)
 
             # Log actual GPU memory after loading
             if torch.cuda.is_available():
