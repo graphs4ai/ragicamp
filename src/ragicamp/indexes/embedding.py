@@ -206,10 +206,11 @@ class EmbeddingIndex(Index):
         - BAAI/bge-en-icl
         """
         if self._encoder is None:
-            if self.embedding_backend == "vllm":
-                self._load_vllm_encoder()
-            else:
-                self._load_sentence_transformers_encoder()
+            # IMPORTANT: For inference (query encoding), always use sentence-transformers
+            # vLLM allocates too much GPU memory and conflicts with the generator.
+            # vLLM is only beneficial for high-throughput index building.
+            # Both produce identical embeddings (same model weights).
+            self._load_sentence_transformers_encoder()
 
         return self._encoder
 
