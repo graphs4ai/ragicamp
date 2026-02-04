@@ -84,13 +84,19 @@ def build_embedding_index(
         embedding_backend: 'vllm' or 'sentence_transformers'
         vllm_gpu_memory_fraction: GPU memory fraction for vLLM (default 0.9)
         max_model_len: Maximum sequence length for embeddings (vLLM only).
-                      Set higher if chunks exceed model's default (e.g., 1024 for Stella's 512 default).
+                      If None, auto-calculated from chunk_size to ensure chunks fit.
 
     Returns:
         Path to the saved index
     """
     # Apply defaults
     index_type = index_type or Defaults.FAISS_INDEX_TYPE
+
+    # Auto-calculate max_model_len from chunk_size if not specified
+    # Formula: chunk_size/2 (conservative char-to-token ratio) + 128 (buffer for special tokens)
+    # Minimum 512 to handle most model defaults
+    if max_model_len is None and embedding_backend == "vllm":
+        max_model_len = max(512, (chunk_size // 2) + 128)
     use_gpu = use_gpu if use_gpu is not None else Defaults.FAISS_USE_GPU
     nlist = nlist or Defaults.FAISS_IVF_NLIST
     nprobe = nprobe or Defaults.FAISS_IVF_NPROBE
@@ -117,6 +123,8 @@ def build_embedding_index(
     print(f"  Chunking strategy: {chunking_strategy}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
     print(f"  FAISS index type: {index_type}, GPU: {use_gpu}, threads: {num_threads}")
+    if embedding_backend == "vllm" and max_model_len:
+        print(f"  vLLM max_model_len: {max_model_len} tokens")
     if index_type in ("ivf", "ivfpq"):
         print(f"  IVF params: nlist={nlist}, nprobe={nprobe}")
     print(f"{'=' * 60}")
