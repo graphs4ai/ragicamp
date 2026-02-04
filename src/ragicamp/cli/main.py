@@ -218,6 +218,13 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Continue uploading if some files fail",
     )
+    backup_parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=12,
+        help="Number of parallel upload threads (default: 12)",
+    )
     backup_parser.set_defaults(func=cmd_backup)
 
     # Download command
@@ -260,6 +267,13 @@ def create_parser() -> argparse.ArgumentParser:
         "--continue-on-error",
         action="store_true",
         help="Continue downloading if some files fail",
+    )
+    download_parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=12,
+        help="Number of parallel download threads (default: 12)",
     )
     download_parser.set_defaults(func=cmd_download)
 

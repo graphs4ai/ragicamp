@@ -380,6 +380,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
         prefix=prefix,
         dry_run=args.dry_run,
         continue_on_error=args.continue_on_error,
+        max_workers=args.workers,
     )
 
 
@@ -406,4 +407,5 @@ def cmd_download(args: argparse.Namespace) -> int:
         outputs_only=args.outputs_only,
         dry_run=args.dry_run,
         continue_on_error=args.continue_on_error,
+        max_workers=args.workers,
     )

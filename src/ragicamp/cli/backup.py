@@ -1,9 +1,14 @@
 """Backblaze B2 backup and download operations."""
 
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
+
+# Default number of parallel workers for upload/download
+DEFAULT_MAX_WORKERS = 12
 
 
 def get_b2_client():
@@ -71,8 +76,9 @@ def backup(
     prefix: str,
     dry_run: bool = False,
     continue_on_error: bool = False,
+    max_workers: int = DEFAULT_MAX_WORKERS,
 ) -> int:
-    """Upload directories to B2.
+    """Upload directories to B2 with parallel uploads.
 
     Args:
         dirs_to_backup: List of directories to backup
@@ -80,6 +86,7 @@ def backup(
         prefix: S3 key prefix
         dry_run: If True, only preview files
         continue_on_error: If True, continue on upload errors
+        max_workers: Number of parallel upload threads (default 12)
 
     Returns:
         Exit code (0 on success)
@@ -92,6 +99,7 @@ def backup(
 
     print(f"Backing up to: s3://{bucket}/{prefix}/")
     print(f"Source directories: {', '.join(str(d) for d in dirs_to_backup)}")
+    print(f"Parallel workers: {max_workers}")
 
     # Collect files to upload
     files_to_upload = []
@@ -104,55 +112,91 @@ def backup(
                 local_path = Path(root) / file
                 relative_path = local_path.relative_to(backup_dir.parent)
                 s3_key = f"{prefix}/{relative_path}"
-                files_to_upload.append((local_path, s3_key))
+                file_size = local_path.stat().st_size
+                files_to_upload.append((local_path, s3_key, file_size))
 
     if not files_to_upload:
         print("No files to upload.")
         return 0
 
-    total_bytes = sum(f[0].stat().st_size for f in files_to_upload)
+    total_bytes = sum(f[2] for f in files_to_upload)
     print(f"Found {len(files_to_upload)} files ({total_bytes / (1024**3):.2f} GB)")
 
     if dry_run:
         print("\n[DRY RUN] Would upload:")
-        for local_path, s3_key in files_to_upload[:10]:
-            size_mb = local_path.stat().st_size / (1024 * 1024)
+        for local_path, s3_key, size in files_to_upload[:10]:
+            size_mb = size / (1024 * 1024)
             print(f"  {s3_key} ({size_mb:.1f} MB)")
         if len(files_to_upload) > 10:
             print(f"  ... and {len(files_to_upload) - 10} more files")
         return 0
 
-    # Upload with byte-level progress
-    uploaded_bytes = 0
-    uploaded_files = 0
+    # Thread-safe counters
+    lock = threading.Lock()
+    uploaded_bytes = [0]  # Use list for mutable reference in closure
+    uploaded_files = [0]
     errors = []
+    early_exit = [False]  # Flag to stop workers on first error
+
+    def upload_file(local_path: Path, s3_key: str, file_size: int) -> tuple[bool, str | None]:
+        """Upload a single file. Returns (success, error_message)."""
+        if early_exit[0]:
+            return False, "Cancelled due to earlier error"
+        try:
+            s3.upload_file(str(local_path), bucket, s3_key)
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
     start_time = time.time()
 
     with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Uploading") as pbar:
-        for local_path, s3_key in files_to_upload:
-            file_size = local_path.stat().st_size
-            try:
-                s3.upload_file(str(local_path), bucket, s3_key)
-                uploaded_files += 1
-                uploaded_bytes += file_size
-                pbar.update(file_size)
-            except Exception as e:
-                errors.append((local_path, str(e)))
-                pbar.update(file_size)
-                if not continue_on_error:
-                    print(f"\nError uploading {local_path}: {e}")
-                    return 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all upload tasks
+            future_to_file = {
+                executor.submit(upload_file, local_path, s3_key, file_size): (
+                    local_path,
+                    s3_key,
+                    file_size,
+                )
+                for local_path, s3_key, file_size in files_to_upload
+            }
+
+            # Process completed uploads
+            for future in as_completed(future_to_file):
+                local_path, s3_key, file_size = future_to_file[future]
+                success, error = future.result()
+
+                with lock:
+                    if success:
+                        uploaded_files[0] += 1
+                        uploaded_bytes[0] += file_size
+                    else:
+                        errors.append((local_path, error))
+                        if not continue_on_error:
+                            early_exit[0] = True
+                            print(f"\nError uploading {local_path}: {error}")
+                    pbar.update(file_size)
+
+                # Exit early if we hit an error and continue_on_error is False
+                if early_exit[0] and not continue_on_error:
+                    # Cancel pending futures
+                    for f in future_to_file:
+                        f.cancel()
+                    break
 
     elapsed = time.time() - start_time
-    speed_mbps = (uploaded_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    speed_mbps = (uploaded_bytes[0] / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
-    print(f"\n✓ Uploaded {uploaded_files}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
-    print(f"  Total: {uploaded_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(f"\n✓ Uploaded {uploaded_files[0]}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
+    print(f"  Total: {uploaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
     if errors:
         print(f"\n⚠️  {len(errors)} errors:")
         for path, err in errors[:5]:
             print(f"  {path}: {err}")
+        if not continue_on_error:
+            return 1
 
     return 0
 
@@ -164,8 +208,9 @@ def download(
     outputs_only: bool = False,
     dry_run: bool = False,
     continue_on_error: bool = False,
+    max_workers: int = DEFAULT_MAX_WORKERS,
 ) -> int:
-    """Download backup from B2.
+    """Download backup from B2 with parallel downloads.
 
     Args:
         bucket: B2 bucket name
@@ -174,6 +219,7 @@ def download(
         outputs_only: Only download outputs/
         dry_run: If True, only preview files
         continue_on_error: If True, continue on download errors
+        max_workers: Number of parallel download threads (default 12)
 
     Returns:
         Exit code (0 on success)
@@ -195,6 +241,7 @@ def download(
 
     prefix = f"ragicamp-backup/{backup_name}"
     print(f"Downloading from: s3://{bucket}/{prefix}/")
+    print(f"Parallel workers: {max_workers}")
 
     # List all files in the backup
     files_to_download = []
@@ -236,39 +283,80 @@ def download(
             print(f"  ... and {len(files_to_download) - 15} more files")
         return 0
 
-    # Download with progress
-    downloaded_bytes = 0
-    downloaded_files = 0
+    # Pre-create all directories (avoid race conditions in threads)
+    dirs_to_create = set()
+    for _, local_path, _ in files_to_download:
+        dirs_to_create.add(local_path.parent)
+    for d in dirs_to_create:
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Thread-safe counters
+    lock = threading.Lock()
+    downloaded_bytes = [0]
+    downloaded_files = [0]
     errors = []
+    early_exit = [False]
+
+    def download_file(s3_key: str, local_path: Path, size: int) -> tuple[bool, str | None]:
+        """Download a single file. Returns (success, error_message)."""
+        if early_exit[0]:
+            return False, "Cancelled due to earlier error"
+        try:
+            s3.download_file(bucket, s3_key, str(local_path))
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
     start_time = time.time()
 
     with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Downloading") as pbar:
-        for s3_key, local_path, size in files_to_download:
-            try:
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                s3.download_file(bucket, s3_key, str(local_path))
-                downloaded_files += 1
-                downloaded_bytes += size
-                pbar.update(size)
-            except Exception as e:
-                errors.append((local_path, str(e)))
-                pbar.update(size)
-                if not continue_on_error:
-                    print(f"\nError downloading {s3_key}: {e}")
-                    return 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all download tasks
+            future_to_file = {
+                executor.submit(download_file, s3_key, local_path, size): (
+                    s3_key,
+                    local_path,
+                    size,
+                )
+                for s3_key, local_path, size in files_to_download
+            }
+
+            # Process completed downloads
+            for future in as_completed(future_to_file):
+                s3_key, local_path, size = future_to_file[future]
+                success, error = future.result()
+
+                with lock:
+                    if success:
+                        downloaded_files[0] += 1
+                        downloaded_bytes[0] += size
+                    else:
+                        errors.append((local_path, error))
+                        if not continue_on_error:
+                            early_exit[0] = True
+                            print(f"\nError downloading {s3_key}: {error}")
+                    pbar.update(size)
+
+                # Exit early if we hit an error and continue_on_error is False
+                if early_exit[0] and not continue_on_error:
+                    for f in future_to_file:
+                        f.cancel()
+                    break
 
     elapsed = time.time() - start_time
-    speed_mbps = (downloaded_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    speed_mbps = (downloaded_bytes[0] / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
-    print(f"\n✓ Downloaded {downloaded_files}/{len(files_to_download)} files")
+    print(f"\n✓ Downloaded {downloaded_files[0]}/{len(files_to_download)} files")
     print(
-        f"  Total: {downloaded_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
+        f"  Total: {downloaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
     )
 
     if errors:
         print(f"\n⚠️  {len(errors)} errors:")
         for path, err in errors[:5]:
             print(f"  {path}: {err}")
+        if not continue_on_error:
+            return 1
 
     # Show what was downloaded
     print("\nDownloaded contents:")
