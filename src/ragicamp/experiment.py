@@ -519,10 +519,18 @@ class Experiment:
                     backend=embedding_backend,
                 )
                 
-                # Load index from the path specified in retriever config
+                # Load index based on retriever type
+                retriever_type = retriever_config.get("type", "dense")
                 index_name = retriever_config.get("embedding_index", spec.retriever)
                 index_path = manager.get_embedding_index_path(index_name)
-                index = VectorIndex.load(index_path)
+                
+                if retriever_type == "hierarchical":
+                    from ragicamp.indexes.hierarchical import HierarchicalIndex
+                    from ragicamp.retrievers.hierarchical import HierarchicalSearcher
+                    hier_index = HierarchicalIndex.load(index_path)
+                    index = HierarchicalSearcher(hier_index)
+                else:
+                    index = VectorIndex.load(index_path)
 
         # Create dataset
         dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
