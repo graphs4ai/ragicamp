@@ -88,7 +88,20 @@ class GenerationHandler(PhaseHandler):
         
         # Sequential model loading: prefetch all retrievals, then unload embedder
         # This allows each model to use full GPU memory
-        if Defaults.VLLM_SEQUENTIAL_MODELS and hasattr(context.agent, 'prefetch_retrievals'):
+        #
+        # IMPORTANT: Only works for "simple" RAG agents that don't interleave retrieval/generation:
+        # ✅ FixedRAGAgent (without query transformers like HyDE)
+        # ✅ VanillaRAGAgent
+        # ❌ IterativeRAGAgent - needs multiple retrieve/generate cycles
+        # ❌ SelfRAGAgent - model decides when to retrieve
+        # ❌ FixedRAGAgent with HyDE - generates hypothetical before retrieval
+        #
+        agent_supports_prefetch = (
+            hasattr(context.agent, 'prefetch_retrievals') and
+            not self._agent_uses_interleaved_pattern(context.agent)
+        )
+        
+        if Defaults.VLLM_SEQUENTIAL_MODELS and agent_supports_prefetch:
             pending_queries = [q[1] for q in pending]  # Extract just the query strings
             logger.info("Sequential mode: prefetching %d retrievals...", len(pending_queries))
             context.agent.prefetch_retrievals(pending_queries, show_progress=True)
@@ -97,6 +110,11 @@ class GenerationHandler(PhaseHandler):
             if hasattr(context.agent, 'unload_embedder'):
                 logger.info("Unloading embedder to free GPU for generator...")
                 context.agent.unload_embedder()
+        elif Defaults.VLLM_SEQUENTIAL_MODELS:
+            logger.info(
+                "Agent uses interleaved retrieval/generation - using concurrent mode "
+                "(both models loaded with reduced GPU fractions)"
+            )
 
         # Create executor with auto batch size reduction
         executor = ResilientExecutor(
@@ -169,6 +187,30 @@ class GenerationHandler(PhaseHandler):
 
         return state
 
+    def _agent_uses_interleaved_pattern(self, agent: Any) -> bool:
+        """Check if agent uses interleaved retrieval/generation pattern.
+        
+        Agents with interleaved patterns cannot use sequential model loading
+        (prefetch all retrievals → unload embedder → generate all).
+        
+        Returns True for:
+        - IterativeRAGAgent (multiple retrieve/generate cycles)
+        - SelfRAGAgent (model decides when to retrieve)
+        - FixedRAGAgent with query transformers (HyDE generates before retrieval)
+        """
+        agent_class_name = agent.__class__.__name__
+        
+        # These agents inherently use interleaved patterns
+        if agent_class_name in ('IterativeRAGAgent', 'SelfRAGAgent'):
+            return True
+        
+        # FixedRAGAgent with query transformer (HyDE, MultiQuery) generates before retrieval
+        if agent_class_name == 'FixedRAGAgent':
+            if hasattr(agent, 'query_transformer') and agent.query_transformer is not None:
+                return True
+        
+        return False
+    
     def _save_predictions(self, data: dict[str, Any], path: Path) -> None:
         """Save predictions atomically using ExperimentIO."""
         io = ExperimentIO(path.parent)
