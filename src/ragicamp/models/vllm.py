@@ -83,13 +83,9 @@ class VLLMModel(LanguageModel):
             enable_prefix_caching: Enable automatic prefix caching for efficiency.
             **kwargs: Additional vLLM engine arguments.
         """
-        # Use default memory fraction if not specified
-        # In sequential mode, use full GPU since embedder is unloaded before generator loads
+        # Default to full GPU - agents manage loading sequence
         if gpu_memory_utilization is None:
-            if Defaults.VLLM_SEQUENTIAL_MODELS:
-                gpu_memory_utilization = Defaults.VLLM_SEQUENTIAL_GPU_FRACTION
-            else:
-                gpu_memory_utilization = Defaults.VLLM_GPU_MEMORY_FRACTION
+            gpu_memory_utilization = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL
         super().__init__(model_name, **kwargs)
 
         if not _check_vllm_available():

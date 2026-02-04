@@ -218,37 +218,18 @@ class EmbeddingIndex(Index):
 
         return self._encoder
 
-    def _load_vllm_encoder(self):
+    def _load_vllm_encoder(self, gpu_fraction: float | None = None):
         """Load vLLM embedding model.
         
-        GPU fraction is determined by:
-        1. Check if another vLLM model is already loaded (e.g., generator)
-           - If yes, use concurrent mode (reduced fraction) to share GPU
-        2. Otherwise, use sequential mode (full GPU)
-        
-        This allows:
-        - Simple RAG: embedder loads first with full GPU
-        - Interleaved RAG: embedder loads after generator, uses reduced fraction
+        Args:
+            gpu_fraction: GPU memory fraction to use. If None, uses full GPU.
+                         Agents control this based on their execution strategy.
         """
         from ragicamp.models.vllm_embedder import VLLMEmbedder
 
-        # Check if another vLLM model is already loaded
-        # This happens in interleaved patterns (HyDE, iterative RAG, self RAG)
-        another_vllm_loaded = self._check_vllm_model_loaded()
-        
-        if another_vllm_loaded:
-            # Concurrent mode: share GPU with generator
-            gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
-            logger.info(
-                "Another vLLM model is loaded - using concurrent GPU fraction: %.0f%%",
-                gpu_fraction * 100,
-            )
-        elif Defaults.VLLM_SEQUENTIAL_MODELS:
-            # Sequential mode: full GPU for embedder (will unload before generator)
-            gpu_fraction = Defaults.VLLM_SEQUENTIAL_GPU_FRACTION
-        else:
-            # Concurrent mode by config
-            gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
+        # Default to full GPU - agents manage loading sequence
+        if gpu_fraction is None:
+            gpu_fraction = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL
         
         logger.info(
             "Loading vLLM embedding model: %s (gpu_fraction=%.0f%%)",
@@ -258,30 +239,9 @@ class EmbeddingIndex(Index):
         self._encoder = VLLMEmbedder(
             model_name=self.embedding_model_name,
             gpu_memory_fraction=gpu_fraction,
-            enforce_eager=False,  # Use CUDA graphs for speed
         )
         self._embedding_dim = self._encoder.get_sentence_embedding_dimension()
         logger.info("vLLM embedder loaded (dim=%d)", self._embedding_dim)
-    
-    def _check_vllm_model_loaded(self) -> bool:
-        """Check if another vLLM model is already loaded on GPU.
-        
-        Used to determine if we should use concurrent mode for GPU sharing.
-        """
-        try:
-            import torch
-            if not torch.cuda.is_available():
-                return False
-            
-            # Check GPU memory usage - if significant memory is allocated,
-            # another model is likely loaded
-            allocated_gb = torch.cuda.memory_allocated(0) / 1e9
-            
-            # If more than 1GB is allocated, assume a model is loaded
-            # (vLLM models typically use much more than this)
-            return allocated_gb > 1.0
-        except Exception:
-            return False
 
     def _load_sentence_transformers_encoder(self):
         """Load sentence-transformers model with optimizations."""

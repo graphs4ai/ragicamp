@@ -1,115 +1,98 @@
-"""Direct LLM agent - Baseline 1: No retrieval, just ask the LLM."""
+"""Direct LLM Agent - No retrieval, just generation.
 
-from typing import Any, Optional
+This is the simplest baseline: batch generate all answers.
+Only the generator model is used (full GPU).
+"""
 
-from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import AgentType, RAGResponseMeta
+from pathlib import Path
+from typing import Callable
+
+from tqdm import tqdm
+
+from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
+from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
-from ragicamp.utils.prompts import PromptBuilder
+from ragicamp.utils.prompts import PromptBuilder, PromptConfig
+
+logger = get_logger(__name__)
 
 
-class DirectLLMAgent(RAGAgent):
-    """Baseline agent that directly queries an LLM without retrieval.
-
-    This is the simplest baseline: just prompt the LLM with the question
-    and return its answer.
+class DirectLLMAgent(Agent):
+    """Direct LLM agent - no retrieval, just generation.
+    
+    Execution strategy:
+    - Single phase: batch generate all answers
+    - Generator uses full GPU
     """
 
     def __init__(
         self,
         name: str,
         model: LanguageModel,
-        prompt_builder: Optional[PromptBuilder] = None,
-        # Legacy parameters for backwards compatibility
-        system_prompt: str = "You are a helpful assistant. Answer questions accurately and concisely.",
-        prompt_template: Optional[str] = None,
-        **kwargs: Any,
+        prompt_builder: PromptBuilder | None = None,
+        **config,
     ):
-        """Initialize the direct LLM agent.
-
-        Args:
-            name: Agent identifier
-            model: The language model to use
-            prompt_builder: PromptBuilder instance for building prompts.
-                          If not provided, creates default from system_prompt.
-            system_prompt: (Legacy) System prompt for the LLM
-            prompt_template: (Legacy) Custom template - ignored if prompt_builder provided
-            **kwargs: Additional configuration
-        """
-        super().__init__(name, **kwargs)
+        super().__init__(name, **config)
         self.model = model
+        self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
-        # Use provided prompt_builder or create from legacy params
-        if prompt_builder is not None:
-            self.prompt_builder = prompt_builder
-        else:
-            # Legacy: create basic builder using style field
-            from ragicamp.utils.prompts import PromptConfig
-
-            self.prompt_builder = PromptBuilder(PromptConfig(style=system_prompt))
-
-        # Legacy template support (for backwards compat with study.py)
-        self._legacy_template = prompt_template
-
-    def _build_prompt(self, query: str) -> str:
-        """Build prompt for a query."""
-        # If legacy template provided, use it directly
-        if self._legacy_template:
-            style = self.prompt_builder.config.style or ""
-            return f"{style}\n\n{self._legacy_template.format(question=query)}"
-
-        # Use prompt builder
-        return self.prompt_builder.build_direct(query)
-
-    def answer(self, query: str, **kwargs: Any) -> RAGResponse:
-        """Generate an answer by directly querying the LLM.
-
-        Args:
-            query: The input question
-            **kwargs: Additional generation parameters
-
-        Returns:
-            RAGResponse with the LLM's answer
-        """
-        context = RAGContext(query=query)
-        prompt = self._build_prompt(query)
-        answer = self.model.generate(prompt, **kwargs)
-
-        return RAGResponse(
-            answer=answer,
-            context=context,
-            prompt=prompt,
-            metadata=RAGResponseMeta(agent_type=AgentType.DIRECT_LLM),
-        )
-
-    def batch_answer(self, queries: list[str], **kwargs: Any) -> list[RAGResponse]:
-        """Generate answers for multiple queries using batch processing.
-
-        This is much faster than calling answer() in a loop because it
-        processes all queries in a single forward pass through the model.
-
-        Args:
-            queries: List of input questions
-            **kwargs: Additional generation parameters
-
-        Returns:
-            List of RAGResponse objects, one per query
-        """
-        prompts = [self._build_prompt(q) for q in queries]
-        answers = self.model.generate(prompts, **kwargs)
-
-        responses = []
-        for query, prompt, answer in zip(queries, prompts, answers):
-            context = RAGContext(query=query)
-            response = RAGResponse(
+    def run(
+        self,
+        queries: list[Query],
+        *,
+        on_result: Callable[[AgentResult], None] | None = None,
+        checkpoint_path: Path | None = None,
+        show_progress: bool = True,
+    ) -> list[AgentResult]:
+        """Process all queries with batch generation."""
+        # Load checkpoint if resuming
+        results, completed_idx = [], set()
+        if checkpoint_path:
+            results, completed_idx = self._load_checkpoint(checkpoint_path)
+        
+        pending = [q for q in queries if q.idx not in completed_idx]
+        
+        if not pending:
+            logger.info("All queries already completed")
+            return results
+        
+        logger.info("Generating %d answers (batch mode)", len(pending))
+        
+        # Build all prompts
+        prompts = [self.prompt_builder.build_direct(q.text) for q in pending]
+        
+        # Batch generate
+        with StepTimer("batch_generate", model=self._get_model_name()) as step:
+            step.input = {"num_queries": len(pending)}
+            answers = self.model.generate(prompts)
+            step.output = {"num_answers": len(answers)}
+        
+        # Build results
+        iterator = zip(pending, prompts, answers)
+        if show_progress:
+            iterator = tqdm(list(iterator), desc="Building results")
+        
+        for query, prompt, answer in iterator:
+            result = AgentResult(
+                query=query,
                 answer=answer,
-                context=context,
+                steps=[Step(
+                    type="generate",
+                    input=query.text,
+                    output=answer,
+                    model=self._get_model_name(),
+                )],
                 prompt=prompt,
-                metadata=RAGResponseMeta(
-                    agent_type=AgentType.DIRECT_LLM,
-                    batch_processing=True,
-                ),
             )
-            responses.append(response)
+            results.append(result)
+            
+            if on_result:
+                on_result(result)
+        
+        if checkpoint_path:
+            self._save_checkpoint(results, checkpoint_path)
+        
+        return results
 
-        return responses
+    def _get_model_name(self) -> str | None:
+        return getattr(self.model, 'model_name', None)

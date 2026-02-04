@@ -541,30 +541,6 @@ class Experiment:
             return all_phases
 
     @classmethod
-    def _spec_uses_interleaved_pattern(cls, spec: "ExperimentSpec") -> bool:
-        """Check if experiment spec will use interleaved retrieval/generation.
-        
-        Interleaved patterns cannot use sequential model loading because
-        they need both embedder and generator loaded simultaneously.
-        
-        Returns True for:
-        - IterativeRAGAgent experiments (agent_type='iterative_rag')
-        - SelfRAGAgent experiments (agent_type='self_rag')
-        - RAG experiments with query transformers (HyDE, MultiQuery)
-        """
-        # Check agent type if available
-        agent_type = getattr(spec, 'agent_type', None)
-        if agent_type in ('iterative_rag', 'self_rag'):
-            return True
-        
-        # Check for query transformers (HyDE, MultiQuery generate before retrieval)
-        query_transform = getattr(spec, 'query_transform', None)
-        if query_transform is not None:
-            return True
-        
-        return False
-
-    @classmethod
     def from_spec(
         cls,
         spec: "ExperimentSpec",
@@ -592,27 +568,10 @@ class Experiment:
             >>> exp = Experiment.from_spec(spec, "outputs/")
             >>> result = exp.run()
         """
-        from ragicamp.core.constants import Defaults
         from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ModelFactory
 
-        # Check if agent uses interleaved retrieval/generation pattern
-        # If so, we need concurrent GPU fractions (both models loaded simultaneously)
-        uses_interleaved = cls._spec_uses_interleaved_pattern(spec)
-        
-        # Create model with appropriate GPU fraction
+        # Create model - agents manage their own GPU loading strategy
         model_config = ModelFactory.parse_spec(spec.model, quantization=spec.quant)
-        
-        # Override GPU fraction if agent uses interleaved pattern and we're in sequential mode
-        if uses_interleaved and Defaults.VLLM_SEQUENTIAL_MODELS:
-            logger.info(
-                "Agent uses interleaved retrieval/generation - using concurrent GPU fractions "
-                "(query_transform=%s, exp_type=%s)",
-                getattr(spec, 'query_transform', None),
-                spec.exp_type,
-            )
-            # Force concurrent mode for this model by overriding GPU fraction
-            model_config = model_config._replace(gpu_memory_utilization=Defaults.VLLM_GPU_MEMORY_FRACTION)
-        
         model = ModelFactory.create(model_config)
 
         # Create dataset

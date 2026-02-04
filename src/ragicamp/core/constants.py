@@ -172,24 +172,16 @@ class Defaults:
     ARTIFACTS_DIR = "artifacts"
     CACHE_DIR = "data/datasets"
 
-    # GPU Memory Partitioning for vLLM Models
-    # 
-    # Two modes supported:
-    # 1. SEQUENTIAL (recommended): Embedder runs first, unloads, then generator runs
-    #    - Each model gets full GPU (VLLM_SEQUENTIAL_GPU_FRACTION)
-    #    - Set VLLM_SEQUENTIAL_MODELS=True to enable
+    # GPU Memory Fractions
     #
-    # 2. CONCURRENT (legacy): Both models share GPU simultaneously
-    #    - Generator gets 50%, embedder gets 25%
-    #    - Neither model saturates GPU
+    # Agents manage their own model loading strategy:
+    # - Simple RAG: batch_retrieve (full GPU) → unload → batch_generate (full GPU)
+    # - Interleaved RAG: both models loaded with reduced fractions
     #
-    VLLM_SEQUENTIAL_MODELS = True  # Enable sequential model loading (embedder → unload → generator)
-    VLLM_SEQUENTIAL_GPU_FRACTION = 0.95  # Full GPU when models are sequential
-    
-    # Concurrent mode fractions (only used when VLLM_SEQUENTIAL_MODELS=False)
-    VLLM_GPU_MEMORY_FRACTION = 0.50  # 50% for generator (main model)
-    VLLM_EMBEDDER_GPU_MEMORY_FRACTION = 0.25  # 25% for query embedder at inference
-    FAISS_GPU_MEMORY_FRACTION = 0.0  # FAISS runs on CPU (B200 not yet supported)
+    # These are defaults - agents can override based on their strategy.
+    VLLM_GPU_MEMORY_FRACTION_FULL = 0.95  # When model has exclusive GPU access
+    VLLM_GPU_MEMORY_FRACTION_SHARED = 0.45  # When sharing GPU with another model
+    VLLM_EMBEDDER_GPU_MEMORY_FRACTION_SHARED = 0.25  # Embedder when sharing
 
     # FAISS GPU Configuration
     # NOTE: GPU FAISS disabled by default - B200 (Blackwell) not yet supported by faiss-gpu-cu12.
