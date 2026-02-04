@@ -44,12 +44,16 @@ def get_memory_gb():
 
 def main():
     parser = argparse.ArgumentParser(description="Incremental recovery for embedding builds")
-    parser.add_argument("--emb-file", required=True, help="Path to temp .npy embeddings file")
-    parser.add_argument("--chunks-file", required=True, help="Path to temp .pkl chunks file")
-    parser.add_argument("--index-name", required=True, help="Name for the index")
+    parser.add_argument("--emb-file", default="artifacts/indexes/tmppzyovtz_.npy", 
+                        help="Path to temp .npy embeddings file")
+    parser.add_argument("--chunks-file", default="artifacts/indexes/tmpali7f93w.pkl",
+                        help="Path to temp .pkl chunks file")
+    parser.add_argument("--index-name", default="en_e5_mistral_7b_instruct_c512_o50",
+                        help="Name for the index")
     parser.add_argument("--embedding-dim", type=int, default=4096, help="Embedding dimension")
     parser.add_argument("--output-dir", default="artifacts/indexes", help="Output directory")
-    parser.add_argument("--start-batch", type=int, default=0, help="Resume from this batch (0-indexed)")
+    parser.add_argument("--start-batch", type=int, default=None, 
+                        help="Resume from this batch (auto-detects from checkpoint if not specified)")
     parser.add_argument("--num-threads", type=int, default=32, help="FAISS threads (default: 32)")
     parser.add_argument("--checkpoint-every", type=int, default=1, help="Checkpoint every N batches")
     args = parser.parse_args()
@@ -58,6 +62,17 @@ def main():
     chunks_path = Path(args.chunks_file)
     output_dir = Path(args.output_dir) / args.index_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Auto-detect checkpoint for resume
+    checkpoint_path = output_dir / "checkpoint.json"
+    if args.start_batch is None:
+        if checkpoint_path.exists():
+            with open(checkpoint_path) as f:
+                checkpoint_data = json.load(f)
+            args.start_batch = checkpoint_data.get("batch_num", 0)
+            print(f"Auto-detected checkpoint: resuming from batch {args.start_batch}", flush=True)
+        else:
+            args.start_batch = 0
 
     print(f"\n{'=' * 60}", flush=True)
     print(f"Incremental embedding recovery: {args.index_name}", flush=True)
