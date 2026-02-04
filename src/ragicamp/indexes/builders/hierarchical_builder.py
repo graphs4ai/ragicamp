@@ -24,8 +24,8 @@ from .storage import EmbeddingStorage
 
 logger = get_logger(__name__)
 
-# Checkpoint interval
-CHECKPOINT_INTERVAL = 5
+# Checkpoint every batch - hierarchical batches can take hours
+CHECKPOINT_INTERVAL = 1
 
 
 def build_hierarchical_index(

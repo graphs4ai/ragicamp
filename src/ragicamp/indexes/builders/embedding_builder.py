@@ -34,7 +34,8 @@ logger = get_logger(__name__)
 MAX_DOC_CHARS = 100_000
 
 # Checkpoint index every N batches
-CHECKPOINT_INTERVAL = 5
+# Checkpoint every batch - large-scale embedding can take hours per batch
+CHECKPOINT_INTERVAL = 1
 
 
 def build_embedding_index(
