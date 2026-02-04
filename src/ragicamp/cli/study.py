@@ -190,12 +190,12 @@ def get_prompt_builder(prompt_type: str, dataset: str):
     return PromptBuilder.from_config(prompt_type, dataset=dataset)
 
 
-def create_generator_provider(spec: str, quant: str | None = None):
+def create_generator_provider(spec: str):
     """Create a GeneratorProvider from spec."""
     from ragicamp.factory import ProviderFactory
 
     validate_model_spec(spec)
-    return ProviderFactory.create_generator(spec, quantization=quant)
+    return ProviderFactory.create_generator(spec)
 
 
 def create_dataset(name: str, limit: Optional[int] = None):

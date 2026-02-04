@@ -254,7 +254,6 @@ def create_fixed_rag_agent(
     top_k: int = 5,
     embedder_backend: str = "vllm",
     generator_backend: str = "vllm",
-    quantization: str | None = None,
     search_type: str = "dense",
     sparse_method: str = "tfidf",
     hybrid_alpha: float = 0.5,
@@ -269,7 +268,6 @@ def create_fixed_rag_agent(
         top_k: Number of documents to retrieve
         embedder_backend: "vllm" or "sentence_transformers"
         generator_backend: "vllm" or "hf"
-        quantization: Generator quantization ("4bit", "8bit", None)
         search_type: "dense", "hybrid", or "hierarchical"
         sparse_method: For hybrid: "tfidf" or "bm25"
         hybrid_alpha: Weight for dense vs sparse (0=sparse, 1=dense)
@@ -295,7 +293,6 @@ def create_fixed_rag_agent(
         GeneratorConfig(
             model_name=generator_model,
             backend=generator_backend,
-            quantization=quantization,
         )
     )
 

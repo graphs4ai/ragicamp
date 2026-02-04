@@ -118,7 +118,6 @@ def create_direct_llm_agent(
     name: str,
     generator_model: str,
     generator_backend: str = "vllm",
-    quantization: str | None = None,
 ) -> DirectLLMAgent:
     """Create a DirectLLMAgent with provider.
     
@@ -126,7 +125,6 @@ def create_direct_llm_agent(
         name: Agent name
         generator_model: Generator model name
         generator_backend: "vllm" or "hf"
-        quantization: Quantization ("4bit", "8bit", None)
     
     Returns:
         Configured DirectLLMAgent
@@ -136,7 +134,6 @@ def create_direct_llm_agent(
     generator_provider = GeneratorProvider(GeneratorConfig(
         model_name=generator_model,
         backend=generator_backend,
-        quantization=quantization,
     ))
     
     return DirectLLMAgent(

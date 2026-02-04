@@ -70,10 +70,6 @@ direct:
     - concise    # Short answers
     - fewshot    # 5 in-context examples
 
-  quantization:
-    - 4bit       # For larger models
-    - none       # Full precision for smaller models
-
 # ============================================================================
 # RAG Experiments (with retrieval)
 # ============================================================================
@@ -126,10 +122,6 @@ rag:
   prompts:
     - concise    # Short answers
     - fewshot    # 5 in-context examples
-
-  quantization:
-    - 4bit       # For large models (70B, 32B)
-    - none       # For medium models (7-9B)
 
 # ============================================================================
 # Metrics

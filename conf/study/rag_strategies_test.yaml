@@ -46,8 +46,6 @@ direct:
   models: *slm_models
   prompts:
     - concise
-  quantization:
-    - none
 
 # ============================================================================
 # RAG Experiments - Systematic Ablation
@@ -132,9 +130,6 @@ rag:
   prompts:
     - concise
     - fewshot_3
-
-  quantization:
-    - none
 
 # ============================================================================
 # Metrics
