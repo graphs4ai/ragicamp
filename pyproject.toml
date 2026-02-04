@@ -7,12 +7,12 @@ name = "ragicamp"
 version = "0.4.0"
 description = "A modular framework for experimenting with RAG approaches"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<3.14"  # vLLM 0.15+ requires Python 3.10-3.13
 authors = [
     {name = "RAGiCamp Team"}
 ]
 dependencies = [
-    "numpy>=1.21.0,<2.0.0", # Pin to <2.0 for TensorFlow/Transformers compatibility
+    "numpy>=1.21.0",  # numpy 2.x required by vLLM 0.15+ (via opencv-python-headless)
     "pandas>=1.3.0",
     "torch>=2.0.0",
     "transformers>=4.30.0",
@@ -73,7 +73,7 @@ packages = ["src/ragicamp"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -98,7 +98,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
