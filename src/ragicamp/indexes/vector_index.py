@@ -1,13 +1,14 @@
-"""Vector index - just data (FAISS index + documents).
+"""VectorIndex - Pure data index (FAISS + documents).
 
-The index stores:
-- Document chunks
-- FAISS index for similarity search
-
-It does NOT own the embedder. Embeddings are provided externally.
-This allows clean lifecycle management of embedder models.
+Design principles:
+- Index is JUST DATA - no model ownership
+- Embeddings provided externally by EmbedderProvider
+- Supports sharded indexes for large corpora
+- Memory-mapped loading for RAM efficiency
+- GPU FAISS for fast search (optional)
 """
 
+import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,71 +18,134 @@ import faiss
 import numpy as np
 
 from ragicamp.core.logging import get_logger
+from ragicamp.core.types import Document, SearchResult
 
 logger = get_logger(__name__)
 
 
-@dataclass
-class Document:
-    """A document chunk with metadata."""
-    id: str
-    text: str
-    metadata: dict[str, Any] | None = None
+# =============================================================================
+# FAISS Configuration
+# =============================================================================
+
+_faiss_gpu_resources = None
 
 
+def get_faiss_gpu_resources():
+    """Get shared FAISS GPU resources."""
+    global _faiss_gpu_resources
+    
+    if not hasattr(faiss, "StandardGpuResources"):
+        return None
+    
+    if _faiss_gpu_resources is None:
+        try:
+            _faiss_gpu_resources = faiss.StandardGpuResources()
+            _faiss_gpu_resources.setTempMemory(512 * 1024 * 1024)  # 512MB
+            logger.info("Initialized FAISS GPU resources")
+        except Exception as e:
+            logger.warning("Failed to init FAISS GPU: %s", e)
+            return None
+    
+    return _faiss_gpu_resources
+
+
+# =============================================================================
+# VectorIndex
+# =============================================================================
+
 @dataclass
-class SearchResult:
-    """Result from index search."""
-    doc_idx: int
-    score: float
-    document: Document
+class IndexConfig:
+    """Configuration for vector index."""
+    embedding_model: str
+    embedding_dim: int
+    index_type: str = "flat"  # flat, ivf, hnsw
+    n_documents: int = 0
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "embedding_model": self.embedding_model,
+            "embedding_dim": self.embedding_dim,
+            "index_type": self.index_type,
+            "n_documents": self.n_documents,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "IndexConfig":
+        return cls(
+            embedding_model=data["embedding_model"],
+            embedding_dim=data["embedding_dim"],
+            index_type=data.get("index_type", "flat"),
+            n_documents=data.get("n_documents", data.get("num_documents", 0)),
+            chunk_size=data.get("chunk_size"),
+            chunk_overlap=data.get("chunk_overlap"),
+        )
 
 
 class VectorIndex:
-    """FAISS-based vector index - just data, no models.
+    """FAISS-based vector index - pure data, no models.
     
-    This is a clean separation of concerns:
-    - VectorIndex: stores vectors and documents, handles search
-    - Embedder: converts text to vectors (managed separately)
+    The index stores:
+    - FAISS index with embeddings
+    - Document list (id, text, metadata)
+    - Configuration (model name, dimensions, etc.)
+    
+    Embeddings are provided externally - the index does NOT own an embedder.
+    This allows clean GPU lifecycle management by agents.
     
     Usage:
-        # Build index with external embedder
+        # Build with external embedder
         with embedder_provider.load() as embedder:
             embeddings = embedder.batch_encode(texts)
-            index = VectorIndex.build(documents, embeddings)
+            index = VectorIndex.build(documents, embeddings, config)
             index.save("my_index")
         
         # Search with external embedder
+        index = VectorIndex.load("my_index")
         with embedder_provider.load() as embedder:
-            query_emb = embedder.batch_encode([query])[0]
-            results = index.search(query_emb, top_k=5)
+            query_emb = embedder.batch_encode(queries)
+            results = index.batch_search(query_emb, top_k=5)
     """
     
     def __init__(
         self,
         faiss_index: faiss.Index,
         documents: list[Document],
-        embedding_dim: int,
-        index_type: str = "flat",
+        config: IndexConfig,
+        is_sharded: bool = False,
+        shard_indexes: list[faiss.Index] | None = None,
+        shard_offsets: list[int] | None = None,
     ):
         self.faiss_index = faiss_index
         self.documents = documents
-        self.embedding_dim = embedding_dim
-        self.index_type = index_type
+        self.config = config
+        
+        # Sharding support
+        self._is_sharded = is_sharded
+        self._shard_indexes = shard_indexes or []
+        self._shard_offsets = shard_offsets or [0]
+        
+        # GPU state
+        self._is_gpu = False
     
     @classmethod
     def build(
         cls,
         documents: list[Document],
         embeddings: np.ndarray,
-        index_type: str = "flat",
+        config: IndexConfig,
+        normalize: bool = True,
     ) -> "VectorIndex":
-        """Build index from documents and their embeddings.
+        """Build index from documents and pre-computed embeddings.
         
         Args:
-            documents: List of documents
+            documents: List of documents (same order as embeddings)
             embeddings: Pre-computed embeddings, shape (n_docs, dim)
-            index_type: "flat", "ivf", or "hnsw"
+            config: Index configuration
+            normalize: Whether to L2-normalize embeddings
         
         Returns:
             VectorIndex ready for search
@@ -91,28 +155,33 @@ class VectorIndex:
         if len(documents) != n_docs:
             raise ValueError(f"Documents ({len(documents)}) != embeddings ({n_docs})")
         
-        # Normalize embeddings for inner product search
+        if dim != config.embedding_dim:
+            raise ValueError(f"Embedding dim ({dim}) != config ({config.embedding_dim})")
+        
+        # Normalize for cosine similarity
         embeddings = embeddings.astype(np.float32)
-        faiss.normalize_L2(embeddings)
+        if normalize:
+            faiss.normalize_L2(embeddings)
         
         # Create FAISS index
-        if index_type == "hnsw":
+        if config.index_type == "hnsw":
             faiss_index = faiss.IndexHNSWFlat(dim, 32)
             faiss_index.hnsw.efConstruction = 200
             faiss_index.hnsw.efSearch = 128
-        elif index_type == "ivf":
+        elif config.index_type == "ivf":
+            nlist = min(4096, max(64, int(np.sqrt(n_docs) * 2)))
             quantizer = faiss.IndexFlatIP(dim)
-            nlist = min(4096, n_docs // 10)
             faiss_index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
             faiss_index.train(embeddings)
-            faiss_index.nprobe = 128
+            faiss_index.nprobe = min(128, nlist // 4)
         else:  # flat
             faiss_index = faiss.IndexFlatIP(dim)
         
         faiss_index.add(embeddings)
+        config.n_documents = n_docs
         
-        logger.info("Built %s index: %d vectors, dim=%d", index_type, n_docs, dim)
-        return cls(faiss_index, documents, dim, index_type)
+        logger.info("Built %s index: %d vectors, dim=%d", config.index_type, n_docs, dim)
+        return cls(faiss_index, documents, config)
     
     def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[SearchResult]:
         """Search for similar documents.
@@ -122,23 +191,10 @@ class VectorIndex:
             top_k: Number of results
         
         Returns:
-            List of SearchResult with document and score
+            List of SearchResult
         """
-        query = query_embedding.astype(np.float32).reshape(1, -1)
-        faiss.normalize_L2(query)
-        
-        scores, indices = self.faiss_index.search(query, top_k)
-        
-        results = []
-        for idx, score in zip(indices[0], scores[0]):
-            if 0 <= idx < len(self.documents):
-                results.append(SearchResult(
-                    doc_idx=int(idx),
-                    score=float(score),
-                    document=self.documents[idx],
-                ))
-        
-        return results
+        results = self.batch_search(query_embedding.reshape(1, -1), top_k)
+        return results[0] if results else []
     
     def batch_search(
         self, 
@@ -152,83 +208,268 @@ class VectorIndex:
             top_k: Number of results per query
         
         Returns:
-            List of results for each query
+            List of SearchResult lists, one per query
         """
         queries = query_embeddings.astype(np.float32)
         faiss.normalize_L2(queries)
+        
+        if self._is_sharded:
+            return self._batch_search_sharded(queries, top_k)
+        
+        if self.faiss_index is None or self.faiss_index.ntotal == 0:
+            return [[] for _ in range(len(queries))]
         
         scores, indices = self.faiss_index.search(queries, top_k)
         
         all_results = []
         for q_idx in range(len(queries)):
             results = []
-            for idx, score in zip(indices[q_idx], scores[q_idx]):
+            for rank, (idx, score) in enumerate(zip(indices[q_idx], scores[q_idx])):
                 if 0 <= idx < len(self.documents):
+                    doc = self.documents[idx]
                     results.append(SearchResult(
-                        doc_idx=int(idx),
+                        document=Document(
+                            id=doc.id,
+                            text=doc.text,
+                            metadata=doc.metadata.copy(),
+                            score=float(score),
+                        ),
                         score=float(score),
-                        document=self.documents[idx],
+                        rank=rank,
                     ))
             all_results.append(results)
         
         return all_results
+    
+    def _batch_search_sharded(
+        self, 
+        queries: np.ndarray, 
+        top_k: int,
+    ) -> list[list[SearchResult]]:
+        """Search across shards and merge results."""
+        n_queries = len(queries)
+        all_shard_results: list[list[tuple[int, float]]] = [[] for _ in range(n_queries)]
+        
+        for shard_idx, shard_index in enumerate(self._shard_indexes):
+            if shard_index.ntotal == 0:
+                continue
+            
+            scores, indices = shard_index.search(queries, top_k)
+            doc_offset = self._shard_offsets[shard_idx]
+            
+            for q_idx in range(n_queries):
+                for idx, score in zip(indices[q_idx], scores[q_idx]):
+                    if idx >= 0:
+                        global_idx = doc_offset + int(idx)
+                        if 0 <= global_idx < len(self.documents):
+                            all_shard_results[q_idx].append((global_idx, float(score)))
+        
+        # Sort and build results
+        final_results = []
+        for q_results in all_shard_results:
+            q_results.sort(key=lambda x: x[1], reverse=True)
+            results = []
+            for rank, (idx, score) in enumerate(q_results[:top_k]):
+                doc = self.documents[idx]
+                results.append(SearchResult(
+                    document=Document(
+                        id=doc.id,
+                        text=doc.text,
+                        metadata=doc.metadata.copy(),
+                        score=score,
+                    ),
+                    score=score,
+                    rank=rank,
+                ))
+            final_results.append(results)
+        
+        return final_results
+    
+    def to_gpu(self) -> "VectorIndex":
+        """Move index to GPU for faster search."""
+        if self._is_gpu:
+            return self
+        
+        if self.config.index_type == "hnsw":
+            logger.warning("HNSW doesn't support GPU, staying on CPU")
+            return self
+        
+        gpu_res = get_faiss_gpu_resources()
+        if gpu_res is None:
+            logger.warning("FAISS GPU not available")
+            return self
+        
+        try:
+            co = faiss.GpuClonerOptions()
+            co.useFloat16 = True
+            
+            if self._is_sharded:
+                self._shard_indexes = [
+                    faiss.index_cpu_to_gpu(gpu_res, 0, idx, co)
+                    for idx in self._shard_indexes
+                ]
+            else:
+                self.faiss_index = faiss.index_cpu_to_gpu(gpu_res, 0, self.faiss_index, co)
+            
+            self._is_gpu = True
+            logger.info("Moved index to GPU")
+        except Exception as e:
+            logger.warning("Failed to move to GPU: %s", e)
+        
+        return self
     
     def save(self, path: Path | str) -> None:
         """Save index to disk."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         
+        # Convert GPU to CPU for saving
+        index_to_save = self.faiss_index
+        if self._is_gpu and not self._is_sharded:
+            index_to_save = faiss.index_gpu_to_cpu(self.faiss_index)
+        
         # Save FAISS index
-        faiss.write_index(self.faiss_index, str(path / "index.faiss"))
+        faiss.write_index(index_to_save, str(path / "index.faiss"))
         
         # Save documents
         with open(path / "documents.pkl", "wb") as f:
             pickle.dump(self.documents, f)
         
-        # Save metadata
-        import json
-        metadata = {
-            "embedding_dim": self.embedding_dim,
-            "index_type": self.index_type,
-            "n_documents": len(self.documents),
-        }
-        with open(path / "metadata.json", "w") as f:
-            json.dump(metadata, f, indent=2)
+        # Save config
+        with open(path / "config.json", "w") as f:
+            json.dump(self.config.to_dict(), f, indent=2)
         
-        logger.info("Saved index to %s", path)
+        logger.info("Saved index to %s (%d docs)", path, len(self.documents))
     
     @classmethod
-    def load(cls, path: Path | str, use_mmap: bool = True) -> "VectorIndex":
+    def load(
+        cls, 
+        path: Path | str, 
+        use_mmap: bool = True,
+        use_gpu: bool = False,
+    ) -> "VectorIndex":
         """Load index from disk.
         
         Args:
             path: Index directory
             use_mmap: Memory-map the index (reduces RAM for large indexes)
+            use_gpu: Move index to GPU after loading
         """
         path = Path(path)
         
-        # Load metadata
-        import json
-        with open(path / "metadata.json") as f:
-            metadata = json.load(f)
+        # Load config
+        with open(path / "config.json") as f:
+            config = IndexConfig.from_dict(json.load(f))
         
-        # Load FAISS index
+        # Check for sharded index
+        shard_dirs = sorted([d for d in path.iterdir() if d.is_dir() and d.name.startswith("shard_")])
+        
+        if shard_dirs:
+            index = cls._load_sharded(path, shard_dirs, config, use_mmap)
+        else:
+            index = cls._load_single(path, config, use_mmap)
+        
+        if use_gpu:
+            index.to_gpu()
+        
+        logger.info("Loaded index: %d docs, sharded=%s, gpu=%s", 
+                   len(index.documents), index._is_sharded, index._is_gpu)
+        return index
+    
+    @classmethod
+    def _load_single(cls, path: Path, config: IndexConfig, use_mmap: bool) -> "VectorIndex":
+        """Load single-file index."""
         io_flags = faiss.IO_FLAG_MMAP if use_mmap else 0
         faiss_index = faiss.read_index(str(path / "index.faiss"), io_flags)
         
-        # Load documents
         with open(path / "documents.pkl", "rb") as f:
             documents = pickle.load(f)
         
-        logger.info("Loaded index from %s (%d docs, mmap=%s)", 
-                   path, len(documents), use_mmap)
+        # Convert old Document format if needed
+        documents = cls._ensure_document_type(documents)
+        
+        return cls(faiss_index, documents, config)
+    
+    @classmethod
+    def _load_sharded(
+        cls, 
+        path: Path, 
+        shard_dirs: list[Path], 
+        config: IndexConfig,
+        use_mmap: bool,
+    ) -> "VectorIndex":
+        """Load sharded index."""
+        io_flags = faiss.IO_FLAG_MMAP if use_mmap else 0
+        
+        shard_indexes = []
+        shard_offsets = [0]
+        total_vectors = 0
+        
+        for shard_dir in shard_dirs:
+            shard_path = shard_dir / "index.faiss"
+            if not shard_path.exists():
+                continue
+            
+            shard_index = faiss.read_index(str(shard_path), io_flags)
+            shard_indexes.append(shard_index)
+            total_vectors += shard_index.ntotal
+            shard_offsets.append(total_vectors)
+        
+        # Load documents
+        docs_path = path / "documents.pkl"
+        if docs_path.exists():
+            with open(docs_path, "rb") as f:
+                documents = pickle.load(f)
+        else:
+            documents = []
+            for shard_dir in shard_dirs:
+                shard_docs = shard_dir / "documents.pkl"
+                if shard_docs.exists():
+                    with open(shard_docs, "rb") as f:
+                        documents.extend(pickle.load(f))
+        
+        documents = cls._ensure_document_type(documents)
+        
+        logger.info("Loaded %d shards with %d vectors", len(shard_indexes), total_vectors)
         
         return cls(
-            faiss_index=faiss_index,
+            faiss_index=shard_indexes[0] if shard_indexes else None,
             documents=documents,
-            embedding_dim=metadata["embedding_dim"],
-            index_type=metadata["index_type"],
+            config=config,
+            is_sharded=True,
+            shard_indexes=shard_indexes,
+            shard_offsets=shard_offsets,
         )
+    
+    @staticmethod
+    def _ensure_document_type(documents: list) -> list[Document]:
+        """Convert legacy document formats to Document type."""
+        if not documents:
+            return []
+        
+        # Check if already correct type
+        if isinstance(documents[0], Document):
+            return documents
+        
+        # Convert from old format
+        converted = []
+        for doc in documents:
+            if hasattr(doc, 'id') and hasattr(doc, 'text'):
+                converted.append(Document(
+                    id=doc.id,
+                    text=doc.text,
+                    metadata=getattr(doc, 'metadata', {}),
+                    score=getattr(doc, 'score', None),
+                ))
+            elif isinstance(doc, dict):
+                converted.append(Document.from_dict(doc))
+            else:
+                raise ValueError(f"Unknown document format: {type(doc)}")
+        
+        return converted
     
     def __len__(self) -> int:
         return len(self.documents)
+    
+    def __repr__(self) -> str:
+        return f"VectorIndex({len(self)} docs, {self.config.index_type}, gpu={self._is_gpu})"

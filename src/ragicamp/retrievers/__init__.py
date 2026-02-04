@@ -1,24 +1,24 @@
-"""Document retrieval systems.
+"""Retrieval components.
 
-Architecture:
-- Indexes (ragicamp.indexes): Store documents + embeddings (expensive, reusable)
-- Retrievers (this module): Search strategies (cheap, configurable)
+Clean Architecture:
+- VectorIndex: Pure data for dense search
+- SparseIndex: TF-IDF/BM25 for sparse search
+- HybridSearcher: Combines dense + sparse with RRF
+- HierarchicalSearcher: Child chunk search, parent chunk return
 
-Retrievers are thin wrappers around Indexes. Multiple retrievers can share
-the same index with different search parameters.
+Searchers don't own embedders. Embeddings are provided externally
+by EmbedderProvider, allowing clean GPU lifecycle management.
 """
 
-from ragicamp.retrievers.base import Document, Retriever
-from ragicamp.retrievers.dense import DenseRetriever
-from ragicamp.retrievers.hierarchical import HierarchicalRetriever
-from ragicamp.retrievers.hybrid import HybridRetriever
-from ragicamp.retrievers.sparse import SparseRetriever
+from ragicamp.indexes.sparse import SparseIndex, SparseMethod
+from ragicamp.indexes.vector_index import VectorIndex
+from ragicamp.retrievers.hierarchical import HierarchicalSearcher
+from ragicamp.retrievers.hybrid import HybridSearcher
 
 __all__ = [
-    "Retriever",
-    "Document",
-    "DenseRetriever",
-    "SparseRetriever",
-    "HybridRetriever",
-    "HierarchicalRetriever",
+    "VectorIndex",
+    "SparseIndex",
+    "SparseMethod",
+    "HybridSearcher",
+    "HierarchicalSearcher",
 ]

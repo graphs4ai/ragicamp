@@ -14,7 +14,8 @@ from tqdm import tqdm
 
 from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
 from ragicamp.core.logging import get_logger
-from ragicamp.indexes.vector_index import VectorIndex, SearchResult, Document
+from ragicamp.core.types import Document
+from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig

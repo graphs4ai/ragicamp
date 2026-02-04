@@ -1,10 +1,10 @@
 """Core infrastructure for RAGiCamp.
 
 This module provides foundational components:
+- Types: Core data types (Document, SearchResult)
 - Schemas: Data contracts (PredictionRecord, RetrievedDoc, etc.)
 - Exceptions: Custom exception hierarchy
 - Logging: Structured logging configuration
-- Protocols: Type-checkable interfaces
 - Constants: Enums and constants
 """
 
@@ -34,8 +34,12 @@ from ragicamp.core.schemas import (
     RetrievalStep,
     RetrievedDoc,
 )
+from ragicamp.core.types import Document, SearchResult
 
 __all__ = [
+    # Core types
+    "Document",
+    "SearchResult",
     # Schemas (data contracts)
     "PredictionRecord",
     "RetrievedDoc",

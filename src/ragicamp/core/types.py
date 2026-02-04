@@ -1,0 +1,66 @@
+"""Core data types used throughout ragicamp.
+
+Single source of truth for Document, Chunk, and related types.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class Document:
+    """A document or chunk in the retrieval system.
+    
+    Used for:
+    - Raw documents from corpus
+    - Chunked text for indexing
+    - Search results (with score)
+    
+    Attributes:
+        id: Unique identifier
+        text: Document text content
+        metadata: Additional info (source, title, parent_id, etc.)
+        score: Retrieval score (only set in search results)
+    """
+    id: str
+    text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    score: float | None = None
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary format."""
+        return {
+            "id": self.id,
+            "text": self.text,
+            "metadata": self.metadata,
+            "score": self.score,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Document":
+        """Create from dictionary."""
+        return cls(
+            id=data["id"],
+            text=data["text"],
+            metadata=data.get("metadata", {}),
+            score=data.get("score"),
+        )
+
+
+@dataclass
+class SearchResult:
+    """Result from index search.
+    
+    Contains the document and its relevance score.
+    """
+    document: Document
+    score: float
+    rank: int = 0
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary format."""
+        return {
+            "document": self.document.to_dict(),
+            "score": self.score,
+            "rank": self.rank,
+        }
