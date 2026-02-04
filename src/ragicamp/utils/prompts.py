@@ -52,30 +52,36 @@ class PromptBuilder:
         """Build prompt for direct (no retrieval) QA.
 
         Structure:
-            [Task instruction - use your knowledge]
+            [Task context - what you're doing]
 
             [Examples section - if fewshot]
 
             Question: {query}
+
+            [Format instruction - at END for better following]
             Answer:
         """
         parts = []
 
-        # Task instruction - emphasize using own knowledge (no context!)
-        task = "Answer the question using your knowledge."
-        if self.config.style:
-            task += f" {self.config.style}"
-        if self.config.stop_instruction:
-            task += f" {self.config.stop_instruction}"
-        task += " If you don't know, answer 'Unknown'."
-        parts.append(task)
+        # Task context - brief description (no formatting instructions here)
+        parts.append("Answer the question using your knowledge.")
 
         # Examples section (if any)
         if self.config.examples:
             parts.append(self._format_examples())
 
         # The actual question
-        parts.append(f"Question: {query}\nAnswer:")
+        parts.append(f"Question: {query}")
+
+        # Format instructions at END - LLMs follow last instruction better
+        format_instruction = []
+        if self.config.style:
+            format_instruction.append(self.config.style)
+        if self.config.stop_instruction:
+            format_instruction.append(self.config.stop_instruction)
+        format_instruction.append("If you don't know, answer 'Unknown'.")
+
+        parts.append(" ".join(format_instruction) + "\nAnswer:")
 
         return "\n\n".join(parts)
 
@@ -83,40 +89,50 @@ class PromptBuilder:
         """Build prompt for RAG (with retrieved context).
 
         Structure:
-            [Task instruction - use context + own knowledge]
+            [Task context - what you're doing]
 
             [Examples section - if fewshot]
 
-            Context:
+            Retrieved Passages:
             {retrieved documents}
 
             Question: {query}
+
+            [Format instruction - at END for better following]
             Answer:
+
+        Key insight: LLMs follow the LAST instruction more reliably.
+        So we put format constraints (reply with just the answer) at the END.
         """
         parts = []
 
-        # Task instruction - encourage using the retrieved passages
+        # Task context - brief description (no formatting instructions here)
         task = "Answer the question based on the retrieved passages below."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
         else:
-            # Default: encourage finding the answer in passages
-            task += " The answer is in one of the passages - find and extract it."
-        if self.config.style:
-            task += f" {self.config.style}"
-        if self.config.stop_instruction:
-            task += f" {self.config.stop_instruction}"
-        # Softer fallback - only use Unknown as last resort
-        task += " Only answer 'Unknown' if the answer is truly not in the passages."
+            task += " The answer can be found in the passages."
         parts.append(task)
 
         # Examples section (if any)
         if self.config.examples:
             parts.append(self._format_examples())
 
-        # Retrieved passages and question
+        # Retrieved passages
         parts.append(f"Retrieved Passages:\n{context}")
-        parts.append(f"Question: {query}\nAnswer:")
+
+        # The actual question
+        parts.append(f"Question: {query}")
+
+        # Format instructions at END - LLMs follow last instruction better
+        format_instruction = []
+        if self.config.style:
+            format_instruction.append(self.config.style)
+        if self.config.stop_instruction:
+            format_instruction.append(self.config.stop_instruction)
+        format_instruction.append("Only answer 'Unknown' if the answer is truly not in the passages.")
+
+        parts.append(" ".join(format_instruction) + "\nAnswer:")
 
         return "\n\n".join(parts)
 

@@ -151,11 +151,12 @@ rag:
       index_type: hnsw
     
     # Stella 1.5B: Distilled SOTA, excellent MTEB scores
+    # Based on gte-Qwen2-1.5B-instruct, supported by vLLM via Transformers backend
     # Using 1024d (authors recommend - only 0.001 lower than 8192d)
     - type: dense
       name: dense_stella_1.5b_512
       embedding_model: NovaSearch/stella_en_1.5B_v5
-      embedding_backend: sentence_transformers  # vLLM doesn't support Stella yet
+      embedding_backend: vllm  # Stella is Qwen2-based, vLLM supports via Transformers
       embedding_dim: 1024  # MRL allows flexible dims; 1024 is optimal
       chunk_size: 512
       chunk_overlap: 50
