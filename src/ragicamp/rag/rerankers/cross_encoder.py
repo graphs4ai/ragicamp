@@ -16,7 +16,7 @@ from ragicamp.core.logging import get_logger
 from ragicamp.rag.rerankers.base import Reranker
 
 if TYPE_CHECKING:
-    from ragicamp.retrievers.base import Document
+    from ragicamp.core.types import Document
 
 logger = get_logger(__name__)
 

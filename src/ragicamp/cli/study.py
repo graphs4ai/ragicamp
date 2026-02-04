@@ -41,21 +41,20 @@ def get_prompt_builder(prompt_type: str, dataset: str):
     return PromptBuilder.from_config(prompt_type, dataset=dataset)
 
 
-def create_model(spec: str, quant: str = "4bit"):
-    """Create model from spec using ComponentFactory."""
-    from ragicamp.factory import ComponentFactory
+def create_generator_provider(spec: str, quant: str | None = None):
+    """Create a GeneratorProvider from spec."""
+    from ragicamp.factory import ProviderFactory
 
     validate_model_spec(spec)
-    config = ComponentFactory.parse_model_spec(spec, quantization=quant)
-    return ComponentFactory.create_model(config)
+    return ProviderFactory.create_generator(spec, quantization=quant)
 
 
 def create_dataset(name: str, limit: Optional[int] = None):
-    """Create dataset using ComponentFactory."""
-    from ragicamp.factory import ComponentFactory
+    """Create dataset using DatasetFactory."""
+    from ragicamp.factory import DatasetFactory
 
-    config = ComponentFactory.parse_dataset_spec(name, limit=limit)
-    return ComponentFactory.create_dataset(config)
+    config = DatasetFactory.parse_spec(name, limit=limit)
+    return DatasetFactory.create(config)
 
 
 def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):

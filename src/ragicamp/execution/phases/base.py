@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    from ragicamp.agents.base import RAGAgent
+    from ragicamp.agents.base import Agent
     from ragicamp.datasets.base import QADataset
     from ragicamp.experiment_state import ExperimentPhase, ExperimentState
     from ragicamp.metrics.base import Metric
@@ -26,7 +26,7 @@ class ExecutionContext:
     """
 
     output_path: Path
-    agent: Optional["RAGAgent"] = None
+    agent: Optional["Agent"] = None
     dataset: Optional["QADataset"] = None
     metrics: Optional[list["Metric"]] = None
     callbacks: Optional[Any] = None  # ExperimentCallbacks

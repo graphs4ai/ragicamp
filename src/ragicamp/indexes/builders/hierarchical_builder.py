@@ -62,10 +62,10 @@ def build_hierarchical_index(
     import faiss
     import numpy as np
 
+    from ragicamp.core.types import Document
     from ragicamp.corpus import CorpusConfig, WikipediaCorpus
     from ragicamp.models.embedder import create_embedder
     from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
-    from ragicamp.retrievers.base import Document
 
     manager = get_artifact_manager()
     retriever_name = retriever_config["name"]

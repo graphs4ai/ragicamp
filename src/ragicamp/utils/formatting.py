@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 
 
 class ContextFormatter:

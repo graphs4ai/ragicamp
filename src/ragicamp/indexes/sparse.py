@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.base import Index
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 from ragicamp.utils.artifacts import get_artifact_manager
 
 logger = get_logger(__name__)

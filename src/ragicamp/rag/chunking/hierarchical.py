@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ragicamp.corpus.chunking import ChunkConfig, RecursiveChunker
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 
 
 @dataclass

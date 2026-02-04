@@ -9,7 +9,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 
 
 def _get_wikirank_cache_path(language: str) -> Path:

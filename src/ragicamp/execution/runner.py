@@ -69,7 +69,7 @@ def run_metrics_only(
         Status string
     """
     from ragicamp.experiment_state import ExperimentPhase, detect_state
-    from ragicamp.factory import ComponentFactory
+    from ragicamp.factory import MetricFactory
     from ragicamp.metrics import compute_metrics_batched
     from ragicamp.utils.experiment_io import ExperimentIO
 
@@ -92,7 +92,7 @@ def run_metrics_only(
     state = detect_state(output_path, metrics)
 
     # Create metric objects
-    metric_objs = ComponentFactory.create_metrics(metrics, judge_model=judge_model)
+    metric_objs = MetricFactory.create(metrics, judge_model=judge_model)
 
     # Callback to save state after each metric
     def on_metric_complete(metric_name: str) -> None:

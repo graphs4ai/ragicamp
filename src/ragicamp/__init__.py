@@ -1,47 +1,50 @@
 """RAGiCamp: A modular framework for experimenting with RAG approaches.
 
-Key packages:
-- spec: Experiment specifications (ExperimentSpec, build_specs, naming)
-- state: State management (ExperimentState, ExperimentPhase, check_health)
-- factory: Component factories (ModelFactory, DatasetFactory, etc.)
-- execution: Batch execution (ResilientExecutor, phase handlers)
-- agents: RAG agents (DirectLLM, FixedRAG)
-- models: Language model interfaces (HuggingFace, OpenAI)
-- retrievers: Document retrieval (Dense, Sparse)
+Clean Architecture:
+- factory: ProviderFactory, AgentFactory, DatasetFactory, MetricFactory
+- agents: DirectLLMAgent, FixedRAGAgent, IterativeRAGAgent, SelfRAGAgent
+- models: EmbedderProvider, GeneratorProvider
+- indexes: VectorIndex, IndexBuilder
+- retrievers: HybridSearcher, HierarchicalSearcher
 - datasets: QA datasets (NQ, HotpotQA, TriviaQA)
 - metrics: Evaluation metrics (F1, EM, BERTScore, LLM-as-judge)
-- indexes: Index building and management
 
 Quick start:
-    from ragicamp import Experiment, ComponentFactory
+    from ragicamp import Experiment
+    from ragicamp.factory import ProviderFactory, AgentFactory
+    from ragicamp.indexes import VectorIndex
 
-    # Create components
-    model = ComponentFactory.create_model({"type": "huggingface", "model_name": "..."})
-    agent = ComponentFactory.create_agent({"type": "direct_llm", "name": "baseline"}, model)
-    dataset = ComponentFactory.create_dataset({"name": "nq", "split": "validation"})
+    # Create providers (lazy loading)
+    embedder = ProviderFactory.create_embedder("BAAI/bge-large-en")
+    generator = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
 
-    # Run experiment
-    exp = Experiment(name="my_exp", agent=agent, dataset=dataset, metrics=[...])
-    result = exp.run(batch_size=8)
+    # Load index
+    index = VectorIndex.load("my_index")
+
+    # Create agent
+    agent = AgentFactory.create_rag(
+        agent_type="fixed_rag",
+        name="my_agent",
+        embedder_provider=embedder,
+        generator_provider=generator,
+        index=index,
+    )
+
+    # Run
+    results = agent.run(queries)
 """
 
 # ============================================================================
-# CRITICAL: Configure TensorFlow BEFORE any library imports!
-#
-# TensorFlow is transitively imported by transformers/sentence-transformers.
-# By default, TF allocates ALL GPU memory on import, leaving no room for
-# PyTorch models like BERTScore or the main LLM.
-#
-# This MUST happen before any other imports to be effective.
+# Configure TensorFlow BEFORE any library imports
 # ============================================================================
 import os as _os
 
 if "TF_FORCE_GPU_ALLOW_GROWTH" not in _os.environ:
     _os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 if "TF_CPP_MIN_LOG_LEVEL" not in _os.environ:
-    _os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Suppress TF info/warning logs
+    _os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from ragicamp.execution import ResilientExecutor
 from ragicamp.experiment import (
@@ -50,9 +53,8 @@ from ragicamp.experiment import (
     ExperimentResult,
     run_experiments,
 )
-from ragicamp.factory import ComponentFactory
 
-# Import from canonical locations (state/ package)
+# Import from canonical locations
 from ragicamp.state import (
     ExperimentHealth,
     ExperimentPhase,
@@ -75,8 +77,6 @@ __all__ = [
     "detect_state",
     # Execution
     "ResilientExecutor",
-    # Factory
-    "ComponentFactory",
     # Version
     "__version__",
 ]

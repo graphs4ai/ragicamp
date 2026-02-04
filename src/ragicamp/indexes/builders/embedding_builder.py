@@ -97,9 +97,9 @@ def build_embedding_index(
     import numpy as np
     from tqdm import tqdm
 
+    from ragicamp.core.types import Document
     from ragicamp.corpus import ChunkConfig, CorpusConfig, DocumentChunker, WikipediaCorpus
     from ragicamp.models.embedder import create_embedder
-    from ragicamp.retrievers.base import Document
 
     manager = get_artifact_manager()
 

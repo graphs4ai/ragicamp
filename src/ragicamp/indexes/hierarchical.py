@@ -11,7 +11,7 @@ from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.indexes.base import Index
 from ragicamp.rag.chunking.hierarchical import HierarchicalChunker
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 from ragicamp.utils.artifacts import get_artifact_manager
 
 if TYPE_CHECKING:

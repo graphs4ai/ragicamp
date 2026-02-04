@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ragicamp.retrievers.base import Document
+from ragicamp.core.types import Document
 
 
 @dataclass

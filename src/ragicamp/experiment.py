@@ -1,22 +1,20 @@
 """Unified Experiment abstraction for RAGiCamp.
 
-This module provides a single, clean interface for running experiments:
-
+Clean Architecture:
     from ragicamp import Experiment
 
-    exp = Experiment.from_config("conf/study/my_study.yaml")
+    exp = Experiment.from_spec(spec, output_dir="outputs/")
     results = exp.run()
 
 Or programmatically:
 
     exp = Experiment(
         name="my_experiment",
-        model=model,
         agent=agent,
         dataset=dataset,
         metrics=metrics,
     )
-    results = exp.run(batch_size=8)
+    results = exp.run()
 
 Phases:
     INIT -> GENERATING -> GENERATED -> COMPUTING_METRICS -> COMPLETE
@@ -27,11 +25,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-
-# TYPE_CHECKING import to avoid circular imports
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
-from ragicamp.agents.base import RAGAgent
+from ragicamp.agents.base import Agent
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets.base import QADataset
 from ragicamp.execution.phases import (
@@ -42,7 +38,6 @@ from ragicamp.execution.phases import (
     PhaseHandler,
 )
 from ragicamp.metrics.base import Metric
-from ragicamp.models.base import LanguageModel
 from ragicamp.state import (
     ExperimentHealth,
     ExperimentPhase,
@@ -61,21 +56,13 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class _MinimalSpec:
-    """Minimal spec adapter for use with phase handlers.
-
-    The Experiment class creates this to pass to handlers that
-    expect an ExperimentSpec-like object.
-    """
+    """Minimal spec adapter for use with phase handlers."""
 
     name: str
 
 
 class _MetricsIncompleteError(Exception):
-    """Internal exception raised when some metrics fail to compute.
-
-    This prevents the experiment from being marked complete, allowing
-    the user to fix the issue (e.g., set API keys) and re-run.
-    """
+    """Raised when some metrics fail to compute."""
 
     def __init__(self, missing_metrics: list[str]):
         self.missing_metrics = missing_metrics
@@ -84,35 +71,14 @@ class _MetricsIncompleteError(Exception):
 
 @dataclass
 class ExperimentCallbacks:
-    """Callbacks for monitoring experiment progress.
-
-    All callbacks are optional. Set them to receive notifications at key points:
-
-    Example:
-        callbacks = ExperimentCallbacks(
-            on_batch_start=lambda i, n: print(f"Starting batch {i}/{n}"),
-            on_complete=lambda r: print(f"Done! F1={r.f1:.3f}"),
-        )
-        exp.run(callbacks=callbacks)
-    """
+    """Callbacks for monitoring experiment progress."""
 
     on_phase_start: Optional[Callable[[ExperimentPhase], None]] = None
-    """Called when entering a new phase. Args: (phase)"""
-
     on_phase_end: Optional[Callable[[ExperimentPhase], None]] = None
-    """Called when completing a phase. Args: (phase)"""
-
     on_batch_start: Optional[Callable[[int, int], None]] = None
-    """Called before each batch. Args: (batch_index, total_batches)"""
-
     on_batch_end: Optional[Callable[[int, int, list[str]], None]] = None
-    """Called after each batch. Args: (batch_index, total_batches, predictions)"""
-
     on_checkpoint: Optional[Callable[[int, Path], None]] = None
-    """Called when checkpoint is saved. Args: (num_predictions, checkpoint_path)"""
-
     on_complete: Optional[Callable[["ExperimentResult"], None]] = None
-    """Called when experiment completes. Args: (result)"""
 
 
 @dataclass
@@ -160,8 +126,8 @@ class ExperimentResult:
 class Experiment:
     """Unified experiment abstraction with phased execution.
 
-    Combines model, agent, dataset, and metrics into a single runnable unit.
-    Handles checkpointing, resource management, and result saving automatically.
+    Combines agent, dataset, and metrics into a single runnable unit.
+    Handles checkpointing, resource management, and result saving.
 
     Phases:
         1. INIT: Save metadata, export questions
@@ -169,18 +135,15 @@ class Experiment:
         3. GENERATED: All predictions complete
         4. COMPUTING_METRICS: Compute all metrics
         5. COMPLETE: Save final results
-
-    Each phase produces artifacts that enable resume from any point.
     """
 
     name: str
-    agent: RAGAgent
+    agent: Agent
     dataset: QADataset
     metrics: list[Metric] = field(default_factory=list)
     output_dir: Path = field(default_factory=lambda: Path("outputs"))
 
-    # Optional references for cleanup and metadata
-    _model: Optional[LanguageModel] = field(default=None, repr=False)
+    # Optional references
     _spec: Optional["ExperimentSpec"] = field(default=None, repr=False)
 
     # Runtime state (not serialized)
@@ -199,11 +162,7 @@ class Experiment:
     # =========================================================================
 
     def check_health(self) -> ExperimentHealth:
-        """Check experiment state and detect issues.
-
-        Returns:
-            ExperimentHealth with current phase, missing predictions/metrics, etc.
-        """
+        """Check experiment state and detect issues."""
         metric_names = [m.name for m in self.metrics]
         return check_health(self.output_path, metric_names)
 
@@ -246,13 +205,12 @@ class Experiment:
 
         Args:
             batch_size: Number of examples to process in parallel
-            min_batch_size: Minimum batch size to reduce to on CUDA errors (default: 1).
-                On CUDA/OOM errors, batch size is halved until it reaches this floor.
+            min_batch_size: Minimum batch size to reduce to on CUDA errors
             checkpoint_every: Save checkpoint every N examples
             resume: Resume from checkpoint if available
             callbacks: Optional callbacks for progress monitoring
             phases: Optional list of phases to run (default: all remaining)
-            **kwargs: Additional arguments passed to agent.answer()
+            **kwargs: Additional arguments passed to agent.run()
 
         Returns:
             ExperimentResult with metrics and metadata
@@ -275,33 +233,27 @@ class Experiment:
 
         # Determine which phases to run
         if phases:
-            # Explicit phases requested
             target_phases = [ExperimentPhase(p) for p in phases]
         elif resume and health.can_resume:
-            # Resume from current phase
             logger.info("Resuming %s from phase: %s", self.name, health.resume_phase.value)
             target_phases = self._phases_from(health.resume_phase)
         else:
-            # Start fresh
             target_phases = list(ExperimentPhase)[:5]  # All except FAILED
 
-        # Load or create state (use detect_state to validate artifacts)
+        # Load or create state
         metric_names = [m.name for m in self.metrics]
         if self.state_path.exists() and resume:
             self._state = detect_state(self.output_path, metric_names)
         else:
             self._state = ExperimentState.new(metrics=metric_names)
 
-        # Note: GPU memory cleared by caller before experiment starts
         logger.info("Running: %s", self.name)
 
         try:
-            # Execute phases
             for phase in target_phases:
                 if phase == ExperimentPhase.FAILED:
                     continue
                 if self._state.is_past(phase) and phase != ExperimentPhase.COMPUTING_METRICS:
-                    # Skip already completed phases (except metrics which can be re-run)
                     continue
 
                 self._run_phase(phase)
@@ -309,9 +261,7 @@ class Experiment:
             return self._load_result()
 
         except _MetricsIncompleteError as e:
-            # Metrics incomplete - don't mark as failed, allow retry
             logger.warning("Experiment incomplete: %s", e)
-            # State already saved in _phase_compute_metrics, just save partial results
             self._save_partial_result()
             raise
 
@@ -322,13 +272,7 @@ class Experiment:
             raise
 
     def run_phase(self, phase: Union[str, ExperimentPhase]) -> None:
-        """Run a specific phase only.
-
-        Useful for recomputing just metrics or resuming generation.
-
-        Args:
-            phase: Phase to run (string or ExperimentPhase)
-        """
+        """Run a specific phase only."""
         if isinstance(phase, str):
             phase = ExperimentPhase(phase)
 
@@ -336,7 +280,6 @@ class Experiment:
         self._start_time = time.time()
         self.output_path.mkdir(parents=True, exist_ok=True)
 
-        # Load state
         if self.state_path.exists():
             self._state = ExperimentState.load(self.state_path)
         else:
@@ -381,19 +324,17 @@ class Experiment:
         self._state.advance_to(phase)
         self._state.save(self.state_path)
 
-        # Use handlers for supported phases
         handlers = self._get_handlers()
         if phase in handlers:
             spec = _MinimalSpec(name=self.name)
             context = self._create_context()
             self._state = handlers[phase].execute(spec, self._state, context)
 
-            # Post-handler validation for COMPUTING_METRICS
             if phase == ExperimentPhase.COMPUTING_METRICS:
                 missing = set(self._state.metrics_requested) - set(self._state.metrics_computed)
                 if missing:
                     logger.warning(
-                        "Some metrics failed to compute: %s. Experiment will not be marked complete.",
+                        "Some metrics failed to compute: %s",
                         list(missing),
                     )
                     raise _MetricsIncompleteError(list(missing))
@@ -408,22 +349,20 @@ class Experiment:
             self._callbacks.on_phase_end(phase)
 
     def _phase_generated(self) -> None:
-        """Phase 3: Mark generation as complete, unload model."""
-        logger.info("Phase: GENERATED - cleaning up model")
-        self._unload_model()
+        """Phase 3: Mark generation as complete."""
+        logger.info("Phase: GENERATED - cleaning up resources")
+        ResourceManager.clear_gpu_memory()
 
     def _phase_complete(self) -> None:
         """Phase 5: Create final summary and results."""
         logger.info("Phase: COMPLETE - saving results")
 
-        # Load predictions for final metrics
         with open(self.predictions_path) as f:
             data = json.load(f)
 
         metrics = data.get("aggregate_metrics", {})
         duration = time.time() - self._start_time
 
-        # Build result
         result = ExperimentResult(
             name=self.name,
             metrics=metrics,
@@ -439,11 +378,9 @@ class Experiment:
             },
         )
 
-        # Save results
         with open(self.results_path, "w") as f:
             json.dump(result.to_dict(), f, indent=2)
 
-        # Log summary
         metrics_parts = []
         for key, val in result.metrics.items():
             if isinstance(val, float):
@@ -472,14 +409,6 @@ class Experiment:
             n = len(data.get("predictions", []))
             self._callbacks.on_checkpoint(n, self.predictions_path)
 
-    def _unload_model(self) -> None:
-        """Unload model to free GPU memory."""
-        if self._model and hasattr(self._model, "unload"):
-            self._model.unload()
-        elif hasattr(self.agent, "model") and hasattr(self.agent.model, "unload"):
-            self.agent.model.unload()
-        ResourceManager.clear_gpu_memory()
-
     def _load_result(self) -> ExperimentResult:
         """Load result from results.json."""
         with open(self.results_path) as f:
@@ -495,11 +424,7 @@ class Experiment:
         )
 
     def _save_partial_result(self) -> None:
-        """Save partial results when metrics are incomplete.
-
-        This creates a results.json with available metrics so the experiment
-        can be loaded, but leaves state in COMPUTING_METRICS for retry.
-        """
+        """Save partial results when metrics are incomplete."""
         if not self.predictions_path.exists():
             return
 
@@ -515,7 +440,7 @@ class Experiment:
             "num_examples": len(data.get("predictions", [])),
             "duration_seconds": duration,
             "completed_at": datetime.now().isoformat(),
-            "partial": True,  # Mark as incomplete
+            "partial": True,
             "metrics_computed": self._state.metrics_computed,
             "metrics_missing": list(
                 set(self._state.metrics_requested) - set(self._state.metrics_computed)
@@ -550,36 +475,76 @@ class Experiment:
     ) -> "Experiment":
         """Create a fully-configured Experiment from an ExperimentSpec.
 
-        This is the preferred way to create experiments as it handles all
-        component creation automatically based on the spec.
+        Uses the clean architecture with providers and indexes:
+        1. Creates EmbedderProvider and GeneratorProvider
+        2. Loads VectorIndex for the retriever
+        3. Creates agent with providers + index
+        4. Agent manages its own GPU lifecycle
 
         Args:
             spec: Experiment specification with all configuration
-            output_dir: Base output directory (experiment creates subdir)
+            output_dir: Base output directory
             limit: Optional limit on dataset examples
             judge_model: Optional LLM judge model for metrics
 
         Returns:
             Fully configured Experiment ready to run
-
-        Example:
-            >>> from ragicamp.spec import ExperimentSpec
-            >>> spec = ExperimentSpec.from_dict({...})
-            >>> exp = Experiment.from_spec(spec, "outputs/")
-            >>> result = exp.run()
         """
-        from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ModelFactory
+        from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ProviderFactory
+        from ragicamp.indexes import VectorIndex
+        from ragicamp.utils.artifacts import get_artifact_manager
 
-        # Create model - agents manage their own GPU loading strategy
-        model_config = ModelFactory.parse_spec(spec.model, quantization=spec.quant)
-        model = ModelFactory.create(model_config)
+        # Create providers (lazy loading)
+        generator_provider = ProviderFactory.create_generator(spec.model, quantization=spec.quant)
+        
+        # Create embedder provider if RAG experiment
+        embedder_provider = None
+        index = None
+        
+        if spec.exp_type == "rag" and spec.retriever:
+            # Load index configuration to get embedding model
+            manager = get_artifact_manager()
+            retriever_path = manager.get_retriever_path(spec.retriever)
+            config_path = retriever_path / "config.json"
+            
+            if config_path.exists():
+                with open(config_path) as f:
+                    retriever_config = json.load(f)
+                
+                embedding_model = retriever_config.get("embedding_model", "all-MiniLM-L6-v2")
+                embedding_backend = retriever_config.get("embedding_backend", "sentence_transformers")
+                
+                embedder_provider = ProviderFactory.create_embedder(
+                    embedding_model,
+                    backend=embedding_backend,
+                )
+                
+                # Load the index
+                index_path = manager.get_embedding_index_path(spec.retriever)
+                index = VectorIndex.load(index_path)
 
         # Create dataset
         dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
         dataset = DatasetFactory.create(dataset_config)
 
-        # Create agent (AgentFactory.from_spec handles all the wiring)
-        agent = AgentFactory.from_spec(spec, model)
+        # Create agent
+        if spec.exp_type == "rag":
+            if embedder_provider is None or index is None:
+                raise ValueError(f"Could not load retriever config for: {spec.retriever}")
+            
+            agent = AgentFactory.from_spec(
+                spec=spec,
+                embedder_provider=embedder_provider,
+                generator_provider=generator_provider,
+                index=index,
+            )
+        else:
+            agent = AgentFactory.from_spec(
+                spec=spec,
+                embedder_provider=embedder_provider,  # May be None for direct
+                generator_provider=generator_provider,
+                index=None,
+            )
 
         # Create metrics
         metrics = MetricFactory.create(spec.metrics, judge_model=judge_model)
@@ -590,7 +555,6 @@ class Experiment:
             dataset=dataset,
             metrics=metrics,
             output_dir=Path(output_dir),
-            _model=model,
             _spec=spec,
         )
 
@@ -598,35 +562,18 @@ class Experiment:
     def from_components(
         cls,
         name: str,
-        model: LanguageModel,
-        agent: RAGAgent,
+        agent: Agent,
         dataset: QADataset,
         metrics: list[Metric],
         output_dir: Union[str, Path] = "outputs",
     ) -> "Experiment":
-        """Create experiment from pre-built components.
-
-        Use this when you've already created components manually.
-        For most cases, prefer from_spec().
-
-        Args:
-            name: Experiment name
-            model: Language model
-            agent: RAG agent
-            dataset: Evaluation dataset
-            metrics: List of metrics
-            output_dir: Output directory
-
-        Returns:
-            Configured Experiment
-        """
+        """Create experiment from pre-built components."""
         return cls(
             name=name,
             agent=agent,
             dataset=dataset,
             metrics=metrics,
             output_dir=Path(output_dir),
-            _model=model,
         )
 
 

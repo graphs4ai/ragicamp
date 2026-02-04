@@ -46,7 +46,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_index(args: argparse.Namespace) -> int:
     """Build retrieval indexes."""
     from ragicamp.corpus import ChunkConfig, CorpusConfig, DocumentChunker, WikipediaCorpus
-    from ragicamp.retrievers import DenseRetriever
+    from ragicamp.factory import ProviderFactory
+    from ragicamp.indexes import IndexBuilder
 
     # Map short names to embedding models
     embedding_models = {
@@ -77,25 +78,33 @@ def cmd_index(args: argparse.Namespace) -> int:
     docs = list(corpus.load())
     print(f"Loaded {len(docs)} documents")
 
-    # Chunk documents
+    # Chunk config
     chunk_config = ChunkConfig(
         strategy="recursive",
         chunk_size=args.chunk_size,
         chunk_overlap=50,
     )
     chunker = DocumentChunker(chunk_config)
-    chunks = list(chunker.chunk_documents(docs, show_progress=True))
-    print(f"Created {len(chunks)} chunks")
 
-    # Build index
-    retriever = DenseRetriever(
-        name=index_name,
-        embedding_model=embedding_model,
+    # Create embedder provider
+    embedder_provider = ProviderFactory.create_embedder(
+        embedding_model,
+        backend="sentence_transformers",  # Default for small models
     )
-    retriever.index_documents(chunks)
-    retriever.save(index_name)
 
-    print(f"Index saved: {index_name}")
+    # Build index using provider pattern
+    builder = IndexBuilder(embedder_provider=embedder_provider, chunker=chunker)
+    index = builder.build(docs, show_progress=True)
+    print(f"Created index with {len(index.documents)} chunks")
+
+    # Save index
+    from ragicamp.utils.artifacts import get_artifact_manager
+    
+    manager = get_artifact_manager()
+    index_path = manager.get_embedding_index_path(index_name)
+    index.save(index_path)
+
+    print(f"Index saved: {index_path}")
     return 0
 
 
@@ -301,7 +310,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     import os
 
     from ragicamp.evaluation import compute_metrics_from_file
-    from ragicamp.factory import ComponentFactory
+    from ragicamp.factory import MetricFactory
 
     exp_dir = args.exp_dir
     predictions_path = exp_dir / "predictions.json"
@@ -324,7 +333,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
 
         judge_model = OpenAIModel(args.judge_model, temperature=0.0)
 
-    metrics = ComponentFactory.create_metrics(metric_names, judge_model=judge_model)
+    metrics = MetricFactory.create(metric_names, judge_model=judge_model)
 
     print(f"Computing metrics: {metric_names}")
     print(f"Experiment: {exp_dir.name}")

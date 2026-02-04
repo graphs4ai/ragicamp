@@ -36,7 +36,8 @@ from ragicamp.rag.query_transform.base import PassthroughTransformer, QueryTrans
 from ragicamp.rag.rerankers.base import Reranker
 
 if TYPE_CHECKING:
-    from ragicamp.retrievers.base import Document, Retriever
+    from ragicamp.core.types import Document
+    from ragicamp.indexes.vector_index import VectorIndex
 
 logger = get_logger(__name__)
 

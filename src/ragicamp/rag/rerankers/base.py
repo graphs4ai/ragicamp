@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ragicamp.retrievers.base import Document
+    from ragicamp.core.types import Document
 
 
 class Reranker(ABC):
