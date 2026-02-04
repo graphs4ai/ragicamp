@@ -238,11 +238,13 @@ rag:
     # =========================================================================
     # HIERARCHICAL RETRIEVERS (Parent-Child Chunks)
     # =========================================================================
+    # Naming: hier_{model}_{parent}p_{child}c
+    # Search small child chunks for precision, return larger parent chunks for context
     
-    # Hierarchical: Search small chunks, return larger context
+    # Hierarchical BGE-large: 2048 parent / 448 child
     - type: hierarchical
-      name: hierarchical_bge_large
-      embedding_index: hierarchical_bge_large  # Hierarchical uses its own index
+      name: hier_bge_large_2048p_448c
+      embedding_index: hier_bge_large_2048p_448c
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       parent_chunk_size: 2048
@@ -267,7 +269,7 @@ rag:
     # - dense_e5_mistral_512        # 7B decoder - too large for RAM
     - hybrid_bge_large_bm25_07      # Built - uses BGE Large index + BM25
     - hybrid_gte_qwen2_bm25_07      # Uses GTE index + BM25 (needs sparse)
-    - hierarchical_bge_large        # Hierarchical retrieval
+    - hier_bge_large_2048p_448c     # Hierarchical: search 448, return 2048
   
   top_k_values:
     - 3
