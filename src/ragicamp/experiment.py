@@ -495,7 +495,7 @@ class Experiment:
         from ragicamp.utils.artifacts import get_artifact_manager
 
         # Create providers (lazy loading)
-        generator_provider = ProviderFactory.create_generator(spec.model, quantization=spec.quant)
+        generator_provider = ProviderFactory.create_generator(spec.model)
         
         # Create embedder provider if RAG experiment
         embedder_provider = None

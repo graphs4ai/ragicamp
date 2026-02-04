@@ -219,7 +219,6 @@ def run_generation(
             "model": spec.model,
             "prompt": spec.prompt,
             "dataset": spec.dataset,
-            "quantization": spec.quant,
             "retriever": spec.retriever,
             "top_k": spec.top_k,
             "fetch_k": spec.fetch_k,
@@ -335,7 +334,6 @@ def run_spec_subprocess(
             "model": spec.model,
             "dataset": spec.dataset,
             "prompt": spec.prompt,
-            "quant": spec.quant,
             "retriever": spec.retriever,
             "top_k": spec.top_k,
             "fetch_k": spec.fetch_k,
@@ -486,7 +484,6 @@ def run_spec(
 
             f.write(f"Error: {e}\n\n")
             f.write(f"Experiment: {spec.name}\n")
-            f.write(f"Model: {spec.model}\n")
-            f.write(f"Quantization: {spec.quant}\n\n")
+            f.write(f"Model: {spec.model}\n\n")
             f.write(f"Traceback:\n{traceback.format_exc()}")
         return "failed"
