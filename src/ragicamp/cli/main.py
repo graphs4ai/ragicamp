@@ -314,6 +314,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview changes without writing",
     )
+    migrate_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Re-migrate even if already migrated",
+    )
     migrate_parser.set_defaults(func=cmd_migrate_indexes)
 
     return parser

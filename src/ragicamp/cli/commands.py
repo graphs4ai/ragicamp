@@ -424,18 +424,34 @@ def cmd_download(args: argparse.Namespace) -> int:
     )
 
 
+def _pickle_needs_migration(pkl_path: Path) -> bool:
+    """Check if a pickle file uses the old module path."""
+    if not pkl_path.exists():
+        return False
+    try:
+        # Read first 4KB and check for old module path
+        with open(pkl_path, "rb") as f:
+            header = f.read(4096)
+        return b"ragicamp.retrievers.base" in header
+    except Exception:
+        return False
+
+
 def cmd_migrate_indexes(args: argparse.Namespace) -> int:
     """Migrate old index format to new format.
     
-    Old formats:
+    Migrates:
     - retriever_config.json → config.json
-    - No config → auto-detected config.json
+    - documents.pkl with old class path → new class path
     """
+    import pickle
     from ragicamp.indexes.vector_index import VectorIndex
     from ragicamp.utils.artifacts import get_artifact_manager
     
     manager = get_artifact_manager()
     indexes_dir = manager.indexes_dir
+    
+    force = getattr(args, "force", False)
     
     if args.index_name:
         index_paths = [manager.get_embedding_index_path(args.index_name)]
@@ -454,13 +470,7 @@ def cmd_migrate_indexes(args: argparse.Namespace) -> int:
     for index_path in index_paths:
         name = index_path.name
         
-        # Check if already new format
-        if (index_path / "config.json").exists():
-            print(f"  [SKIP] {name}: already has config.json")
-            skipped += 1
-            continue
-        
-        # Check if it's a valid old index
+        # Check if it's a valid index
         has_faiss = (index_path / "index.faiss").exists()
         has_shards = any((index_path / f"shard_{i}" / "index.faiss").exists() for i in range(10))
         
@@ -469,42 +479,66 @@ def cmd_migrate_indexes(args: argparse.Namespace) -> int:
             skipped += 1
             continue
         
+        # Check what needs migration
+        needs_config = not (index_path / "config.json").exists()
+        
+        # Check if any pickle files need migration
+        docs_path = index_path / "documents.pkl"
+        shard_dirs = sorted(index_path.glob("shard_*"))
+        
+        needs_pickle = False
+        if docs_path.exists():
+            needs_pickle = _pickle_needs_migration(docs_path)
+        else:
+            for shard_dir in shard_dirs:
+                if _pickle_needs_migration(shard_dir / "documents.pkl"):
+                    needs_pickle = True
+                    break
+        
+        if not needs_config and not needs_pickle and not force:
+            print(f"  [SKIP] {name}: already migrated")
+            skipped += 1
+            continue
+        
+        what_to_do = []
+        if needs_config:
+            what_to_do.append("config")
+        if needs_pickle:
+            what_to_do.append("pickle")
+        
         try:
             if args.dry_run:
-                print(f"  [DRY RUN] {name}: would migrate to new format")
+                print(f"  [DRY RUN] {name}: would migrate {', '.join(what_to_do)}")
                 migrated += 1
             else:
-                import pickle
+                print(f"  Migrating {name} ({', '.join(what_to_do)})...")
+                index = VectorIndex.load(index_path, use_mmap=False)
                 
-                # Load with auto-detection (uses shim for old Document class)
-                print(f"  Migrating {name}...")
-                index = VectorIndex.load(index_path, use_mmap=False)  # Can't mmap while writing
+                # Save config.json if needed
+                if needs_config or force:
+                    config_path = index_path / "config.json"
+                    with open(config_path, "w") as f:
+                        json.dump(index.config.to_dict(), f, indent=2)
                 
-                # Save config.json
-                config_path = index_path / "config.json"
-                with open(config_path, "w") as f:
-                    json.dump(index.config.to_dict(), f, indent=2)
-                
-                # Re-save documents.pkl with new Document class path
-                docs_path = index_path / "documents.pkl"
-                if docs_path.exists():
-                    with open(docs_path, "wb") as f:
-                        pickle.dump(index.documents, f)
-                    print(f"  [OK] {name}: migrated config + documents ({len(index.documents)} docs)")
+                # Re-save documents.pkl with new class path
+                if needs_pickle or force:
+                    if docs_path.exists():
+                        with open(docs_path, "wb") as f:
+                            pickle.dump(index.documents, f)
+                        print(f"  [OK] {name}: migrated ({len(index.documents)} docs)")
+                    else:
+                        # Handle sharded indexes
+                        for shard_dir in shard_dirs:
+                            shard_docs = shard_dir / "documents.pkl"
+                            if shard_docs.exists():
+                                with open(shard_docs, "rb") as f:
+                                    shard_documents = pickle.load(f)
+                                shard_documents = VectorIndex._ensure_document_type(shard_documents)
+                                with open(shard_docs, "wb") as f:
+                                    pickle.dump(shard_documents, f)
+                        print(f"  [OK] {name}: migrated {len(shard_dirs)} shards")
                 else:
-                    # Handle sharded indexes - re-save each shard's documents
-                    shard_dirs = sorted(index_path.glob("shard_*"))
-                    for shard_dir in shard_dirs:
-                        shard_docs = shard_dir / "documents.pkl"
-                        if shard_docs.exists():
-                            # Already loaded as part of index.documents, need to reload per-shard
-                            with open(shard_docs, "rb") as f:
-                                shard_documents = pickle.load(f)
-                            # Convert and re-save
-                            shard_documents = VectorIndex._ensure_document_type(shard_documents)
-                            with open(shard_docs, "wb") as f:
-                                pickle.dump(shard_documents, f)
-                    print(f"  [OK] {name}: migrated config + {len(shard_dirs)} shard docs")
+                    print(f"  [OK] {name}: config updated")
                 
                 migrated += 1
                 
