@@ -25,9 +25,13 @@ from ragicamp.core.exceptions import (
 from ragicamp.core.logging import configure_logging, get_logger
 from ragicamp.core.schemas import (
     ExperimentSpec,
+    PipelineLog,
     PredictionRecord,
     PromptStyle,
+    QueryTransformStep,
     RAGResponseMeta,
+    RerankStep,
+    RetrievalStep,
     RetrievedDoc,
 )
 
@@ -38,6 +42,11 @@ __all__ = [
     "RAGResponseMeta",
     "ExperimentSpec",
     "PromptStyle",
+    # Pipeline logging (modular metadata)
+    "PipelineLog",
+    "QueryTransformStep",
+    "RetrievalStep",
+    "RerankStep",
     # Exceptions
     "RAGiCampError",
     "ConfigError",

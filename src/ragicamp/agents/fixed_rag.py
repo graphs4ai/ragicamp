@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, Any, Optional
 
 from ragicamp.agents.base import RAGAgent, RAGContext, RAGResponse
-from ragicamp.core.schemas import AgentType, RAGResponseMeta, RetrievedDoc
+from ragicamp.core.schemas import AgentType, PipelineLog, RAGResponseMeta, RetrievedDoc
 from ragicamp.models.base import LanguageModel
 from ragicamp.retrievers.base import Retriever
 from ragicamp.retrievers.dense import DenseRetriever
@@ -121,8 +121,13 @@ class FixedRAGAgent(RAGAgent):
             RAGResponse with the answer and retrieved context
         """
         # Retrieve documents (use pipeline if available, otherwise direct retrieval)
+        pipeline_log: Optional[PipelineLog] = None
+
         if self._pipeline is not None:
-            retrieved_docs = self._pipeline.retrieve(query)
+            # Use pipeline with full logging
+            result = self._pipeline.retrieve_with_log(query)
+            retrieved_docs = result.documents
+            pipeline_log = result.pipeline_log
         else:
             retrieved_docs = self.retriever.retrieve(query, top_k=self.top_k)
 
@@ -146,16 +151,21 @@ class FixedRAGAgent(RAGAgent):
         answer = self.model.generate(prompt, **kwargs)
 
         # Build structured retrieved docs for typed metadata
+        # Include both retrieval and rerank scores if available
         retrieved_structured = [
             RetrievedDoc(
                 rank=i + 1,
                 content=doc.text,
                 score=getattr(doc, "score", None),
+                retrieval_score=getattr(doc, "_retrieval_score", None),
+                rerank_score=getattr(doc, "_rerank_score", None),
+                retrieval_rank=getattr(doc, "_retrieval_rank", None),
+                doc_id=getattr(doc, "id", None),
             )
             for i, doc in enumerate(retrieved_docs)
         ]
 
-        # Return response with typed metadata
+        # Return response with typed metadata including pipeline log
         return RAGResponse(
             answer=answer,
             context=context,
@@ -164,6 +174,7 @@ class FixedRAGAgent(RAGAgent):
                 agent_type=AgentType.FIXED_RAG,
                 num_docs_used=len(retrieved_docs),
                 retrieved_docs=retrieved_structured,
+                pipeline_log=pipeline_log,
             ),
         )
 
@@ -175,6 +186,9 @@ class FixedRAGAgent(RAGAgent):
         - Batch FAISS search (5-10x faster)
         - Batch LLM generation
 
+        Note: Batch mode currently doesn't capture per-query pipeline logs
+        for performance. Use single-query mode if detailed logging is needed.
+
         Args:
             queries: List of input questions
             **kwargs: Additional generation parameters
@@ -183,6 +197,7 @@ class FixedRAGAgent(RAGAgent):
             List of RAGResponse objects, one per query
         """
         # Retrieve documents for all queries using batch retrieval if available
+        # Note: batch_retrieve doesn't return per-query pipeline logs yet
         if self._pipeline is not None:
             all_docs = self._pipeline.batch_retrieve(queries)
         elif hasattr(self.retriever, "batch_retrieve"):
@@ -218,11 +233,16 @@ class FixedRAGAgent(RAGAgent):
             queries, prompts, answers, contexts, all_docs, context_texts
         ):
             # Build structured retrieved docs for typed metadata
+            # Include both retrieval and rerank scores if available
             retrieved_structured = [
                 RetrievedDoc(
                     rank=i + 1,
                     content=doc.text,
                     score=getattr(doc, "score", None),
+                    retrieval_score=getattr(doc, "_retrieval_score", None),
+                    rerank_score=getattr(doc, "_rerank_score", None),
+                    retrieval_rank=getattr(doc, "_retrieval_rank", None),
+                    doc_id=getattr(doc, "id", None),
                 )
                 for i, doc in enumerate(docs)
             ]
@@ -236,6 +256,7 @@ class FixedRAGAgent(RAGAgent):
                     num_docs_used=len(docs),
                     batch_processing=True,
                     retrieved_docs=retrieved_structured,
+                    # pipeline_log not available in batch mode for performance
                 ),
             )
             responses.append(response)

@@ -110,6 +110,7 @@ class VanillaRAGAgent(RAGAgent):
                 rank=i + 1,
                 content=doc.text,
                 score=getattr(doc, "score", None),
+                doc_id=getattr(doc, "id", None),
             )
             for i, doc in enumerate(retrieved_docs)
         ]
@@ -176,6 +177,7 @@ class VanillaRAGAgent(RAGAgent):
                     rank=i + 1,
                     content=doc.text,
                     score=getattr(doc, "score", None),
+                    doc_id=getattr(doc, "id", None),
                 )
                 for i, doc in enumerate(docs)
             ]
