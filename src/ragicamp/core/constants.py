@@ -174,7 +174,7 @@ class Defaults:
 
     # GPU Memory Partitioning
     # With FAISS on CPU, vLLM can use most of the GPU
-    VLLM_GPU_MEMORY_FRACTION = 0.90  # 90% for vLLM (FAISS uses CPU/RAM)
+    VLLM_GPU_MEMORY_FRACTION = 0.70  # 70% for vLLM - reduced to leave room for other processes
     FAISS_GPU_MEMORY_FRACTION = 0.0  # FAISS runs on CPU (B200 not yet supported)
     # Remaining 5% for PyTorch overhead, embedding model, etc.
 
