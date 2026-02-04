@@ -70,8 +70,10 @@ def main():
                 emb = np.load(f)
                 batch_sizes.append(len(emb))
                 total_batches += 1
+                if total_batches % 10 == 0:
+                    print(f"  Counted {total_batches} batches...", flush=True)
                 del emb
-            except ValueError:
+            except (ValueError, EOFError):
                 break
     
     total_vectors = sum(batch_sizes)
@@ -197,7 +199,7 @@ def main():
                     with open(checkpoint_path, "w") as cf:
                         json.dump({"batch_num": batch_num, "total_vectors": index.ntotal}, cf)
                     
-                except ValueError:
+                except (ValueError, EOFError):
                     break
         
         elapsed = time.time() - t_start
