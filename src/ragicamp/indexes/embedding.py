@@ -741,11 +741,21 @@ class EmbeddingIndex(Index):
         with open(path / "documents.pkl", "rb") as f:
             self.documents = pickle.load(f)
     
-    def _load_sharded_index(self, path: Path, shard_dirs: list[Path], use_gpu: bool, config: dict) -> None:
-        """Load a sharded index - all shards kept in memory for max throughput.
+    def _load_sharded_index(
+        self, path: Path, shard_dirs: list[Path], use_gpu: bool, config: dict, 
+        use_mmap: bool = True
+    ) -> None:
+        """Load a sharded index with memory-mapping for large indexes.
         
-        For large GPUs (B200, H100), keeping all shards in memory provides
-        the best query performance by avoiding shard loading/unloading overhead.
+        Args:
+            path: Index directory path
+            shard_dirs: List of shard directories
+            use_gpu: Whether to use GPU FAISS
+            config: Index configuration
+            use_mmap: Use memory-mapped loading (default True for RAM efficiency)
+        
+        Memory-mapped loading keeps the index on disk and only loads pages
+        as needed, dramatically reducing RAM usage for large indexes.
         """
         self._is_sharded = True
         self._shard_indexes = []
@@ -754,6 +764,11 @@ class EmbeddingIndex(Index):
         index_type = config.get("index_type", "flat")
         gpu_res = get_faiss_gpu_resources() if use_gpu and index_type != "hnsw" else None
         
+        # Determine IO flags - use mmap for RAM efficiency
+        io_flags = faiss.IO_FLAG_MMAP if use_mmap else 0
+        if use_mmap:
+            logger.info("Using memory-mapped loading for RAM efficiency")
+        
         total_vectors = 0
         for shard_dir in shard_dirs:
             shard_index_path = shard_dir / "index.faiss"
@@ -761,11 +776,15 @@ class EmbeddingIndex(Index):
                 logger.warning("Shard missing index.faiss: %s", shard_dir)
                 continue
             
-            cpu_index = faiss.read_index(str(shard_index_path))
+            # Load with mmap if requested (keeps data on disk, pages in as needed)
+            cpu_index = faiss.read_index(str(shard_index_path), io_flags)
             
-            # Optionally move to GPU
+            # Optionally move to GPU (requires loading into RAM first, so disable mmap)
             if gpu_res is not None:
                 try:
+                    # GPU requires full load - reload without mmap
+                    if use_mmap:
+                        cpu_index = faiss.read_index(str(shard_index_path))
                     co = faiss.GpuClonerOptions()
                     co.useFloat16 = True
                     gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index, co)
@@ -773,17 +792,20 @@ class EmbeddingIndex(Index):
                     self._is_gpu_index = True
                 except Exception as e:
                     logger.warning("Failed to load shard to GPU: %s", e)
+                    # Fall back to mmap CPU
+                    if use_mmap:
+                        cpu_index = faiss.read_index(str(shard_index_path), io_flags)
                     self._shard_indexes.append(cpu_index)
             else:
                 self._shard_indexes.append(cpu_index)
             
             total_vectors += cpu_index.ntotal
             self._shard_doc_offsets.append(total_vectors)
-            logger.debug("Loaded shard %s: %d vectors", shard_dir.name, cpu_index.ntotal)
+            logger.debug("Loaded shard %s: %d vectors (mmap=%s)", shard_dir.name, cpu_index.ntotal, use_mmap)
         
         logger.info(
-            "Loaded %d shards with %d total vectors (GPU=%s)",
-            len(self._shard_indexes), total_vectors, self._is_gpu_index
+            "Loaded %d shards with %d total vectors (GPU=%s, mmap=%s)",
+            len(self._shard_indexes), total_vectors, self._is_gpu_index, use_mmap and not self._is_gpu_index
         )
         
         # Load documents - either combined or from shards

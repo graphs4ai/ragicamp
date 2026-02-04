@@ -149,6 +149,16 @@ try:
     import flash_attn; print('  - Flash Attention: ✓ installed (optional)')
 except ImportError:
     print('  - Flash Attention: ✗ not installed (optional, install manually if needed)')
+
+# Check FAISS GPU support
+try:
+    import faiss
+    if hasattr(faiss, 'StandardGpuResources'):
+        print('  - FAISS GPU: ✓ installed')
+    else:
+        print('  - FAISS GPU: ✗ CPU only (install faiss-gpu-cu12 for GPU search)')
+except ImportError:
+    print('  - FAISS: ✗ not installed')
 "
 
 # ============================================================================
