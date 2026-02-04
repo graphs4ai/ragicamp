@@ -88,7 +88,6 @@ def main():
         model=spec_dict["model"],
         dataset=spec_dict["dataset"],
         prompt=spec_dict["prompt"],
-        quant=spec_dict.get("quant", "4bit"),
         retriever=spec_dict.get("retriever"),
         top_k=spec_dict.get("top_k", 5),
         fetch_k=spec_dict.get("fetch_k"),
