@@ -221,19 +221,25 @@ class EmbeddingIndex(Index):
     def _load_vllm_encoder(self):
         """Load vLLM embedding model.
         
-        Uses a lower GPU memory fraction for inference (query encoding) to leave
-        room for the generator model. Index building uses the full configured fraction.
+        In sequential mode (VLLM_SEQUENTIAL_MODELS=True), uses full GPU since
+        the embedder is unloaded before the generator loads.
+        
+        In concurrent mode, uses lower GPU fraction to share with generator.
         """
         from ragicamp.models.vllm_embedder import VLLMEmbedder
 
-        # For inference (query encoding), use lower GPU fraction to leave room for generator
-        # The index is already built, so we're just encoding queries
-        gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
+        # In sequential mode, embedder gets full GPU (it's unloaded before generator loads)
+        # In concurrent mode, use lower fraction to share with generator
+        if Defaults.VLLM_SEQUENTIAL_MODELS:
+            gpu_fraction = Defaults.VLLM_SEQUENTIAL_GPU_FRACTION
+        else:
+            gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
         
         logger.info(
-            "Loading vLLM embedding model: %s (gpu_fraction=%.0f%% for inference)",
+            "Loading vLLM embedding model: %s (gpu_fraction=%.0f%%, sequential=%s)",
             self.embedding_model_name,
             gpu_fraction * 100,
+            Defaults.VLLM_SEQUENTIAL_MODELS,
         )
         self._encoder = VLLMEmbedder(
             model_name=self.embedding_model_name,

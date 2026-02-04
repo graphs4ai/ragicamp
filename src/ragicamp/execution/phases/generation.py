@@ -38,7 +38,14 @@ class GenerationHandler(PhaseHandler):
 
         Loads questions, generates predictions in batches, and checkpoints
         progress to enable resume on interruption.
+        
+        When VLLM_SEQUENTIAL_MODELS is enabled, uses prefetch retrieval mode:
+        1. Prefetch all retrievals (embedder uses full GPU)
+        2. Unload embedder
+        3. Load generator (uses full GPU)
+        4. Generate answers using cached retrievals
         """
+        from ragicamp.core.constants import Defaults
         from ragicamp.execution import ResilientExecutor
 
         logger.info("Phase: GENERATING - generating predictions")
@@ -78,6 +85,18 @@ class GenerationHandler(PhaseHandler):
             return state
 
         logger.info("Generating %d predictions...", len(pending))
+        
+        # Sequential model loading: prefetch all retrievals, then unload embedder
+        # This allows each model to use full GPU memory
+        if Defaults.VLLM_SEQUENTIAL_MODELS and hasattr(context.agent, 'prefetch_retrievals'):
+            pending_queries = [q[1] for q in pending]  # Extract just the query strings
+            logger.info("Sequential mode: prefetching %d retrievals...", len(pending_queries))
+            context.agent.prefetch_retrievals(pending_queries, show_progress=True)
+            
+            # Unload embedder to free GPU for generator
+            if hasattr(context.agent, 'unload_embedder'):
+                logger.info("Unloading embedder to free GPU for generator...")
+                context.agent.unload_embedder()
 
         # Create executor with auto batch size reduction
         executor = ResilientExecutor(

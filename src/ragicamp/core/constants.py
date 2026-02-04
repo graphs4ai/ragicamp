@@ -172,13 +172,24 @@ class Defaults:
     ARTIFACTS_DIR = "artifacts"
     CACHE_DIR = "data/datasets"
 
-    # GPU Memory Partitioning for Multi-Model vLLM
-    # When running RAG with vLLM embedder + vLLM generator, we need to split GPU memory
+    # GPU Memory Partitioning for vLLM Models
+    # 
+    # Two modes supported:
+    # 1. SEQUENTIAL (recommended): Embedder runs first, unloads, then generator runs
+    #    - Each model gets full GPU (VLLM_SEQUENTIAL_GPU_FRACTION)
+    #    - Set VLLM_SEQUENTIAL_MODELS=True to enable
+    #
+    # 2. CONCURRENT (legacy): Both models share GPU simultaneously
+    #    - Generator gets 50%, embedder gets 25%
+    #    - Neither model saturates GPU
+    #
+    VLLM_SEQUENTIAL_MODELS = True  # Enable sequential model loading (embedder → unload → generator)
+    VLLM_SEQUENTIAL_GPU_FRACTION = 0.95  # Full GPU when models are sequential
+    
+    # Concurrent mode fractions (only used when VLLM_SEQUENTIAL_MODELS=False)
     VLLM_GPU_MEMORY_FRACTION = 0.50  # 50% for generator (main model)
     VLLM_EMBEDDER_GPU_MEMORY_FRACTION = 0.25  # 25% for query embedder at inference
     FAISS_GPU_MEMORY_FRACTION = 0.0  # FAISS runs on CPU (B200 not yet supported)
-    # Total: 75% allocated, 25% headroom for PyTorch, etc.
-    # Remaining 5% for PyTorch overhead, embedding model, etc.
 
     # FAISS GPU Configuration
     # NOTE: GPU FAISS disabled by default - B200 (Blackwell) not yet supported by faiss-gpu-cu12.

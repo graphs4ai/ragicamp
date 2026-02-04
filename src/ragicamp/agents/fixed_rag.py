@@ -77,6 +77,13 @@ class FixedRAGAgent(RAGAgent):
 
         # Build pipeline if advanced features are used
         self._pipeline: "Optional[RAGPipeline]" = None  # noqa: UP037
+        
+        # Prefetched retrieval cache for sequential model loading
+        # When enabled, retrievals are done upfront so embedder can be unloaded
+        # before the generator is loaded (allows full GPU for each model)
+        self._retrieval_cache: dict[str, list] = {}
+        self._use_cached_retrievals: bool = False
+        
         if query_transformer is not None or reranker is not None:
             from ragicamp.rag.pipeline import RAGPipeline
 
@@ -110,6 +117,69 @@ class FixedRAGAgent(RAGAgent):
         # Use prompt builder
         return self.prompt_builder.build_rag(query, context_text)
 
+    # =========================================================================
+    # Prefetch Retrieval API - For Sequential Model Loading
+    # =========================================================================
+    # When VLLM_SEQUENTIAL_MODELS=True, retrievals are done upfront so the
+    # embedder can be unloaded before the generator is loaded. This allows
+    # each model to use full GPU memory.
+    
+    def prefetch_retrievals(self, queries: list[str], show_progress: bool = True) -> None:
+        """Prefetch retrievals for all queries to enable sequential model loading.
+        
+        This method:
+        1. Retrieves documents for all queries using the embedder
+        2. Caches them in memory
+        3. Enables cached retrieval mode for subsequent answer() calls
+        
+        After calling this, the embedder can be unloaded and the generator
+        loaded with full GPU memory.
+        
+        Args:
+            queries: List of query strings to prefetch retrievals for
+            show_progress: Show progress bar
+        """
+        from ragicamp.core.logging import get_logger
+        from tqdm import tqdm
+        
+        logger = get_logger(__name__)
+        logger.info("Prefetching retrievals for %d queries...", len(queries))
+        
+        self._retrieval_cache.clear()
+        
+        iterator = tqdm(queries, desc="Prefetching retrievals") if show_progress else queries
+        for query in iterator:
+            if self._pipeline is not None:
+                result = self._pipeline.retrieve_with_log(query)
+                # Cache both docs and pipeline log
+                self._retrieval_cache[query] = (result.documents, result.pipeline_log)
+            else:
+                docs = self.retriever.retrieve(query, top_k=self.top_k)
+                self._retrieval_cache[query] = (docs, None)
+        
+        self._use_cached_retrievals = True
+        logger.info("Prefetched %d retrievals, embedder can now be unloaded", len(self._retrieval_cache))
+    
+    def clear_retrieval_cache(self) -> None:
+        """Clear the prefetched retrieval cache."""
+        self._retrieval_cache.clear()
+        self._use_cached_retrievals = False
+    
+    def unload_embedder(self) -> None:
+        """Unload the embedder model to free GPU memory.
+        
+        Should be called after prefetch_retrievals() and before loading the generator.
+        """
+        from ragicamp.utils.resource_manager import ResourceManager
+        
+        if hasattr(self.retriever, 'index') and self.retriever.index is not None:
+            if hasattr(self.retriever.index, '_encoder') and self.retriever.index._encoder is not None:
+                if hasattr(self.retriever.index._encoder, 'unload'):
+                    self.retriever.index._encoder.unload()
+                self.retriever.index._encoder = None
+        
+        ResourceManager.clear_gpu_memory()
+
     def answer(self, query: str, **kwargs: Any) -> RAGResponse:
         """Generate an answer using fixed RAG pipeline.
 
@@ -120,10 +190,13 @@ class FixedRAGAgent(RAGAgent):
         Returns:
             RAGResponse with the answer and retrieved context
         """
-        # Retrieve documents (use pipeline if available, otherwise direct retrieval)
+        # Retrieve documents - use cache if available (for sequential model loading)
         pipeline_log: Optional[PipelineLog] = None
 
-        if self._pipeline is not None:
+        if self._use_cached_retrievals and query in self._retrieval_cache:
+            # Use prefetched retrieval (embedder already unloaded)
+            retrieved_docs, pipeline_log = self._retrieval_cache[query]
+        elif self._pipeline is not None:
             # Use pipeline with full logging
             result = self._pipeline.retrieve_with_log(query)
             retrieved_docs = result.documents
