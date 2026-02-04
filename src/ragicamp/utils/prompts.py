@@ -103,15 +103,18 @@ class PromptBuilder:
 
         Key insight: LLMs follow the LAST instruction more reliably.
         So we put format constraints (reply with just the answer) at the END.
+
+        Important: We explicitly tell the model to ONLY use the passages,
+        not its own knowledge. This ensures we measure retrieval quality,
+        not the model's parametric memory.
         """
         parts = []
 
-        # Task context - brief description (no formatting instructions here)
-        task = "Answer the question based on the retrieved passages below."
+        # Task context - emphasize ONLY using passages, not own knowledge
+        task = "Answer the question using ONLY the retrieved passages below."
+        task += " Do not use your own knowledge."
         if self.config.knowledge_instruction:
             task += f" {self.config.knowledge_instruction}"
-        else:
-            task += " The answer can be found in the passages."
         parts.append(task)
 
         # Examples section (if any)
@@ -130,7 +133,7 @@ class PromptBuilder:
             format_instruction.append(self.config.style)
         if self.config.stop_instruction:
             format_instruction.append(self.config.stop_instruction)
-        format_instruction.append("Only answer 'Unknown' if the answer is truly not in the passages.")
+        format_instruction.append("If the answer is not in the passages, answer 'Unknown'.")
 
         parts.append(" ".join(format_instruction) + "\nAnswer:")
 
