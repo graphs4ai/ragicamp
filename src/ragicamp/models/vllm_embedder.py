@@ -94,7 +94,7 @@ class VLLMEmbedder:
     def encode(
         self,
         sentences: list[str] | str,
-        batch_size: int = 65536,
+        batch_size: int = 256,
         show_progress_bar: bool = True,
         normalize_embeddings: bool = False,
         **kwargs,
@@ -103,7 +103,7 @@ class VLLMEmbedder:
 
         Args:
             sentences: Single string or list of strings to encode
-            batch_size: Max sentences per vLLM call (default 32k for stability)
+            batch_size: Ignored - vLLM handles batching internally
             show_progress_bar: Show progress (vLLM handles this)
             normalize_embeddings: L2 normalize embeddings
             **kwargs: Additional arguments (ignored, for compatibility)
@@ -114,19 +114,8 @@ class VLLMEmbedder:
         if isinstance(sentences, str):
             sentences = [sentences]
 
-        # Process in batches to avoid memory issues with very large inputs
-        # vLLM continuous batching handles internal scheduling, but 500k+
-        # sentences at once can cause memory/scheduling issues
-        if len(sentences) <= batch_size:
-            outputs = self.llm.embed(sentences)
-        else:
-            # Batch processing for very large inputs
-            all_outputs = []
-            for i in range(0, len(sentences), batch_size):
-                batch = sentences[i : i + batch_size]
-                batch_outputs = self.llm.embed(batch)
-                all_outputs.extend(batch_outputs)
-            outputs = all_outputs
+        # vLLM handles batching internally with continuous batching
+        outputs = self.llm.embed(sentences)
 
         # Pre-allocate array for faster extraction (avoids Python list overhead)
         n_outputs = len(outputs)
