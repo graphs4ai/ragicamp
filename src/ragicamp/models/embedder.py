@@ -60,8 +60,10 @@ class Embedder(Protocol):
 def create_embedder(
     model_name: str,
     backend: str = "vllm",
-    gpu_memory_fraction: float = 0.7,
-    enforce_eager: bool = False,
+    gpu_memory_fraction: float = 0.9,
+    enforce_eager: bool = True,  # True for embeddings (skip CUDA graph compilation)
+    max_num_seqs: int = 1024,  # Higher concurrency for embedding batches
+    disable_compile: bool = True,  # Skip torch.compile for faster startup
     use_flash_attn: bool = True,
     use_compile: bool = True,
     **kwargs,
@@ -74,8 +76,10 @@ def create_embedder(
     Args:
         model_name: HuggingFace model name
         backend: 'vllm' or 'sentence_transformers'
-        gpu_memory_fraction: GPU memory fraction (vLLM only)
-        enforce_eager: Use eager mode instead of CUDA graphs (vLLM only)
+        gpu_memory_fraction: GPU memory fraction (vLLM only, 0.9 default)
+        enforce_eager: Use eager mode instead of CUDA graphs (vLLM only, True for embeddings)
+        max_num_seqs: Max concurrent sequences for batching (vLLM only)
+        disable_compile: Skip torch.compile for faster startup (vLLM only)
         use_flash_attn: Use Flash Attention 2 if available (sentence_transformers only)
         use_compile: Apply torch.compile (sentence_transformers only)
         **kwargs: Additional backend-specific arguments
@@ -91,6 +95,8 @@ def create_embedder(
             model_name=model_name,
             gpu_memory_fraction=gpu_memory_fraction,
             enforce_eager=enforce_eager,
+            max_num_seqs=max_num_seqs,
+            disable_compile=disable_compile,
         )
     else:
         from .st_embedder import SentenceTransformerEmbedder

@@ -49,22 +49,28 @@ class VLLMEmbedder:
     def __init__(
         self,
         model_name: str,
-        gpu_memory_fraction: float = 0.7,
-        enforce_eager: bool = False,
+        gpu_memory_fraction: float = 0.9,
+        enforce_eager: bool = True,  # Default True for embeddings (skip CUDA graph compilation)
         trust_remote_code: bool = True,
+        max_num_seqs: int = 1024,  # Higher concurrency for embedding batches
+        disable_compile: bool = True,  # Skip torch.compile for faster startup
     ):
         """Initialize vLLM embedder.
 
         Args:
             model_name: HuggingFace model name (must be vLLM-compatible)
-            gpu_memory_fraction: Fraction of GPU memory to use (0.7 default)
-            enforce_eager: Use eager mode (False = use CUDA graphs for speed)
+            gpu_memory_fraction: Fraction of GPU memory to use (0.9 default for embeddings)
+            enforce_eager: Use eager mode (True = skip 35s CUDA graph compilation)
             trust_remote_code: Trust remote code in model
+            max_num_seqs: Max concurrent sequences (higher = better batching)
+            disable_compile: Skip torch.compile (saves 30s startup, minimal perf impact)
         """
         self.model_name = model_name
         self.gpu_memory_fraction = gpu_memory_fraction
         self.enforce_eager = enforce_eager
         self.trust_remote_code = trust_remote_code
+        self.max_num_seqs = max_num_seqs
+        self.disable_compile = disable_compile
 
         self._llm: Optional[vllm.LLM] = None
         self._embedding_dim: Optional[int] = None
@@ -98,14 +104,29 @@ class VLLMEmbedder:
             #
             # vLLM 0.15+ API: use runner="pooling" instead of task="embed"
             # See: https://docs.vllm.ai/en/stable/models/pooling_models/
-            self._llm = LLM(
-                model=self.model_name,
-                runner="pooling",  # vLLM 0.15+ pooling mode for embedding models
-                trust_remote_code=self.trust_remote_code,
-                gpu_memory_utilization=self.gpu_memory_fraction,
-                enforce_eager=self.enforce_eager,
-                dtype="auto",  # Use bfloat16/float16 on GPU
-            )
+            #
+            # Embedding-specific optimizations:
+            # - enforce_eager=True: Skip 35s CUDA graph compilation (not useful for embeddings)
+            # - max_num_seqs=1024: Higher batch concurrency for throughput
+            # - disable_compile: Skip 30s torch.compile (minimal benefit for embeddings)
+            
+            llm_kwargs = {
+                "model": self.model_name,
+                "runner": "pooling",  # vLLM 0.15+ pooling mode
+                "trust_remote_code": self.trust_remote_code,
+                "gpu_memory_utilization": self.gpu_memory_fraction,
+                "enforce_eager": self.enforce_eager,
+                "dtype": "auto",  # Use bfloat16/float16 on GPU
+                "max_num_seqs": self.max_num_seqs,
+            }
+            
+            # Disable torch.compile for faster startup (vLLM 0.15+)
+            if self.disable_compile:
+                from vllm import CompilationConfig
+                llm_kwargs["compilation_config"] = CompilationConfig(level=0)
+                logger.info("torch.compile disabled for faster startup")
+            
+            self._llm = LLM(**llm_kwargs)
 
             # Log actual GPU memory after loading
             if torch.cuda.is_available():
