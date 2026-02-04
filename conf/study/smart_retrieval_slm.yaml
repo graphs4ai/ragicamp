@@ -153,14 +153,14 @@ rag:
     # Stella 1.5B: Distilled SOTA, excellent MTEB scores
     # Based on gte-Qwen2-1.5B-instruct, supported by vLLM via Transformers backend
     # Using 1024d (authors recommend - only 0.001 lower than 8192d)
-    # max_model_len auto-calculated from chunk_size (512/2 + 128 = 384 tokens)
+    # chunk_size=448 to fit within Stella's 512 token limit (Qwen tokenizer)
     - type: dense
-      name: dense_stella_1.5b_512
+      name: dense_stella_1.5b_448
       embedding_model: NovaSearch/stella_en_1.5B_v5
       embedding_backend: vllm  # Stella is Qwen2-based, vLLM supports via Transformers
       embedding_dim: 1024  # MRL allows flexible dims; 1024 is optimal
-      chunk_size: 512
-      chunk_overlap: 50
+      chunk_size: 448
+      chunk_overlap: 40
       chunking_strategy: recursive
       index_type: hnsw
     
@@ -239,7 +239,7 @@ rag:
   retriever_names:
     - dense_bge_large_512      # Built - proven baseline
     - dense_bge_m3_512         # Built - multilingual
-    - dense_stella_1.5b_512    # NEW - SOTA distilled, needs index build
+    - dense_stella_1.5b_448    # NEW - SOTA distilled, needs index build
     - hybrid_bge_large_bm25_07 # Built - uses BGE Large index
     # - dense_e5_mistral_512   # PENDING - sharded index build in progress
     # - hierarchical_bge_large # PENDING - high memory for query-time embedding
