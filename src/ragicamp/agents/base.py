@@ -1,8 +1,9 @@
 """Base classes for RAG agents.
 
-Design Principles:
-- Agents receive ALL queries and manage their own resources
-- Each agent optimizes its own model loading/batching strategy
+Clean Architecture Design:
+- Agents receive providers (not loaded models)
+- Agents manage their own GPU lifecycle via context managers
+- Each agent optimizes its own loading/batching strategy
 - All intermediate steps are captured for analysis
 - Simple interface: agent.run(queries) → results
 """

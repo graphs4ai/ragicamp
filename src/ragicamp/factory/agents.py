@@ -1,20 +1,23 @@
 """Agent factory for creating RAG agents from configuration.
 
-This module provides two ways to create agents:
-
-1. AgentFactory.create(config, model, retriever) - Low-level, dict-based config
-2. AgentFactory.from_spec(spec, model, retriever) - High-level, from ExperimentSpec
-
-The from_spec() method is preferred as it handles all the wiring of query
-transformers, rerankers, and prompt builders automatically.
+Creates agents with the clean provider-based architecture where:
+- Agents receive providers (not loaded models)
+- Agents manage their own GPU lifecycle
+- Agents use VectorIndex (not Retriever)
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from ragicamp.agents import DirectLLMAgent, FixedRAGAgent, RAGAgent
+from ragicamp.agents import (
+    Agent,
+    DirectLLMAgent,
+    FixedRAGAgent,
+    IterativeRAGAgent,
+    SelfRAGAgent,
+)
 from ragicamp.core.logging import get_logger
-from ragicamp.models.base import LanguageModel
-from ragicamp.retrievers.base import Retriever
+from ragicamp.indexes.vector_index import VectorIndex
+from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 
 if TYPE_CHECKING:
     from ragicamp.spec import ExperimentSpec
@@ -24,196 +27,191 @@ logger = get_logger(__name__)
 
 class AgentFactory:
     """Factory for creating RAG agents from configuration.
-
-    Supports two creation patterns:
-
-    1. Dict-based (low-level):
-        >>> config = {"type": "direct_llm", "name": "baseline"}
-        >>> agent = AgentFactory.create(config, model)
-
-    2. Spec-based (high-level, preferred):
-        >>> agent = AgentFactory.from_spec(spec, model)
-
-    Custom agents can be registered using the @register decorator:
-        >>> @AgentFactory.register("my_agent")
-        ... class MyAgent(RAGAgent):
-        ...     pass
+    
+    Creates agents with provider-based architecture:
+    
+        # Create providers
+        embedder = ProviderFactory.create_embedder("BAAI/bge-large-en")
+        generator = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
+        
+        # Load index
+        index = VectorIndex.load("my_index")
+        
+        # Create agent
+        agent = AgentFactory.create_rag(
+            agent_type="fixed_rag",
+            embedder_provider=embedder,
+            generator_provider=generator,
+            index=index,
+        )
+        
+        # Run (agent manages GPU internally)
+        results = agent.run(queries)
     """
-
+    
     # Custom agent registry
     _custom_agents: dict[str, type] = {}
-
-    # Agent type aliases for backwards compatibility and clarity
+    
+    # Agent type aliases
     _aliases: dict[str, str] = {
-        "pipeline_rag": "fixed_rag",  # Clearer name for fixed_rag
-        "direct": "direct_llm",  # Short form
+        "pipeline_rag": "fixed_rag",
+        "direct": "direct_llm",
+        "rag": "fixed_rag",
     }
-
+    
     @classmethod
     def register(cls, name: str):
-        """Register a custom agent type.
-
-        Example:
-            >>> @AgentFactory.register("iterative_rag")
-            ... class IterativeRAGAgent(RAGAgent):
-            ...     def __init__(self, name, model, retriever, max_iterations=2, **kwargs):
-            ...         ...
-        """
-
+        """Register a custom agent type."""
         def decorator(agent_class: type) -> type:
             cls._custom_agents[name] = agent_class
-            logger.debug("Registered agent type: %s -> %s", name, agent_class.__name__)
+            logger.debug("Registered agent type: %s", name)
             return agent_class
-
         return decorator
-
+    
+    @classmethod
+    def create_direct(
+        cls,
+        name: str,
+        generator_provider: GeneratorProvider,
+        **kwargs: Any,
+    ) -> DirectLLMAgent:
+        """Create a DirectLLMAgent (no retrieval).
+        
+        Args:
+            name: Agent name
+            generator_provider: Generator provider
+            **kwargs: Additional agent config
+        
+        Returns:
+            DirectLLMAgent
+        """
+        from ragicamp.utils.prompts import PromptBuilder
+        
+        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder()
+        
+        return DirectLLMAgent(
+            name=name,
+            generator_provider=generator_provider,
+            prompt_builder=prompt_builder,
+            **kwargs,
+        )
+    
+    @classmethod
+    def create_rag(
+        cls,
+        agent_type: str,
+        name: str,
+        embedder_provider: EmbedderProvider,
+        generator_provider: GeneratorProvider,
+        index: VectorIndex,
+        top_k: int = 5,
+        **kwargs: Any,
+    ) -> Agent:
+        """Create a RAG agent.
+        
+        Args:
+            agent_type: Type of agent (fixed_rag, iterative_rag, self_rag)
+            name: Agent name
+            embedder_provider: Embedder provider
+            generator_provider: Generator provider
+            index: Vector index
+            top_k: Number of documents to retrieve
+            **kwargs: Additional agent config
+        
+        Returns:
+            Agent instance
+        """
+        from ragicamp.utils.prompts import PromptBuilder
+        
+        # Resolve aliases
+        agent_type = cls._aliases.get(agent_type, agent_type)
+        
+        prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder()
+        
+        common_kwargs = {
+            "name": name,
+            "embedder_provider": embedder_provider,
+            "generator_provider": generator_provider,
+            "index": index,
+            "top_k": top_k,
+            "prompt_builder": prompt_builder,
+        }
+        common_kwargs.update(kwargs)
+        
+        if agent_type == "fixed_rag":
+            return FixedRAGAgent(**common_kwargs)
+        elif agent_type == "iterative_rag":
+            return IterativeRAGAgent(**common_kwargs)
+        elif agent_type == "self_rag":
+            return SelfRAGAgent(**common_kwargs)
+        elif agent_type in cls._custom_agents:
+            return cls._custom_agents[agent_type](**common_kwargs)
+        else:
+            available = ["fixed_rag", "iterative_rag", "self_rag"] + list(cls._custom_agents.keys())
+            raise ValueError(f"Unknown agent type: {agent_type}. Available: {available}")
+    
     @classmethod
     def from_spec(
         cls,
         spec: "ExperimentSpec",
-        model: LanguageModel,
-        retriever: Optional[Retriever] = None,
-    ) -> RAGAgent:
+        embedder_provider: EmbedderProvider,
+        generator_provider: GeneratorProvider,
+        index: VectorIndex | None = None,
+    ) -> Agent:
         """Create an agent from an ExperimentSpec.
-
-        This is the preferred method for creating agents as it handles all
-        the wiring of optional components (query transformers, rerankers,
-        prompt builders) automatically based on the spec.
-
+        
         Args:
-            spec: Experiment specification containing all config
-            model: Language model instance
-            retriever: Optional retriever (will be loaded from spec.retriever if not provided)
-
+            spec: Experiment specification
+            embedder_provider: Embedder provider
+            generator_provider: Generator provider
+            index: Vector index (required for RAG agents)
+        
         Returns:
-            Fully configured RAGAgent
-
-        Example:
-            >>> from ragicamp.spec import ExperimentSpec
-            >>> spec = ExperimentSpec(name="test", exp_type="rag", ...)
-            >>> agent = AgentFactory.from_spec(spec, model)
+            Configured Agent
         """
-        from ragicamp.factory.retrievers import create_query_transformer, create_reranker
         from ragicamp.utils.prompts import PromptBuilder
-
-        # Determine agent type: explicit > inferred from exp_type
+        
+        # Determine agent type
         agent_type = spec.agent_type
         if not agent_type:
             agent_type = "direct_llm" if spec.exp_type == "direct" else "fixed_rag"
-
-        # Resolve aliases
+        
         agent_type = cls._aliases.get(agent_type, agent_type)
-
-        # Load retriever if needed and not provided
-        if retriever is None and spec.retriever:
-            from ragicamp.factory.retrievers import RetrieverFactory
-
-            retriever = RetrieverFactory.load(spec.retriever)
-
+        
         # Build prompt builder
         prompt_builder = PromptBuilder.from_config(spec.prompt, dataset=spec.dataset)
-
-        # Build base kwargs
+        
         kwargs: dict[str, Any] = {
-            "name": spec.name,
             "prompt_builder": prompt_builder,
         }
-
-        # Add RAG-specific components
-        if agent_type != "direct_llm":
-            kwargs["top_k"] = spec.top_k
-
-            # Add fetch_k for reranking pool
-            if spec.fetch_k:
-                kwargs["top_k_retrieve"] = spec.fetch_k
-
-            # Create query transformer if specified
-            if spec.query_transform:
-                query_transformer = create_query_transformer(spec.query_transform, model)
-                if query_transformer:
-                    kwargs["query_transformer"] = query_transformer
-
-            # Create reranker if specified
-            if spec.reranker_model:
-                reranker = create_reranker(spec.reranker_model)
-                if reranker:
-                    kwargs["reranker"] = reranker
-
+        
         # Add agent-specific params from spec
         if spec.agent_params:
             kwargs.update(dict(spec.agent_params))
-
-        # Create the agent
-        return cls._create_instance(agent_type, model, retriever, kwargs)
-
-    @classmethod
-    def _create_instance(
-        cls,
-        agent_type: str,
-        model: LanguageModel,
-        retriever: Optional[Retriever],
-        kwargs: dict[str, Any],
-    ) -> RAGAgent:
-        """Internal method to instantiate an agent by type."""
-        # Check custom registry first
-        if agent_type in cls._custom_agents:
-            agent_cls = cls._custom_agents[agent_type]
-            # For direct-style agents, don't pass retriever
-            if agent_type in ("direct_llm", "direct"):
-                return agent_cls(model=model, **kwargs)
-            return agent_cls(model=model, retriever=retriever, **kwargs)
-
-        # Built-in agents
+        
         if agent_type == "direct_llm":
-            return DirectLLMAgent(model=model, **kwargs)
-
-        elif agent_type == "fixed_rag":
-            if retriever is None:
-                raise ValueError("fixed_rag agent requires a retriever")
-            return FixedRAGAgent(model=model, retriever=retriever, **kwargs)
-
+            return cls.create_direct(
+                name=spec.name,
+                generator_provider=generator_provider,
+                **kwargs,
+            )
         else:
-            available = cls.get_available_agents()
-            raise ValueError(f"Unknown agent type: {agent_type}. Available: {', '.join(available)}")
-
+            if index is None:
+                raise ValueError(f"RAG agent '{agent_type}' requires an index")
+            
+            return cls.create_rag(
+                agent_type=agent_type,
+                name=spec.name,
+                embedder_provider=embedder_provider,
+                generator_provider=generator_provider,
+                index=index,
+                top_k=spec.top_k,
+                **kwargs,
+            )
+    
     @classmethod
-    def create(
-        cls,
-        config: dict[str, Any],
-        model: LanguageModel,
-        retriever: Optional[Retriever] = None,
-        **kwargs: Any,
-    ) -> RAGAgent:
-        """Create an agent from a configuration dict.
-
-        This is the low-level API. For most use cases, prefer from_spec().
-
-        Args:
-            config: Agent configuration dict with 'type' and agent-specific params
-            model: Language model instance
-            retriever: Optional retriever for RAG agents
-            **kwargs: Additional arguments merged into config
-
-        Returns:
-            Instantiated RAGAgent
-
-        Example:
-            >>> config = {"type": "direct_llm", "name": "baseline"}
-            >>> agent = AgentFactory.create(config, model)
-        """
-        agent_type = config["type"]
-        config_copy = dict(config)
-        config_copy.pop("type", None)
-        config_copy.update(kwargs)
-
-        # Resolve aliases
-        agent_type = cls._aliases.get(agent_type, agent_type)
-
-        return cls._create_instance(agent_type, model, retriever, config_copy)
-
-    @classmethod
-    def get_available_agents(cls) -> list:
+    def get_available_agents(cls) -> list[str]:
         """Get list of all available agent types."""
-        built_in = ["direct_llm", "fixed_rag", "pipeline_rag", "direct"]
+        built_in = ["direct_llm", "fixed_rag", "iterative_rag", "self_rag"]
         custom = list(cls._custom_agents.keys())
         return built_in + custom

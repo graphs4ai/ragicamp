@@ -1,118 +1,44 @@
-"""Factory package for creating RAGiCamp components from configuration.
+"""Factory package for creating RAGiCamp components.
 
-This package provides factories for creating:
-- Models (HuggingFace, OpenAI, vLLM)
-- Datasets (NQ, TriviaQA, HotpotQA, etc.)
-- Metrics (Exact Match, F1, BERTScore, etc.)
-- Retrievers (Dense, Sparse, Hybrid, Hierarchical)
-- Agents (DirectLLM, FixedRAG)
+Clean architecture:
+- ProviderFactory: Creates EmbedderProvider and GeneratorProvider
+- AgentFactory: Creates agents with providers + index
+- DatasetFactory: Creates evaluation datasets
+- MetricFactory: Creates evaluation metrics
 
 Example:
-    from ragicamp.factory import ModelFactory, DatasetFactory
-
-    model = ModelFactory.create({"type": "huggingface", "model_name": "google/gemma-2-2b-it"})
-    dataset = DatasetFactory.create({"name": "natural_questions"})
+    from ragicamp.factory import ProviderFactory, AgentFactory
+    from ragicamp.indexes import VectorIndex
+    
+    # Create providers
+    embedder = ProviderFactory.create_embedder("BAAI/bge-large-en")
+    generator = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
+    
+    # Load index
+    index = VectorIndex.load("my_index")
+    
+    # Create agent
+    agent = AgentFactory.create_rag(
+        agent_type="fixed_rag",
+        name="my_agent",
+        embedder_provider=embedder,
+        generator_provider=generator,
+        index=index,
+    )
+    
+    # Run
+    results = agent.run(queries)
 """
 
 from ragicamp.factory.agents import AgentFactory
 from ragicamp.factory.datasets import DatasetFactory
 from ragicamp.factory.metrics import MetricFactory
-from ragicamp.factory.models import ModelFactory, validate_model_config
-from ragicamp.factory.retrievers import (
-    RetrieverFactory,
-    create_query_transformer,
-    create_reranker,
-)
-
-
-# Backward compatibility: ComponentFactory as unified facade
-class ComponentFactory:
-    """Unified factory facade for backward compatibility.
-
-    This class delegates to the individual specialized factories.
-    New code should use the specialized factories directly.
-    """
-
-    # Re-export registries from specialized factories
-    _custom_models = ModelFactory._custom_models
-    _custom_agents = AgentFactory._custom_agents
-    _custom_metrics = MetricFactory._custom_metrics
-    _custom_retrievers = RetrieverFactory._custom_retrievers
-
-    @classmethod
-    def register_model(cls, name: str):
-        """Register a custom model type."""
-        return ModelFactory.register(name)
-
-    @classmethod
-    def register_agent(cls, name: str):
-        """Register a custom agent type."""
-        return AgentFactory.register(name)
-
-    @classmethod
-    def register_metric(cls, name: str):
-        """Register a custom metric type."""
-        return MetricFactory.register(name)
-
-    @classmethod
-    def register_retriever(cls, name: str):
-        """Register a custom retriever type."""
-        return RetrieverFactory.register(name)
-
-    @staticmethod
-    def parse_model_spec(spec, quantization="none", **kwargs):
-        """Parse model spec string."""
-        return ModelFactory.parse_spec(spec, quantization, **kwargs)
-
-    @staticmethod
-    def parse_dataset_spec(name, split="validation", limit=None, **kwargs):
-        """Parse dataset spec."""
-        return DatasetFactory.parse_spec(name, split, limit, **kwargs)
-
-    @classmethod
-    def create_model(cls, config):
-        """Create a language model."""
-        return ModelFactory.create(config)
-
-    @classmethod
-    def create_agent(cls, config, model, retriever=None, **kwargs):
-        """Create an agent."""
-        return AgentFactory.create(config, model, retriever, **kwargs)
-
-    @staticmethod
-    def create_dataset(config):
-        """Create a dataset."""
-        return DatasetFactory.create(config)
-
-    @classmethod
-    def create_metrics(cls, config, judge_model=None):
-        """Create metrics."""
-        return MetricFactory.create(config, judge_model)
-
-    @staticmethod
-    def create_retriever(config):
-        """Create a retriever."""
-        return RetrieverFactory.create(config)
-
-
-# Convenience function for loading retrievers
-def load_retriever(retriever_name: str):
-    """Load a retriever by name."""
-    return RetrieverFactory.load(retriever_name)
-
+from ragicamp.factory.providers import ProviderFactory
 
 __all__ = [
-    # New individual factories
-    "ModelFactory",
+    # New architecture
+    "ProviderFactory",
+    "AgentFactory",
     "DatasetFactory",
     "MetricFactory",
-    "RetrieverFactory",
-    "AgentFactory",
-    # Backward compatibility
-    "ComponentFactory",
-    # Utility functions
-    "validate_model_config",
-    "load_retriever",
-    "create_query_transformer",
-    "create_reranker",
 ]
