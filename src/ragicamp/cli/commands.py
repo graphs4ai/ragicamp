@@ -470,16 +470,38 @@ def cmd_migrate_indexes(args: argparse.Namespace) -> int:
                 print(f"  [DRY RUN] {name}: would migrate to new format")
                 migrated += 1
             else:
-                # Load with auto-detection and save in new format
+                import pickle
+                
+                # Load with auto-detection (uses shim for old Document class)
                 print(f"  Migrating {name}...")
-                index = VectorIndex.load(index_path, use_mmap=True)
+                index = VectorIndex.load(index_path, use_mmap=False)  # Can't mmap while writing
                 
                 # Save config.json
                 config_path = index_path / "config.json"
                 with open(config_path, "w") as f:
                     json.dump(index.config.to_dict(), f, indent=2)
                 
-                print(f"  [OK] {name}: migrated ({len(index.documents)} docs, dim={index.config.embedding_dim})")
+                # Re-save documents.pkl with new Document class path
+                docs_path = index_path / "documents.pkl"
+                if docs_path.exists():
+                    with open(docs_path, "wb") as f:
+                        pickle.dump(index.documents, f)
+                    print(f"  [OK] {name}: migrated config + documents ({len(index.documents)} docs)")
+                else:
+                    # Handle sharded indexes - re-save each shard's documents
+                    shard_dirs = sorted(index_path.glob("shard_*"))
+                    for shard_dir in shard_dirs:
+                        shard_docs = shard_dir / "documents.pkl"
+                        if shard_docs.exists():
+                            # Already loaded as part of index.documents, need to reload per-shard
+                            with open(shard_docs, "rb") as f:
+                                shard_documents = pickle.load(f)
+                            # Convert and re-save
+                            shard_documents = VectorIndex._ensure_document_type(shard_documents)
+                            with open(shard_docs, "wb") as f:
+                                pickle.dump(shard_documents, f)
+                    print(f"  [OK] {name}: migrated config + {len(shard_dirs)} shard docs")
+                
                 migrated += 1
                 
         except Exception as e:
