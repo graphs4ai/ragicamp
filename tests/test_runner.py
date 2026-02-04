@@ -23,7 +23,6 @@ class TestExpSpec:
 
         assert spec.name == "test_exp"
         assert spec.exp_type == "direct"
-        assert spec.quant == "4bit"
         assert spec.retriever is None
         assert spec.top_k == 5
         assert spec.query_transform is None
@@ -198,9 +197,8 @@ class TestBuildSpecs:
 
         specs = build_specs(config)
 
-        # Should only create 1 spec (4bit), skip 8bit for OpenAI
+        # Should create 1 spec
         assert len(specs) == 1
-        assert specs[0].quant == "4bit"
 
 
 class TestNamingFunctions:
@@ -208,7 +206,7 @@ class TestNamingFunctions:
 
     def test_name_direct(self):
         """Test direct experiment naming."""
-        name = name_direct("hf:meta-llama/Llama-3.2", "default", "nq", "4bit")
+        name = name_direct("hf:meta-llama/Llama-3.2", "default", "nq")
 
         assert "direct" in name
         assert "nq" in name
@@ -216,17 +214,9 @@ class TestNamingFunctions:
         assert ":" not in name
         assert "/" not in name
 
-    def test_name_direct_non_4bit_suffix(self):
-        """Test direct naming includes quantization suffix for non-4bit."""
-        name_4bit = name_direct("hf:test", "default", "nq", "4bit")
-        name_8bit = name_direct("hf:test", "default", "nq", "8bit")
-
-        assert "_8bit" not in name_4bit
-        assert "_8bit" in name_8bit
-
     def test_name_rag(self):
         """Test RAG experiment naming."""
-        name = name_rag("hf:test", "default", "nq", "4bit", "dense_bge", 5)
+        name = name_rag("hf:test", "default", "nq", "dense_bge", 5)
 
         assert "rag" in name
         assert "dense_bge" in name
@@ -234,13 +224,13 @@ class TestNamingFunctions:
 
     def test_name_rag_with_query_transform(self):
         """Test RAG naming with query transform."""
-        name = name_rag("hf:test", "default", "nq", "4bit", "dense", 5, query_transform="hyde")
+        name = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="hyde")
 
         assert "hyde" in name
 
     def test_name_rag_with_reranker(self):
         """Test RAG naming with reranker."""
-        name = name_rag("hf:test", "default", "nq", "4bit", "dense", 5, reranker="bge")
+        name = name_rag("hf:test", "default", "nq", "dense", 5, reranker="bge")
 
         assert "bge" in name
 

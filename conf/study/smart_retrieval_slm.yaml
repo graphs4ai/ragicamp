@@ -68,8 +68,6 @@ direct:
   models: *slm_models
   prompts:
     - concise
-  quantization:
-    - none
 
 # =============================================================================
 # RAG Configuration (Grid Search)
@@ -311,9 +309,6 @@ rag:
     - concise       # Baseline - minimal prompt
     - structured    # Clear delimiters, better for instruction-tuned models
     - extractive    # Strict extraction, reduces hallucination
-  
-  quantization:
-    - none
 
 # =============================================================================
 # SINGLETON EXPERIMENTS (Agent-Based Strategies)

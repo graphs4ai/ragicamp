@@ -187,7 +187,6 @@ class GeneratorConfig:
 
     model_name: str
     backend: str = "vllm"  # "vllm" or "hf"
-    quantization: str | None = None
     dtype: str = "auto"
     trust_remote_code: bool = True
     max_model_len: int | None = None
@@ -239,7 +238,6 @@ class GeneratorProvider(ModelProvider):
         llm = LLM(
             model=self.config.model_name,
             dtype=self.config.dtype,
-            quantization=self.config.quantization,
             gpu_memory_utilization=gpu_fraction,
             trust_remote_code=self.config.trust_remote_code,
             max_model_len=self.config.max_model_len,
@@ -249,20 +247,8 @@ class GeneratorProvider(ModelProvider):
     def _load_hf(self) -> "Generator":
         """Load HuggingFace generator."""
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-        # Configure quantization
-        quantization_config = None
-        if self.config.quantization == "4bit":
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4",
-            )
-        elif self.config.quantization == "8bit":
-            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(
             self.config.model_name,
@@ -272,22 +258,20 @@ class GeneratorProvider(ModelProvider):
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.pad_token_id = tokenizer.eos_token_id
         tokenizer.padding_side = "left"
-
+        
         # Load model
         model = AutoModelForCausalLM.from_pretrained(
             self.config.model_name,
-            device_map="auto" if quantization_config else None,
-            quantization_config=quantization_config,
             torch_dtype=torch.float16 if self.config.dtype == "float16" else "auto",
             trust_remote_code=self.config.trust_remote_code,
             low_cpu_mem_usage=True,
         )
-
-        if not quantization_config and torch.cuda.is_available():
+        
+        if torch.cuda.is_available():
             model = model.to("cuda")
-
+        
         model.eval()
-
+        
         return HFGeneratorWrapper(model, tokenizer, self.config.model_name)
 
     def _unload(self):

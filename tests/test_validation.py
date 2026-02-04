@@ -5,7 +5,6 @@ import pytest
 from ragicamp.config.validation import (
     VALID_DATASETS,
     VALID_PROVIDERS,
-    VALID_QUANTIZATIONS,
     ConfigError,
     validate_config,
     validate_dataset,
@@ -125,23 +124,6 @@ class TestValidateConfig:
 
         assert any("no retrievers" in w.lower() for w in warnings)
 
-    def test_invalid_quantization_raises(self):
-        """Test that invalid quantization raises error."""
-        config = {
-            "name": "test",
-            "datasets": ["nq"],
-            "direct": {
-                "enabled": True,
-                "models": ["hf:test/model"],
-                "quantization": ["invalid_quant"],
-            },
-        }
-
-        with pytest.raises(ConfigError) as exc_info:
-            validate_config(config)
-
-        assert "Invalid quantization" in str(exc_info.value)
-
 
 class TestConstants:
     """Test validation constants are complete."""
@@ -157,12 +139,6 @@ class TestConstants:
         assert len(VALID_PROVIDERS) > 0
         assert "hf" in VALID_PROVIDERS
         assert "openai" in VALID_PROVIDERS
-
-    def test_valid_quantizations_not_empty(self):
-        """Test VALID_QUANTIZATIONS is not empty."""
-        assert len(VALID_QUANTIZATIONS) > 0
-        assert "4bit" in VALID_QUANTIZATIONS
-        assert "none" in VALID_QUANTIZATIONS
 
 
 if __name__ == "__main__":

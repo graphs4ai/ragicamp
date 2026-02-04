@@ -33,14 +33,12 @@ class ProviderFactory:
     @staticmethod
     def parse_generator_spec(
         spec: str,
-        quantization: str | None = None,
         **kwargs: Any,
     ) -> GeneratorConfig:
         """Parse a model spec string into GeneratorConfig.
         
         Args:
             spec: Model spec like 'vllm:meta-llama/Llama-3.2-3B' or 'hf:google/gemma-2b-it'
-            quantization: Quantization setting (awq, gptq, 4bit, 8bit)
             **kwargs: Additional config params
         
         Returns:
@@ -56,7 +54,6 @@ class ProviderFactory:
         return GeneratorConfig(
             model_name=model_name,
             backend=backend,
-            quantization=quantization,
             dtype=kwargs.get("dtype", "auto"),
             trust_remote_code=kwargs.get("trust_remote_code", True),
             max_model_len=kwargs.get("max_model_len"),
@@ -65,14 +62,12 @@ class ProviderFactory:
     @staticmethod
     def create_generator(
         spec: str | dict[str, Any],
-        quantization: str | None = None,
         **kwargs: Any,
     ) -> GeneratorProvider:
         """Create a GeneratorProvider from spec.
         
         Args:
             spec: Model spec string or config dict
-            quantization: Quantization setting
             **kwargs: Additional params
         
         Returns:
@@ -82,13 +77,12 @@ class ProviderFactory:
             config = GeneratorConfig(
                 model_name=spec.get("model_name", spec.get("name", "")),
                 backend=spec.get("backend", spec.get("type", "vllm")),
-                quantization=spec.get("quantization"),
                 dtype=spec.get("dtype", "auto"),
                 trust_remote_code=spec.get("trust_remote_code", True),
                 max_model_len=spec.get("max_model_len"),
             )
         else:
-            config = ProviderFactory.parse_generator_spec(spec, quantization, **kwargs)
+            config = ProviderFactory.parse_generator_spec(spec, **kwargs)
         
         logger.info("Creating generator provider: %s (%s)", config.model_name, config.backend)
         return GeneratorProvider(config)

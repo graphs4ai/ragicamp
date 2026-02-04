@@ -14,7 +14,6 @@ from ragicamp.config.schemas import (
 from ragicamp.config.validation import (
     VALID_DATASETS,
     VALID_PROVIDERS,
-    VALID_QUANTIZATIONS,
     ConfigError,
     validate_config,
     validate_dataset,
@@ -39,5 +38,4 @@ __all__ = [
     "validate_model_spec",
     "VALID_DATASETS",
     "VALID_PROVIDERS",
-    "VALID_QUANTIZATIONS",
 ]

@@ -226,30 +226,23 @@ def _build_direct_specs(
 
     models = direct_config.get("models", [])
     prompts = direct_config.get("prompts", ["default"])
-    quantizations = direct_config.get("quantization", ["4bit"])
 
     for model in models:
         for prompt in prompts:
-            for quant in quantizations:
-                # Skip non-4bit for OpenAI models
-                if model.startswith("openai:") and quant != "4bit":
-                    continue
-
-                for dataset in datasets:
-                    name = name_direct(model, prompt, dataset, quant)
-                    specs.append(
-                        ExperimentSpec(
-                            name=name,
-                            exp_type="direct",
-                            model=model,
-                            dataset=dataset,
-                            prompt=prompt,
-                            quant=quant,
-                            batch_size=batch_size,
-                            min_batch_size=min_batch_size,
-                            metrics=metrics,
-                        )
+            for dataset in datasets:
+                name = name_direct(model, prompt, dataset)
+                specs.append(
+                    ExperimentSpec(
+                        name=name,
+                        exp_type="direct",
+                        model=model,
+                        dataset=dataset,
+                        prompt=prompt,
+                        batch_size=batch_size,
+                        min_batch_size=min_batch_size,
+                        metrics=metrics,
                     )
+                )
 
     return specs
 
@@ -275,7 +268,6 @@ def _build_rag_specs(
     models = rag_config.get("models", [])
     top_k_values = rag_config.get("top_k_values", [5])
     prompts = rag_config.get("prompts", ["default"])
-    quantizations = rag_config.get("quantization", ["4bit"])
 
     # Get retriever names for grid search
     # Priority: retriever_names > extracting names from retrievers list
@@ -321,58 +313,51 @@ def _build_rag_specs(
         for ret_name in retriever_names:
             for top_k in top_k_values:
                 for prompt in prompts:
-                    for quant in quantizations:
-                        # Skip non-4bit for OpenAI models
-                        if model.startswith("openai:") and quant != "4bit":
-                            continue
+                    for qt in query_transforms:
+                        for rr_cfg in reranker_cfgs:
+                            rr_name = (
+                                rr_cfg.get("name", "none") if rr_cfg.get("enabled") else "none"
+                            )
+                            rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
 
-                        for qt in query_transforms:
-                            for rr_cfg in reranker_cfgs:
-                                rr_name = (
-                                    rr_cfg.get("name", "none") if rr_cfg.get("enabled") else "none"
+                            for dataset in datasets:
+                                name = name_rag(
+                                    model,
+                                    prompt,
+                                    dataset,
+                                    ret_name,
+                                    top_k,
+                                    qt,
+                                    rr_name,
                                 )
-                                rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
 
-                                for dataset in datasets:
-                                    name = name_rag(
-                                        model,
-                                        prompt,
-                                        dataset,
-                                        quant,
-                                        ret_name,
-                                        top_k,
-                                        qt,
-                                        rr_name,
+                                # Compute fetch_k: explicit > multiplier (if reranking) > None
+                                has_reranker = rr_name != "none" and rr_cfg.get("enabled")
+                                if fetch_k_config is not None:
+                                    fetch_k = fetch_k_config
+                                elif has_reranker:
+                                    fetch_k = top_k * fetch_k_multiplier
+                                else:
+                                    fetch_k = None
+
+                                specs.append(
+                                    ExperimentSpec(
+                                        name=name,
+                                        exp_type="rag",
+                                        model=model,
+                                        dataset=dataset,
+                                        prompt=prompt,
+                                        retriever=ret_name,
+                                        top_k=top_k,
+                                        fetch_k=fetch_k,
+                                        query_transform=qt if qt != "none" else None,
+                                        reranker=rr_name if rr_name != "none" else None,
+                                        reranker_model=rr_model,
+                                        batch_size=batch_size,
+                                        min_batch_size=min_batch_size,
+                                        metrics=metrics,
                                     )
-
-                                    # Compute fetch_k: explicit > multiplier (if reranking) > None
-                                    has_reranker = rr_name != "none" and rr_cfg.get("enabled")
-                                    if fetch_k_config is not None:
-                                        fetch_k = fetch_k_config
-                                    elif has_reranker:
-                                        fetch_k = top_k * fetch_k_multiplier
-                                    else:
-                                        fetch_k = None
-
-                                    specs.append(
-                                        ExperimentSpec(
-                                            name=name,
-                                            exp_type="rag",
-                                            model=model,
-                                            dataset=dataset,
-                                            prompt=prompt,
-                                            quant=quant,
-                                            retriever=ret_name,
-                                            top_k=top_k,
-                                            fetch_k=fetch_k,
-                                            query_transform=qt if qt != "none" else None,
-                                            reranker=rr_name if rr_name != "none" else None,
-                                            reranker_model=rr_model,
-                                            batch_size=batch_size,
-                                            min_batch_size=min_batch_size,
-                                            metrics=metrics,
-                                        )
-                                    )
+                                )
 
     return specs
 
@@ -416,7 +401,6 @@ def _build_singleton_specs(
 
     default_datasets = config.get("datasets", ["nq"])
     default_prompt = "concise"
-    default_quant = "none"
 
     for exp in experiments:
         # Required field
@@ -441,7 +425,6 @@ def _build_singleton_specs(
         exp_datasets = [exp["dataset"]] if "dataset" in exp else default_datasets
 
         prompt = exp.get("prompt", default_prompt)
-        quant = exp.get("quant", exp.get("quantization", default_quant))
 
         # RAG-specific fields
         retriever = exp.get("retriever")
@@ -503,7 +486,6 @@ def _build_singleton_specs(
                     model=model,
                     dataset=dataset,
                     prompt=prompt,
-                    quant=quant,
                     retriever=retriever,
                     top_k=top_k,
                     fetch_k=fetch_k,

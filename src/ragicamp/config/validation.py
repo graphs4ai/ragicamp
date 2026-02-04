@@ -15,7 +15,6 @@ class ConfigError(ValueError):
 # Valid configuration values
 VALID_DATASETS = {"nq", "triviaqa", "hotpotqa", "techqa", "pubmedqa"}
 VALID_PROVIDERS = {"hf", "openai", "vllm"}
-VALID_QUANTIZATIONS = {"4bit", "8bit", "none"}
 
 
 def validate_model_spec(spec: str) -> None:
@@ -85,9 +84,6 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             warnings.append("Direct experiments enabled but no models specified")
         for model in direct.get("models", []):
             validate_model_spec(model)
-        for q in direct.get("quantization", []):
-            if q not in VALID_QUANTIZATIONS:
-                raise ConfigError(f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}")
 
     # Validate RAG experiments
     rag = config.get("rag", {})
@@ -105,8 +101,5 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             warnings.append("RAG enabled but no retrievers specified")
         for model in rag.get("models", []):
             validate_model_spec(model)
-        for q in rag.get("quantization", []):
-            if q not in VALID_QUANTIZATIONS:
-                raise ConfigError(f"Invalid quantization: '{q}'. Valid: {VALID_QUANTIZATIONS}")
 
     return warnings

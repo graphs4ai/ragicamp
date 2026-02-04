@@ -22,7 +22,6 @@ class ExperimentSpec:
         model: Model specification string (e.g., 'hf:google/gemma-2-2b-it')
         dataset: Dataset name (e.g., 'nq', 'triviaqa')
         prompt: Prompt style name (e.g., 'default', 'cot')
-        quant: Quantization setting ('4bit', '8bit', 'none')
         retriever: Retriever name (for RAG experiments)
         top_k: Number of documents to use for generation (after reranking if applicable)
         fetch_k: Number of documents to retrieve before reranking (None = auto)
@@ -42,7 +41,6 @@ class ExperimentSpec:
     model: str
     dataset: str
     prompt: str
-    quant: str = "4bit"
     retriever: Optional[str] = None
     top_k: int = 5
     fetch_k: Optional[int] = None
@@ -70,7 +68,6 @@ class ExperimentSpec:
             "model": self.model,
             "dataset": self.dataset,
             "prompt": self.prompt,
-            "quant": self.quant,
             "retriever": self.retriever,
             "top_k": self.top_k,
             "fetch_k": self.fetch_k,
@@ -103,7 +100,6 @@ class ExperimentSpec:
             model=data["model"],
             dataset=data["dataset"],
             prompt=data["prompt"],
-            quant=data.get("quant", "4bit"),
             retriever=data.get("retriever"),
             top_k=data.get("top_k", 5),
             fetch_k=data.get("fetch_k"),
