@@ -232,6 +232,24 @@ def run_generation(
         }
     )
 
+    # Check if there were aborted predictions (model failures)
+    predictions_path = exp_out / "predictions.json"
+    if predictions_path.exists():
+        import json
+
+        with open(predictions_path) as f:
+            preds_data = json.load(f)
+        predictions = preds_data.get("predictions", [])
+        aborted = sum(1 for p in predictions if "[ABORTED" in str(p.get("prediction", "")))
+        errored = sum(1 for p in predictions if p.get("error"))
+
+        if aborted > 0:
+            print(f"  ⚠ WARNING: {aborted} predictions were aborted due to model failures")
+            return "failed"
+        if errored > len(predictions) * 0.5:  # >50% errors
+            print(f"  ⚠ WARNING: {errored}/{len(predictions)} predictions had errors")
+            return "failed"
+
     return "ran"
 
 
