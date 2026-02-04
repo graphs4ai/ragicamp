@@ -60,10 +60,11 @@ class Embedder(Protocol):
 def create_embedder(
     model_name: str,
     backend: str = "vllm",
-    gpu_memory_fraction: float = 0.9,
-    enforce_eager: bool = True,  # True for embeddings (skip CUDA graph compilation)
-    max_num_seqs: int = 1024,  # Higher concurrency for embedding batches
-    disable_compile: bool = True,  # Skip torch.compile for faster startup
+    gpu_memory_fraction: float = 0.95,  # Max VRAM for throughput
+    enforce_eager: bool = False,  # CUDA graphs improve throughput
+    max_num_seqs: int = 8192,  # Massive batch concurrency for large GPUs
+    max_num_batched_tokens: int = 131072,  # 128k tokens per batch
+    max_model_len: int = 2048,  # Shorter context = more parallelism
     use_flash_attn: bool = True,
     use_compile: bool = True,
     **kwargs,
@@ -76,10 +77,11 @@ def create_embedder(
     Args:
         model_name: HuggingFace model name
         backend: 'vllm' or 'sentence_transformers'
-        gpu_memory_fraction: GPU memory fraction (vLLM only, 0.9 default)
-        enforce_eager: Use eager mode instead of CUDA graphs (vLLM only, True for embeddings)
-        max_num_seqs: Max concurrent sequences for batching (vLLM only)
-        disable_compile: Skip torch.compile for faster startup (vLLM only)
+        gpu_memory_fraction: GPU memory fraction (vLLM only, 0.95 for max throughput)
+        enforce_eager: Use eager mode instead of CUDA graphs (False = enable graphs)
+        max_num_seqs: Max concurrent sequences for batching (8192 for large GPUs)
+        max_num_batched_tokens: Max tokens per batch (131072 = 128k tokens)
+        max_model_len: Max sequence length (2048 is enough for 512-token chunks)
         use_flash_attn: Use Flash Attention 2 if available (sentence_transformers only)
         use_compile: Apply torch.compile (sentence_transformers only)
         **kwargs: Additional backend-specific arguments
@@ -96,7 +98,8 @@ def create_embedder(
             gpu_memory_fraction=gpu_memory_fraction,
             enforce_eager=enforce_eager,
             max_num_seqs=max_num_seqs,
-            disable_compile=disable_compile,
+            max_num_batched_tokens=max_num_batched_tokens,
+            max_model_len=max_model_len,
         )
     else:
         from .st_embedder import SentenceTransformerEmbedder

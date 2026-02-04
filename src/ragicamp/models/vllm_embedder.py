@@ -49,28 +49,31 @@ class VLLMEmbedder:
     def __init__(
         self,
         model_name: str,
-        gpu_memory_fraction: float = 0.9,
-        enforce_eager: bool = True,  # Default True for embeddings (skip CUDA graph compilation)
+        gpu_memory_fraction: float = 0.95,  # Use almost all VRAM
+        enforce_eager: bool = False,  # CUDA graphs improve throughput
         trust_remote_code: bool = True,
-        max_num_seqs: int = 1024,  # Higher concurrency for embedding batches
-        disable_compile: bool = True,  # Skip torch.compile for faster startup
+        max_num_seqs: int = 8192,  # Massive batch concurrency for large GPUs
+        max_num_batched_tokens: int = 131072,  # 128k tokens per batch (B200 can handle it)
+        max_model_len: int = 2048,  # Shorter context = more sequences in parallel
     ):
-        """Initialize vLLM embedder.
+        """Initialize vLLM embedder optimized for maximum throughput.
 
         Args:
             model_name: HuggingFace model name (must be vLLM-compatible)
-            gpu_memory_fraction: Fraction of GPU memory to use (0.9 default for embeddings)
-            enforce_eager: Use eager mode (True = skip 35s CUDA graph compilation)
+            gpu_memory_fraction: Fraction of GPU memory to use (0.95 = max throughput)
+            enforce_eager: Use CUDA graphs for throughput (False = enable graphs)
             trust_remote_code: Trust remote code in model
-            max_num_seqs: Max concurrent sequences (higher = better batching)
-            disable_compile: Skip torch.compile (saves 30s startup, minimal perf impact)
+            max_num_seqs: Max concurrent sequences (8192 for large GPUs like B200)
+            max_num_batched_tokens: Max tokens per batch (higher = better GPU utilization)
+            max_model_len: Max sequence length (2048 is enough for 512-token chunks)
         """
         self.model_name = model_name
         self.gpu_memory_fraction = gpu_memory_fraction
         self.enforce_eager = enforce_eager
         self.trust_remote_code = trust_remote_code
         self.max_num_seqs = max_num_seqs
-        self.disable_compile = disable_compile
+        self.max_num_batched_tokens = max_num_batched_tokens
+        self.max_model_len = max_model_len
 
         self._llm: Optional[vllm.LLM] = None
         self._embedding_dim: Optional[int] = None
@@ -98,35 +101,34 @@ class VLLMEmbedder:
                 self.gpu_memory_fraction * 100,
             )
 
-            # NOTE: For embedding models, gpu_memory_utilization has limited effect
-            # since there's no KV cache to pre-allocate. Memory usage = model weights only.
-            # See: https://github.com/vllm-project/vllm/issues/12308
-            #
             # vLLM 0.15+ API: use runner="pooling" instead of task="embed"
             # See: https://docs.vllm.ai/en/stable/models/pooling_models/
             #
-            # Embedding-specific optimizations:
-            # - enforce_eager=True: Skip 35s CUDA graph compilation (not useful for embeddings)
-            # - max_num_seqs=1024: Higher batch concurrency for throughput
-            # - disable_compile: Skip 30s torch.compile (minimal benefit for embeddings)
+            # THROUGHPUT OPTIMIZATIONS for large GPUs (B200, H100, etc.):
+            # - max_num_seqs=8192: Massive batch concurrency
+            # - max_num_batched_tokens=131072: Process 128k tokens per forward pass
+            # - max_model_len=2048: Shorter context = more sequences fit in memory
+            # - enforce_eager=False: CUDA graphs reduce kernel launch overhead
+            # - gpu_memory_utilization=0.95: Use all available VRAM
             
-            llm_kwargs = {
-                "model": self.model_name,
-                "runner": "pooling",  # vLLM 0.15+ pooling mode
-                "trust_remote_code": self.trust_remote_code,
-                "gpu_memory_utilization": self.gpu_memory_fraction,
-                "enforce_eager": self.enforce_eager,
-                "dtype": "auto",  # Use bfloat16/float16 on GPU
-                "max_num_seqs": self.max_num_seqs,
-            }
+            logger.info(
+                "Throughput config: max_num_seqs=%d, max_batched_tokens=%d, max_model_len=%d",
+                self.max_num_seqs,
+                self.max_num_batched_tokens,
+                self.max_model_len,
+            )
             
-            # Disable torch.compile for faster startup (vLLM 0.15+)
-            if self.disable_compile:
-                from vllm import CompilationConfig
-                llm_kwargs["compilation_config"] = CompilationConfig(level=0)
-                logger.info("torch.compile disabled for faster startup")
-            
-            self._llm = LLM(**llm_kwargs)
+            self._llm = LLM(
+                model=self.model_name,
+                runner="pooling",  # vLLM 0.15+ pooling mode
+                trust_remote_code=self.trust_remote_code,
+                gpu_memory_utilization=self.gpu_memory_fraction,
+                enforce_eager=self.enforce_eager,
+                dtype="bfloat16",  # bfloat16 for fastest inference on modern GPUs
+                max_num_seqs=self.max_num_seqs,
+                max_num_batched_tokens=self.max_num_batched_tokens,
+                max_model_len=self.max_model_len,
+            )
 
             # Log actual GPU memory after loading
             if torch.cuda.is_available():
