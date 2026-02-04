@@ -65,6 +65,15 @@ class VLLMEmbedder:
         if self._llm is None:
             from vllm import LLM
 
+            # Check GPU availability before loading
+            import torch
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+                logger.info("GPU detected: %s (%.1f GB)", gpu_name, gpu_mem)
+            else:
+                logger.warning("No GPU detected! vLLM will be slow.")
+
             logger.info(
                 "Loading vLLM embedding model: %s (gpu_mem=%.1f%%)",
                 self.model_name,
@@ -77,6 +86,7 @@ class VLLMEmbedder:
                 trust_remote_code=self.trust_remote_code,
                 gpu_memory_utilization=self.gpu_memory_fraction,
                 enforce_eager=self.enforce_eager,
+                dtype="auto",  # Use bfloat16/float16 on GPU
             )
 
             logger.info("vLLM embedding model loaded: %s", self.model_name)
