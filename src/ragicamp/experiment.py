@@ -527,7 +527,7 @@ class Experiment:
                 if retriever_type == "hierarchical":
                     from ragicamp.indexes.hierarchical import HierarchicalIndex
                     from ragicamp.retrievers.hierarchical import HierarchicalSearcher
-                    hier_index = HierarchicalIndex.load(index_path)
+                    hier_index = HierarchicalIndex.load(name=index_name, path=index_path)
                     index = HierarchicalSearcher(hier_index)
                 else:
                     index = VectorIndex.load(index_path)
