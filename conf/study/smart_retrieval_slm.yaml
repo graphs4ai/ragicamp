@@ -109,14 +109,11 @@ rag:
     # doc_batch_size: Number of documents per embedding batch.
     doc_batch_size: 5000
     embedding_batch_size: 4096
-  
-  # --------------------------------------------------------------------------
-  # Embedding Backend Configuration
-  # --------------------------------------------------------------------------
-  embedding:
-    backend: vllm
-    vllm_gpu_memory_fraction: 0.9  # High fraction for index building (no generator running)
-    vllm_enforce_eager: false
+    # Embedding backend configuration (used during index building)
+    embedding:
+      backend: vllm
+      vllm_gpu_memory_fraction: 0.9  # High fraction for index building (no generator running)
+      vllm_enforce_eager: false
   
   # --------------------------------------------------------------------------
   # Retrievers (referenced by grid search)
