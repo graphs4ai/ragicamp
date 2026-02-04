@@ -55,8 +55,53 @@ def _index_exists(index_path: Path) -> bool:
     return False
 
 
+def _sparse_index_exists(sparse_path: Path) -> bool:
+    """Check if sparse index exists."""
+    return (sparse_path / "config.json").exists()
+
+
+def _build_sparse_index(
+    sparse_name: str,
+    embedding_index_path: Path,
+    sparse_method: str,
+) -> None:
+    """Build sparse index from documents in the embedding index.
+    
+    Args:
+        sparse_name: Name for the sparse index
+        embedding_index_path: Path to the dense embedding index (to get documents)
+        sparse_method: 'tfidf' or 'bm25'
+    """
+    from ragicamp.indexes.sparse import SparseIndex, SparseMethod
+    from ragicamp.indexes.vector_index import VectorIndex
+    
+    _study_logger.info("Building sparse index: %s (method=%s)", sparse_name, sparse_method)
+    
+    # Load documents from the dense index
+    _study_logger.info("Loading documents from: %s", embedding_index_path)
+    vector_index = VectorIndex.load(embedding_index_path, use_mmap=True)
+    documents = vector_index.documents
+    
+    _study_logger.info("Building %s index from %d documents...", sparse_method, len(documents))
+    
+    # Build sparse index
+    sparse_index = SparseIndex(
+        name=sparse_name,
+        method=SparseMethod(sparse_method),
+    )
+    sparse_index.build(documents, show_progress=True)
+    
+    # Save
+    saved_path = sparse_index.save()
+    _study_logger.info("Sparse index saved to: %s", saved_path)
+
+
 def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
     """Ensure all required indexes exist, building them if necessary.
+    
+    For dense retrievers: builds embedding index
+    For hybrid retrievers: builds embedding index + sparse index
+    For hierarchical retrievers: builds hierarchical index
     
     Args:
         retriever_configs: List of retriever configuration dicts
@@ -68,35 +113,62 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
         retriever_type = config.get("type", "dense")
         name = config.get("name", "")
         
-        # Check if index already exists
+        # ===================================================================
+        # Step 1: Check/Build dense embedding index
+        # ===================================================================
         if retriever_type == "hierarchical":
-            index_path = manager.get_embedding_index_path(name)
+            index_name = config.get("embedding_index", name)
+            index_path = manager.get_embedding_index_path(index_name)
         else:
             # Dense or hybrid - use embedding index name
             index_name = config.get("embedding_index", name)
             index_path = manager.get_embedding_index_path(index_name)
         
         if _index_exists(index_path):
-            _study_logger.info("Index exists: %s (at %s)", name, index_path)
-            continue
-        
-        # Build the index
-        _study_logger.info("Building index: %s", name)
-        
-        if retriever_type == "hierarchical":
-            build_hierarchical_index(
-                retriever_config=config,
-                corpus_config=corpus_config,
-            )
+            _study_logger.info("Dense index exists: %s (at %s)", name, index_path)
         else:
-            build_embedding_index(
-                index_name=config.get("embedding_index", name),
-                embedding_model=config.get("embedding_model", "all-MiniLM-L6-v2"),
-                chunk_size=config.get("chunk_size", 512),
-                chunk_overlap=config.get("chunk_overlap", 50),
-                corpus_config=corpus_config,
-                embedding_backend=config.get("embedding_backend", "vllm"),
-            )
+            # Build the dense index
+            _study_logger.info("Building dense index: %s", name)
+            
+            if retriever_type == "hierarchical":
+                build_hierarchical_index(
+                    retriever_config=config,
+                    corpus_config=corpus_config,
+                )
+            else:
+                build_embedding_index(
+                    index_name=index_name,
+                    embedding_model=config.get("embedding_model", "all-MiniLM-L6-v2"),
+                    chunk_size=config.get("chunk_size", 512),
+                    chunk_overlap=config.get("chunk_overlap", 50),
+                    corpus_config=corpus_config,
+                    embedding_backend=config.get("embedding_backend", "vllm"),
+                )
+        
+        # ===================================================================
+        # Step 2: For hybrid retrievers, check/build sparse index
+        # ===================================================================
+        if retriever_type == "hybrid":
+            sparse_method = config.get("sparse_method", "tfidf")
+            
+            # Determine sparse index name
+            # Priority: explicit sparse_index > auto-generated from embedding_index
+            sparse_name = config.get("sparse_index")
+            if not sparse_name:
+                # Auto-generate: {embedding_index}_sparse_{method}
+                sparse_name = f"{index_name}_sparse_{sparse_method}"
+            
+            sparse_path = manager.get_sparse_index_path(sparse_name)
+            
+            if _sparse_index_exists(sparse_path):
+                _study_logger.info("Sparse index exists: %s (at %s)", sparse_name, sparse_path)
+            else:
+                # Build sparse index from the dense index documents
+                _build_sparse_index(
+                    sparse_name=sparse_name,
+                    embedding_index_path=index_path,
+                    sparse_method=sparse_method,
+                )
 
 
 def get_prompt_builder(prompt_type: str, dataset: str):
