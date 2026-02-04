@@ -418,3 +418,74 @@ def cmd_download(args: argparse.Namespace) -> int:
         continue_on_error=args.continue_on_error,
         max_workers=args.workers,
     )
+
+
+def cmd_migrate_indexes(args: argparse.Namespace) -> int:
+    """Migrate old index format to new format.
+    
+    Old formats:
+    - retriever_config.json → config.json
+    - No config → auto-detected config.json
+    """
+    from ragicamp.indexes.vector_index import VectorIndex
+    from ragicamp.utils.artifacts import get_artifact_manager
+    
+    manager = get_artifact_manager()
+    indexes_dir = manager.indexes_dir
+    
+    if args.index_name:
+        index_paths = [manager.get_embedding_index_path(args.index_name)]
+    else:
+        # Find all indexes
+        index_paths = [p for p in indexes_dir.iterdir() if p.is_dir()]
+    
+    if not index_paths:
+        print("No indexes found to migrate.")
+        return 0
+    
+    migrated = 0
+    skipped = 0
+    failed = 0
+    
+    for index_path in index_paths:
+        name = index_path.name
+        
+        # Check if already new format
+        if (index_path / "config.json").exists():
+            print(f"  [SKIP] {name}: already has config.json")
+            skipped += 1
+            continue
+        
+        # Check if it's a valid old index
+        has_faiss = (index_path / "index.faiss").exists()
+        has_shards = any((index_path / f"shard_{i}" / "index.faiss").exists() for i in range(10))
+        
+        if not has_faiss and not has_shards:
+            print(f"  [SKIP] {name}: not a valid index")
+            skipped += 1
+            continue
+        
+        try:
+            if args.dry_run:
+                print(f"  [DRY RUN] {name}: would migrate to new format")
+                migrated += 1
+            else:
+                # Load with auto-detection and save in new format
+                print(f"  Migrating {name}...")
+                index = VectorIndex.load(index_path, use_mmap=True)
+                
+                # Save config.json
+                config_path = index_path / "config.json"
+                with open(config_path, "w") as f:
+                    json.dump(index.config.to_dict(), f, indent=2)
+                
+                print(f"  [OK] {name}: migrated ({len(index.documents)} docs, dim={index.config.embedding_dim})")
+                migrated += 1
+                
+        except Exception as e:
+            print(f"  [FAIL] {name}: {e}")
+            failed += 1
+    
+    print()
+    print(f"Migration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
+    return 0 if failed == 0 else 1

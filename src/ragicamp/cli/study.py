@@ -28,6 +28,33 @@ from ragicamp.utils.artifacts import get_artifact_manager
 _study_logger = get_logger(__name__)
 
 
+def _index_exists(index_path: Path) -> bool:
+    """Check if index exists, supporting both old and new formats.
+    
+    New format: config.json + index.faiss + documents.pkl
+    Old format: retriever_config.json + index.faiss OR just index.faiss
+    Sharded: config.json + shard_*/ directories
+    """
+    # New format
+    if (index_path / "config.json").exists():
+        return True
+    
+    # Old format with retriever_config.json
+    if (index_path / "retriever_config.json").exists():
+        return True
+    
+    # Very old format - just the FAISS index
+    if (index_path / "index.faiss").exists():
+        return True
+    
+    # Sharded index
+    shard_dirs = list(index_path.glob("shard_*"))
+    if shard_dirs and any((s / "index.faiss").exists() for s in shard_dirs):
+        return True
+    
+    return False
+
+
 def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
     """Ensure all required indexes exist, building them if necessary.
     
@@ -49,8 +76,8 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
             index_name = config.get("embedding_index", name)
             index_path = manager.get_embedding_index_path(index_name)
         
-        if (index_path / "config.json").exists():
-            _study_logger.info("Index exists: %s", name)
+        if _index_exists(index_path):
+            _study_logger.info("Index exists: %s (at %s)", name, index_path)
             continue
         
         # Build the index

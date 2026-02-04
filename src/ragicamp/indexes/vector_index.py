@@ -354,12 +354,15 @@ class VectorIndex:
             path: Index directory
             use_mmap: Memory-map the index (reduces RAM for large indexes)
             use_gpu: Move index to GPU after loading
+        
+        Supports both old and new index formats:
+        - New: config.json with full IndexConfig
+        - Old: retriever_config.json or minimal auto-detection
         """
         path = Path(path)
         
-        # Load config
-        with open(path / "config.json") as f:
-            config = IndexConfig.from_dict(json.load(f))
+        # Load config (try multiple formats)
+        config = cls._load_config(path)
         
         # Check for sharded index
         shard_dirs = sorted([d for d in path.iterdir() if d.is_dir() and d.name.startswith("shard_")])
@@ -440,6 +443,78 @@ class VectorIndex:
             shard_indexes=shard_indexes,
             shard_offsets=shard_offsets,
         )
+    
+    @classmethod
+    def _load_config(cls, path: Path) -> IndexConfig:
+        """Load config from multiple possible formats.
+        
+        Tries in order:
+        1. config.json (new format)
+        2. retriever_config.json (old format)
+        3. Auto-detect from FAISS index
+        """
+        # Try new format
+        config_path = path / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                return IndexConfig.from_dict(json.load(f))
+        
+        # Try old retriever_config format
+        old_config_path = path / "retriever_config.json"
+        if old_config_path.exists():
+            with open(old_config_path) as f:
+                old_config = json.load(f)
+            
+            # Map old fields to new
+            return IndexConfig(
+                embedding_model=old_config.get("embedding_model", old_config.get("model", "unknown")),
+                embedding_dim=old_config.get("embedding_dim", old_config.get("dimension", 768)),
+                index_type=old_config.get("index_type", old_config.get("faiss_index_type", "flat")),
+                n_documents=old_config.get("num_documents", old_config.get("n_documents", 0)),
+                chunk_size=old_config.get("chunk_size"),
+                chunk_overlap=old_config.get("chunk_overlap"),
+            )
+        
+        # Auto-detect from FAISS index
+        faiss_path = path / "index.faiss"
+        if faiss_path.exists():
+            temp_index = faiss.read_index(str(faiss_path))
+            dim = temp_index.d
+            n_docs = temp_index.ntotal
+            
+            logger.warning(
+                "No config found at %s, auto-detecting: dim=%d, n_docs=%d", 
+                path, dim, n_docs
+            )
+            
+            return IndexConfig(
+                embedding_model="unknown",
+                embedding_dim=dim,
+                index_type="flat",
+                n_documents=n_docs,
+            )
+        
+        # Check for sharded index
+        shard_dirs = sorted([d for d in path.iterdir() if d.is_dir() and d.name.startswith("shard_")])
+        if shard_dirs:
+            first_shard = shard_dirs[0] / "index.faiss"
+            if first_shard.exists():
+                temp_index = faiss.read_index(str(first_shard))
+                dim = temp_index.d
+                
+                logger.warning(
+                    "Sharded index without config at %s, auto-detecting: dim=%d", 
+                    path, dim
+                )
+                
+                return IndexConfig(
+                    embedding_model="unknown",
+                    embedding_dim=dim,
+                    index_type="flat",
+                    n_documents=0,
+                )
+        
+        raise FileNotFoundError(f"No valid index found at {path}")
     
     @staticmethod
     def _ensure_document_type(documents: list) -> list[Document]:

@@ -39,6 +39,7 @@ from ragicamp.cli.commands import (
     cmd_health,
     cmd_index,
     cmd_metrics,
+    cmd_migrate_indexes,
     cmd_resume,
     cmd_run,
 )
@@ -276,6 +277,23 @@ def create_parser() -> argparse.ArgumentParser:
         help="Number of parallel download threads (default: 12)",
     )
     download_parser.set_defaults(func=cmd_download)
+
+    # Migrate indexes command
+    migrate_parser = subparsers.add_parser(
+        "migrate-indexes", help="Migrate old index format to new format"
+    )
+    migrate_parser.add_argument(
+        "--index-name",
+        "-n",
+        default=None,
+        help="Specific index to migrate (default: all)",
+    )
+    migrate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview changes without writing",
+    )
+    migrate_parser.set_defaults(func=cmd_migrate_indexes)
 
     return parser
 
