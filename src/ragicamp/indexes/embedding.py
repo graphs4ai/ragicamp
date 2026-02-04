@@ -155,7 +155,7 @@ class EmbeddingIndex(Index):
         nlist: int = None,
         nprobe: int = None,
         embedding_backend: str = "vllm",
-        vllm_gpu_memory_fraction: float = 0.9,
+        vllm_gpu_memory_fraction: float = 0.7,
         **kwargs: Any,
     ):
         """Initialize embedding index.

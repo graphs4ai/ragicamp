@@ -34,7 +34,7 @@ def build_hierarchical_index(
     doc_batch_size: int = 1000,
     embedding_batch_size: int = 64,
     embedding_backend: str = "vllm",
-    vllm_gpu_memory_fraction: float = 0.9,
+    vllm_gpu_memory_fraction: float = 0.7,
 ) -> str:
     """Build a hierarchical index with batched processing.
 

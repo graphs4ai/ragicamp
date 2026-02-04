@@ -37,8 +37,8 @@ class ModelConfig(BaseModel):
         description="vLLM quantization: 'awq', 'gptq', 'squeezellm', or None (no quantization)",
     )
     gpu_memory_utilization: float = Field(
-        default=0.90,
-        description="Fraction of GPU memory to use (vLLM). Default 0.90 leaves 10% headroom.",
+        default=0.70,
+        description="Fraction of GPU memory to use (vLLM). Default 0.70 leaves room for other processes.",
     )
     max_model_len: Optional[int] = Field(
         default=None,

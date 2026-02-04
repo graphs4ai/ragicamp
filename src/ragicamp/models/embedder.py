@@ -60,7 +60,7 @@ class Embedder(Protocol):
 def create_embedder(
     model_name: str,
     backend: str = "vllm",
-    gpu_memory_fraction: float = 0.9,
+    gpu_memory_fraction: float = 0.7,
     enforce_eager: bool = False,
     use_flash_attn: bool = True,
     use_compile: bool = True,

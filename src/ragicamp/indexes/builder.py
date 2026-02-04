@@ -210,7 +210,7 @@ def ensure_indexes_exist(
                     "embedding_backend",
                     embedding_cfg.get("backend", "vllm"),
                 )
-                vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.9)
+                vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.7)
                 build_hierarchical_index(
                     first_retriever,
                     corpus_config,
@@ -234,7 +234,7 @@ def ensure_indexes_exist(
                     "embedding_backend",
                     embedding_cfg.get("backend", "vllm"),
                 )
-                vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.9)
+                vllm_gpu_fraction = embedding_cfg.get("vllm_gpu_memory_fraction", 0.7)
 
                 build_embedding_index(
                     index_name=index_name,

@@ -39,7 +39,7 @@ class VLLMEmbedder:
     def __init__(
         self,
         model_name: str,
-        gpu_memory_fraction: float = 0.9,
+        gpu_memory_fraction: float = 0.7,
         enforce_eager: bool = False,
         trust_remote_code: bool = True,
     ):
@@ -47,7 +47,7 @@ class VLLMEmbedder:
 
         Args:
             model_name: HuggingFace model name (must be vLLM-compatible)
-            gpu_memory_fraction: Fraction of GPU memory to use (0.9 for index building)
+            gpu_memory_fraction: Fraction of GPU memory to use (0.7 default)
             enforce_eager: Use eager mode (False = use CUDA graphs for speed)
             trust_remote_code: Trust remote code in model
         """
