@@ -94,7 +94,7 @@ class VLLMEmbedder:
     def encode(
         self,
         sentences: list[str] | str,
-        batch_size: int = 32768,
+        batch_size: int = 65536,
         show_progress_bar: bool = True,
         normalize_embeddings: bool = False,
         **kwargs,

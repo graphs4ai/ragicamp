@@ -108,7 +108,7 @@ rag:
     num_proc: 128
     # doc_batch_size: Number of documents per embedding batch.
     doc_batch_size: 5000
-    embedding_batch_size: 4096
+    embedding_batch_size: 131072  # 128k - let vLLM handle large batches
     # Embedding backend configuration (used during index building)
     embedding:
       backend: vllm
