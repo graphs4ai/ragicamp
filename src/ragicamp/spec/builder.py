@@ -66,21 +66,20 @@ def build_specs(
     # Global settings
     datasets = config.get("datasets", ["nq"])
     batch_size = config.get("batch_size", 8)
-    min_batch_size = config.get("min_batch_size", 1)
     metrics = config.get("metrics", ["f1", "exact_match"])
 
     # Build direct experiment specs (baselines - never sampled)
     # Direct LLM baselines are always included for proper comparison
     direct = config.get("direct", {})
     if direct.get("enabled"):
-        direct_specs = _build_direct_specs(direct, datasets, batch_size, min_batch_size, metrics)
+        direct_specs = _build_direct_specs(direct, datasets, batch_size, metrics)
         # Note: Direct baselines are NOT sampled - they're essential for comparison
         specs.extend(direct_specs)
 
     # Build RAG experiment specs (grid search, optionally sampled)
     rag = config.get("rag", {})
     if rag.get("enabled"):
-        rag_specs = _build_rag_specs(rag, datasets, batch_size, min_batch_size, metrics)
+        rag_specs = _build_rag_specs(rag, datasets, batch_size, metrics)
 
         # Apply sampling if configured
         sampling_config = sampling_override or rag.get("sampling")
@@ -95,7 +94,7 @@ def build_specs(
     experiments = config.get("experiments", [])
     if experiments:
         specs.extend(
-            _build_singleton_specs(experiments, config, batch_size, min_batch_size, metrics)
+            _build_singleton_specs(experiments, config, batch_size, metrics)
         )
 
     return specs
@@ -218,7 +217,6 @@ def _build_direct_specs(
     direct_config: dict[str, Any],
     datasets: list[str],
     batch_size: int,
-    min_batch_size: int,
     metrics: list[str],
 ) -> list[ExperimentSpec]:
     """Build specs for direct (non-RAG) experiments."""
@@ -239,7 +237,6 @@ def _build_direct_specs(
                         dataset=dataset,
                         prompt=prompt,
                         batch_size=batch_size,
-                        min_batch_size=min_batch_size,
                         metrics=metrics,
                     )
                 )
@@ -251,7 +248,6 @@ def _build_rag_specs(
     rag_config: dict[str, Any],
     datasets: list[str],
     batch_size: int,
-    min_batch_size: int,
     metrics: list[str],
 ) -> list[ExperimentSpec]:
     """Build specs for RAG experiments.
@@ -361,7 +357,6 @@ def _build_rag_specs(
                                         reranker=rr_name if rr_name != "none" else None,
                                         reranker_model=rr_model,
                                         batch_size=batch_size,
-                                        min_batch_size=min_batch_size,
                                         metrics=metrics,
                                     )
                                 )
@@ -373,7 +368,6 @@ def _build_singleton_specs(
     experiments: list[dict[str, Any]],
     config: dict[str, Any],
     batch_size: int,
-    min_batch_size: int,
     metrics: list[str],
 ) -> list[ExperimentSpec]:
     """Build specs from explicit singleton experiment definitions.
@@ -388,7 +382,6 @@ def _build_singleton_specs(
         experiments: List of experiment definition dicts
         config: Full study config (for defaults)
         batch_size: Default batch size
-        min_batch_size: Default min batch size
         metrics: Default metrics list
 
     Returns:
@@ -488,7 +481,6 @@ def _build_singleton_specs(
 
         # Override batch settings if specified
         exp_batch_size = exp.get("batch_size", batch_size)
-        exp_min_batch_size = exp.get("min_batch_size", min_batch_size)
         exp_metrics = exp.get("metrics", metrics)
 
         # Create one spec per dataset
@@ -515,7 +507,6 @@ def _build_singleton_specs(
                     reranker=reranker,
                     reranker_model=reranker_model,
                     batch_size=exp_batch_size,
-                    min_batch_size=exp_min_batch_size,
                     metrics=exp_metrics,
                     agent_type=agent_type,
                     hypothesis=hypothesis,

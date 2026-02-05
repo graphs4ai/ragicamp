@@ -150,7 +150,6 @@ class Experiment:
     _state: Optional[ExperimentState] = field(default=None, repr=False)
     _callbacks: Optional[ExperimentCallbacks] = field(default=None, repr=False)
     _batch_size: int = field(default=8, repr=False)
-    _min_batch_size: int = field(default=1, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
 
@@ -194,7 +193,6 @@ class Experiment:
     def run(
         self,
         batch_size: int = 8,
-        min_batch_size: int = 1,
         checkpoint_every: int = 50,
         resume: bool = True,
         callbacks: Optional[ExperimentCallbacks] = None,
@@ -205,7 +203,6 @@ class Experiment:
 
         Args:
             batch_size: Number of examples to process in parallel
-            min_batch_size: Minimum batch size to reduce to on CUDA errors
             checkpoint_every: Save checkpoint every N examples
             resume: Resume from checkpoint if available
             callbacks: Optional callbacks for progress monitoring
@@ -217,7 +214,6 @@ class Experiment:
         """
         self._callbacks = callbacks or ExperimentCallbacks()
         self._batch_size = batch_size
-        self._min_batch_size = min_batch_size
         self._checkpoint_every = checkpoint_every
         self._start_time = time.time()
         self._kwargs = kwargs
@@ -311,7 +307,6 @@ class Experiment:
             metrics=self.metrics,
             callbacks=self._callbacks,
             batch_size=self._batch_size,
-            min_batch_size=self._min_batch_size,
             checkpoint_every=self._checkpoint_every,
             kwargs=getattr(self, "_kwargs", {}),
         )

@@ -151,7 +151,6 @@ output_dir: outputs/comprehensive_baseline
 # Execution options
 # ============================================================================
 batch_size: 32
-min_batch_size: 1
 
 options:
   save_intermediate: true

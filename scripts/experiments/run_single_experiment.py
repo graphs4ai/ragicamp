@@ -103,7 +103,6 @@ def main():
         reranker=spec_dict.get("reranker"),
         reranker_model=spec_dict.get("reranker_model"),
         batch_size=spec_dict.get("batch_size", 8),
-        min_batch_size=spec_dict.get("min_batch_size", 1),
         metrics=spec_metrics,
         agent_type=spec_dict.get("agent_type"),
         agent_params=agent_params_tuple,

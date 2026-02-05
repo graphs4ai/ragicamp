@@ -205,7 +205,6 @@ def run_generation(
     # Run the experiment
     result = exp.run(
         batch_size=spec.batch_size,
-        min_batch_size=spec.min_batch_size,
         checkpoint_every=50,
         resume=True,
     )
@@ -320,72 +319,55 @@ def run_spec_subprocess(
         / "run_single_experiment.py"
     )
 
-    current_batch_size = spec.batch_size
-    min_batch_size = spec.min_batch_size
-    attempt = 0
-    max_retries = 5
+    spec_dict = {
+        "name": spec.name,
+        "exp_type": spec.exp_type,
+        "model": spec.model,
+        "dataset": spec.dataset,
+        "prompt": spec.prompt,
+        "retriever": spec.retriever,
+        "top_k": spec.top_k,
+        "fetch_k": spec.fetch_k,
+        "query_transform": spec.query_transform,
+        "reranker": spec.reranker,
+        "reranker_model": spec.reranker_model,
+        "batch_size": spec.batch_size,
+        "metrics": list(spec.metrics) if spec.metrics else metrics,
+        "agent_type": spec.agent_type,
+        "agent_params": dict(spec.agent_params) if spec.agent_params else {},
+    }
 
-    while current_batch_size >= min_batch_size:
-        attempt += 1
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "--spec-json",
+        json.dumps(spec_dict),
+        "--output-dir",
+        str(out),
+        "--metrics",
+        ",".join(metrics),
+    ]
+    if limit:
+        cmd.extend(["--limit", str(limit)])
+    if llm_judge_config:
+        cmd.extend(["--llm-judge-config", json.dumps(llm_judge_config)])
 
-        spec_dict = {
-            "name": spec.name,
-            "exp_type": spec.exp_type,
-            "model": spec.model,
-            "dataset": spec.dataset,
-            "prompt": spec.prompt,
-            "retriever": spec.retriever,
-            "top_k": spec.top_k,
-            "fetch_k": spec.fetch_k,
-            "query_transform": spec.query_transform,
-            "reranker": spec.reranker,
-            "reranker_model": spec.reranker_model,
-            "batch_size": current_batch_size,
-            "min_batch_size": min_batch_size,
-            "metrics": list(spec.metrics) if spec.metrics else metrics,
-            "agent_type": spec.agent_type,
-            "agent_params": dict(spec.agent_params) if spec.agent_params else {},
-        }
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=False,
+            timeout=timeout,
+            check=False,
+        )
 
-        cmd = [
-            sys.executable,
-            str(script_path),
-            "--spec-json",
-            json.dumps(spec_dict),
-            "--output-dir",
-            str(out),
-            "--metrics",
-            ",".join(metrics),
-        ]
-        if limit:
-            cmd.extend(["--limit", str(limit)])
-        if llm_judge_config:
-            cmd.extend(["--llm-judge-config", json.dumps(llm_judge_config)])
+        if result.returncode == 0:
+            return "ran"
+        else:
+            return "failed"
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=False,
-                timeout=timeout,
-                check=False,
-            )
-
-            if result.returncode == 0:
-                return "ran"
-            else:
-                current_batch_size = max(current_batch_size // 2, min_batch_size)
-                if current_batch_size < min_batch_size:
-                    break
-                print(f"  Retrying with batch_size={current_batch_size}")
-
-        except subprocess.TimeoutExpired:
-            print(f"  ⏱ Timeout after {timeout}s")
-            return "timeout"
-
-        if attempt >= max_retries:
-            break
-
-    return "failed"
+    except subprocess.TimeoutExpired:
+        print(f"  ⏱ Timeout after {timeout}s")
+        return "timeout"
 
 
 def run_spec(

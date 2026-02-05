@@ -9,7 +9,7 @@ This module provides:
 Example:
     from ragicamp.execution import ResilientExecutor, ExperimentSpec, build_specs
 
-    executor = ResilientExecutor(agent, batch_size=32, min_batch_size=1)
+    executor = ResilientExecutor(agent, batch_size=32)
     results = executor.execute(queries)
 """
 

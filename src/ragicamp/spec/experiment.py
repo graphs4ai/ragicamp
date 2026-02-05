@@ -31,7 +31,6 @@ class ExperimentSpec:
         reranker: Reranker type (e.g., 'bge', 'ms-marco')
         reranker_model: Full reranker model name
         batch_size: Batch size for generation
-        min_batch_size: Minimum batch size to reduce to on OOM
         metrics: List of metric names to compute
         agent_type: Explicit agent type (e.g., 'vanilla_rag', 'pipeline_rag', 'iterative_rag')
         hypothesis: Documentation of what this experiment tests (for singleton experiments)
@@ -52,7 +51,6 @@ class ExperimentSpec:
     reranker: Optional[str] = None
     reranker_model: Optional[str] = None
     batch_size: int = 8
-    min_batch_size: int = 1
     metrics: list[str] = field(default_factory=list)
     # Singleton experiment fields
     agent_type: Optional[str] = None
@@ -81,7 +79,6 @@ class ExperimentSpec:
             "reranker": self.reranker,
             "reranker_model": self.reranker_model,
             "batch_size": self.batch_size,
-            "min_batch_size": self.min_batch_size,
             "metrics": list(self.metrics),
         }
         # Only include optional singleton fields if set
@@ -115,7 +112,6 @@ class ExperimentSpec:
             reranker=data.get("reranker"),
             reranker_model=data.get("reranker_model"),
             batch_size=data.get("batch_size", 8),
-            min_batch_size=data.get("min_batch_size", 1),
             metrics=data.get("metrics", []),
             agent_type=data.get("agent_type"),
             hypothesis=data.get("hypothesis"),

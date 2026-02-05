@@ -301,9 +301,29 @@ Answer:"""
                 )
             )
 
+        # concise_strict: More aggressive anti-hallucination version
+        if prompt_type == "concise_strict":
+            return cls(
+                PromptConfig(
+                    style="Give ONLY the answer - a single word, name, date, or short phrase.",
+                    stop_instruction="STOP immediately after answering. Do NOT add explanations or follow-up questions.",
+                    knowledge_instruction="Find the answer in the passages.",
+                )
+            )
+
+        # concise_json: Request JSON format for easier parsing
+        if prompt_type == "concise_json":
+            return cls(
+                PromptConfig(
+                    style='Reply with JSON: {"answer": "your answer here"}',
+                    knowledge_instruction="The answer can be found in the passages.",
+                )
+            )
+
         # =================================================================
-        # Advanced prompts (new)
+        # Advanced prompts
         # =================================================================
+        # Note: structured kept for backwards compatibility but not recommended
         if prompt_type == "structured":
             return cls(
                 PromptConfig(
@@ -321,11 +341,30 @@ Answer:"""
                 )
             )
 
+        # extractive_quoted: Forces model to quote from passages
+        if prompt_type == "extractive_quoted":
+            return cls(
+                PromptConfig(
+                    strict_extraction=True,
+                    style="Copy the exact answer as it appears in the passages. Use quotation marks.",
+                    knowledge_instruction="The answer MUST appear verbatim in the passages. Quote it exactly.",
+                )
+            )
+
         if prompt_type == "cot":
             return cls(
                 PromptConfig(
                     include_reasoning=True,
                     style="Show your reasoning, then give a final answer.",
+                )
+            )
+
+        # cot_final: Chain-of-thought with clear final answer marker
+        if prompt_type == "cot_final":
+            return cls(
+                PromptConfig(
+                    include_reasoning=True,
+                    style="Think step by step, then end with 'FINAL ANSWER: <your answer>'",
                 )
             )
 

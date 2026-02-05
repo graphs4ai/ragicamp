@@ -370,7 +370,6 @@ class ExperimentSpec:
         retriever: Retriever name (RAG only)
         top_k: Number of docs to retrieve (RAG only)
         batch_size: Batch size for generation
-        min_batch_size: Minimum batch size (for auto-reduction)
     """
 
     name: str
@@ -382,7 +381,6 @@ class ExperimentSpec:
     retriever: Optional[str] = None
     top_k: int = 5
     batch_size: int = 32
-    min_batch_size: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
@@ -396,5 +394,4 @@ class ExperimentSpec:
             "retriever": self.retriever,
             "top_k": self.top_k,
             "batch_size": self.batch_size,
-            "min_batch_size": self.min_batch_size,
         }

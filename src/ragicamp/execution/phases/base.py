@@ -33,7 +33,6 @@ class ExecutionContext:
 
     # Runtime configuration
     batch_size: int = 8
-    min_batch_size: int = 1
     checkpoint_every: int = 50
     kwargs: dict[str, Any] = field(default_factory=dict)
 
