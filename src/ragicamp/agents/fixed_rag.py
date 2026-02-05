@@ -18,7 +18,7 @@ from typing import Callable, Union
 import numpy as np
 from tqdm import tqdm
 
-from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
+from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Searcher, SearchResult
 from ragicamp.indexes.vector_index import VectorIndex
@@ -225,15 +225,28 @@ class FixedRAGAgent(Agent):
                 )
             )
 
+            # Build structured retrieved docs info
+            retrieved_docs = [
+                RetrievedDocInfo(
+                    rank=i + 1,
+                    doc_id=sr.document.id if sr.document else None,
+                    content=sr.document.text if sr.document else None,
+                    score=sr.score,
+                    retrieval_score=sr.score,  # No reranking in fixed RAG
+                    retrieval_rank=i + 1,
+                )
+                for i, sr in enumerate(search_results)
+            ]
+
             result = AgentResult(
                 query=query,
                 answer=answer,
                 steps=query_steps,
                 prompt=prompt,
+                retrieved_docs=retrieved_docs,
                 metadata={
                     "num_docs": len(search_results),
                     "top_k": self.top_k,
-                    "doc_scores": [r.score for r in search_results],
                 },
             )
             results.append(result)

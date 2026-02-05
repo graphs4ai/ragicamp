@@ -100,24 +100,18 @@ class GenerationHandler(PhaseHandler):
         return state
 
     def _result_to_prediction(self, result: AgentResult) -> dict[str, Any]:
-        """Convert AgentResult to prediction format."""
-        return {
-            "idx": result.query.idx,
-            "question": result.query.text,
-            "prediction": result.answer,
-            "expected": result.query.expected,
-            "prompt": result.prompt,
-            "steps": [
-                {
-                    "type": s.type,
-                    "timing_ms": s.timing_ms,
-                    "model": s.model,
-                }
-                for s in result.steps
-            ],
-            "metadata": result.metadata,
-            "metrics": {},  # Filled in metrics phase
-        }
+        """Convert AgentResult to prediction format.
+        
+        Uses AgentResult.to_dict() which properly serializes:
+        - Steps with timing info
+        - Retrieved docs with scores and content
+        - Metadata
+        """
+        d = result.to_dict(include_content=True, max_content_len=500)
+        # Rename fields to match PredictionRecord format
+        d["prediction"] = d.pop("answer")
+        d["metrics"] = {}  # Filled in metrics phase
+        return d
 
     def _save_predictions(self, data: dict[str, Any], path: Path) -> None:
         """Save predictions atomically."""

@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from tqdm import tqdm
 
-from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
+from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
 from ragicamp.indexes.vector_index import VectorIndex
@@ -179,6 +179,7 @@ class SelfRAGAgent(Agent):
                     "retrieve" if used_retrieval else "direct")
 
         retrieved_docs: list[Document] = []
+        retrieved_docs_info: list[RetrievedDocInfo] = []  # For logging
         context_text = ""
         verification_result = None
 
@@ -194,6 +195,18 @@ class SelfRAGAgent(Agent):
             with StepTimer("search") as step:
                 search_results = self.index.batch_search(query_embedding, top_k=self.top_k)[0]
                 retrieved_docs = [r.document for r in search_results]
+                # Build structured doc info for logging
+                retrieved_docs_info = [
+                    RetrievedDocInfo(
+                        rank=i + 1,
+                        doc_id=r.document.id if r.document else None,
+                        content=r.document.text if r.document else None,
+                        score=r.score,
+                        retrieval_score=r.score,
+                        retrieval_rank=i + 1,
+                    )
+                    for i, r in enumerate(search_results)
+                ]
                 step.input = {"top_k": self.top_k}
                 step.output = {"n_docs": len(retrieved_docs)}
             steps.append(step)
@@ -229,6 +242,7 @@ class SelfRAGAgent(Agent):
                             step.output = answer
                         steps.append(step)
                         retrieved_docs = []
+                        retrieved_docs_info = []  # Clear on fallback
                         context_text = ""
         else:
             # Step 2b: Generate directly without retrieval
@@ -246,6 +260,7 @@ class SelfRAGAgent(Agent):
             answer=answer,
             steps=steps,
             prompt=prompt,
+            retrieved_docs=retrieved_docs_info if retrieved_docs_info else None,
             metadata={
                 "used_retrieval": used_retrieval,
                 "confidence": confidence,

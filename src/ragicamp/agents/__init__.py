@@ -13,6 +13,7 @@ from ragicamp.agents.base import (
     Agent,
     AgentResult,
     Query,
+    RetrievedDocInfo,
     Step,
     StepTimer,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "Agent",
     "AgentResult",
     "Query",
+    "RetrievedDocInfo",
     "Step",
     "StepTimer",
     # Agents

@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from tqdm import tqdm
 
-from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
+from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
 from ragicamp.indexes.vector_index import VectorIndex
@@ -230,11 +230,23 @@ class IterativeRAGAgent(Agent):
                 step.output = answer
             steps.append(step)
 
+        # Build structured retrieved docs info for final docs used
+        retrieved_docs = [
+            RetrievedDocInfo(
+                rank=i + 1,
+                doc_id=doc.id if hasattr(doc, 'id') else None,
+                content=doc.text if hasattr(doc, 'text') else str(doc),
+                score=None,  # Iterative RAG accumulates docs, no single score
+            )
+            for i, doc in enumerate(final_docs)
+        ]
+
         return AgentResult(
             query=query,
             answer=answer,
             steps=steps,
             prompt=prompt,
+            retrieved_docs=retrieved_docs,
             metadata={
                 "iterations": iterations_info,
                 "total_docs": len(all_docs),

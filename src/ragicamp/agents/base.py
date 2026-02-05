@@ -74,22 +74,67 @@ class StepTimer:
 
 
 @dataclass
+class RetrievedDocInfo:
+    """Retrieved document info for logging.
+    
+    Captures all stages of retrieval pipeline for analysis.
+    """
+    rank: int  # Final rank (1-indexed)
+    doc_id: str | None = None
+    content: str | None = None  # Can be truncated for disk space
+    score: float | None = None  # Final score
+    retrieval_score: float | None = None  # Before reranking
+    retrieval_rank: int | None = None  # Before reranking
+    rerank_score: float | None = None  # Cross-encoder score
+    
+    def to_dict(self) -> dict[str, Any]:
+        d = {"rank": self.rank}
+        if self.doc_id is not None:
+            d["doc_id"] = self.doc_id
+        if self.content is not None:
+            d["content"] = self.content
+        if self.score is not None:
+            d["score"] = self.score
+        if self.retrieval_score is not None:
+            d["retrieval_score"] = self.retrieval_score
+        if self.retrieval_rank is not None:
+            d["retrieval_rank"] = self.retrieval_rank
+        if self.rerank_score is not None:
+            d["rerank_score"] = self.rerank_score
+        return d
+
+
+@dataclass
 class AgentResult:
     """Result from processing a single query.
     
     Contains the answer and all intermediate steps for analysis.
+    
+    Attributes:
+        query: The input query
+        answer: Generated answer
+        steps: Pipeline steps with timing
+        prompt: Full prompt sent to LLM
+        retrieved_docs: Structured retrieved doc info (RAG only)
+        metadata: Additional metadata (flexible)
     """
     query: Query
     answer: str
     steps: list[Step] = field(default_factory=list)
-    prompt: str | None = None  # Full prompt sent to LLM
+    prompt: str | None = None
+    retrieved_docs: list[RetrievedDocInfo] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for checkpointing/storage."""
-        return {
+    def to_dict(self, include_content: bool = True, max_content_len: int = 500) -> dict[str, Any]:
+        """Serialize for checkpointing/storage.
+        
+        Args:
+            include_content: Whether to include document content (disk space tradeoff)
+            max_content_len: Max chars per doc content (0 = full)
+        """
+        d = {
             "idx": self.query.idx,
-            "query": self.query.text,
+            "question": self.query.text,
             "answer": self.answer,
             "expected": self.query.expected,
             "prompt": self.prompt,
@@ -98,12 +143,28 @@ class AgentResult:
                     "type": s.type,
                     "timing_ms": s.timing_ms,
                     "model": s.model,
-                    "metadata": s.metadata,
+                    **({"metadata": s.metadata} if s.metadata else {}),
                 }
                 for s in self.steps
             ],
             "metadata": self.metadata,
         }
+        
+        # Add retrieved docs if present
+        if self.retrieved_docs:
+            docs_list = []
+            for doc in self.retrieved_docs:
+                doc_dict = doc.to_dict()
+                # Optionally truncate content
+                if "content" in doc_dict and include_content:
+                    if max_content_len > 0 and len(doc_dict["content"]) > max_content_len:
+                        doc_dict["content"] = doc_dict["content"][:max_content_len] + "..."
+                elif not include_content:
+                    doc_dict.pop("content", None)
+                docs_list.append(doc_dict)
+            d["retrieved_docs"] = docs_list
+        
+        return d
 
 
 # =============================================================================
