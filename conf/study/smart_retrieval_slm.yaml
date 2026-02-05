@@ -69,7 +69,7 @@ models: &slm_models
   # ---------------------------------------------------------------------------
   # TINY MODELS (1-2B) - Lower bound test
   # ---------------------------------------------------------------------------
-  - vllm:HuggingFaceTB/SmolLM2-1.7B-Instruct  # Very small, surprisingly capable
+  - vllm:Qwen/Qwen2.5-1.5B-Instruct           # Excellent 1.5B, works with raw prompts
   - vllm:google/gemma-2-2b-it                  # Gemma 2 architecture, 2B
 
   # ---------------------------------------------------------------------------
@@ -443,9 +443,9 @@ experiments:
   # Key comparison: Does premium retrieval help tiny models more than medium?
   
   # --- TINY MODELS (1-2B) with premium retrieval ---
-  - name: premium_smollm2
-    hypothesis: "SmolLM2-1.7B + premium stack - can retrieval save tiny models?"
-    model: vllm:HuggingFaceTB/SmolLM2-1.7B-Instruct
+  - name: premium_qwen1.5b
+    hypothesis: "Qwen2.5-1.5B + premium stack - can retrieval save tiny models?"
+    model: vllm:Qwen/Qwen2.5-1.5B-Instruct
     retriever: hybrid_bge_large_bm25_07
     query_transform: hyde
     top_k: 5
