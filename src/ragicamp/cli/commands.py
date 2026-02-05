@@ -364,7 +364,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
 
 def cmd_backup(args: argparse.Namespace) -> int:
     """Backup artifacts and outputs to Backblaze B2."""
-    from ragicamp.cli.backup import backup
+    from ragicamp.cli.backup import backup, list_backups
 
     # Determine directories to backup
     if args.path:
@@ -381,7 +381,21 @@ def cmd_backup(args: argparse.Namespace) -> int:
             print("Specify a path explicitly: ragicamp backup <path>")
             return 1
 
-    prefix = args.prefix or f"ragicamp-backup/{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    # Determine prefix
+    if getattr(args, "latest", False):
+        # Use the most recent backup as target
+        backups = list_backups(args.bucket, limit=1)
+        if not backups:
+            print("Error: No existing backups found. Cannot use --latest.")
+            print("Run a full backup first without --latest flag.")
+            return 1
+        latest_backup = backups[0]
+        print(f"Using latest backup: {latest_backup}")
+        prefix = f"ragicamp-backup/{latest_backup}"
+    elif args.prefix:
+        prefix = args.prefix
+    else:
+        prefix = f"ragicamp-backup/{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     return backup(
         dirs_to_backup=dirs_to_backup,

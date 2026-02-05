@@ -232,6 +232,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only upload new/modified files (compare by size)",
     )
+    backup_parser.add_argument(
+        "--latest",
+        "-l",
+        action="store_true",
+        help="Use the most recent backup as target prefix (for sync)",
+    )
     backup_parser.set_defaults(func=cmd_backup)
 
     # Download command
