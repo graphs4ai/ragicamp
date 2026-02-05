@@ -1,0 +1,745 @@
+"""
+Shared utilities for Smart Retrieval SLM Analysis notebooks.
+
+This module provides common functions for loading experiment data,
+computing statistics, and generating visualizations.
+"""
+
+import json
+import re
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple
+from collections import defaultdict
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats as scipy_stats
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Default paths
+DEFAULT_STUDY_PATH = Path("../outputs/smart_retrieval_slm")
+
+# Metrics to analyze
+METRICS = ['f1', 'exact_match', 'bertscore', 'bleurt', 'llm_judge']
+PRIMARY_METRIC = 'f1'
+
+# Model name mappings
+MODEL_MAP = {
+    'llama': 'Llama-3.2-3B',
+    'Llama3.23BInstruct': 'Llama-3.2-3B',
+    'phi': 'Phi-3-mini',
+    'Phi3mini4kinstruct': 'Phi-3-mini',
+    'qwen': 'Qwen-2.5-3B',
+    'Qwen2.53BInstruct': 'Qwen-2.5-3B',
+}
+
+# Retriever type detection
+RETRIEVER_TYPES = {
+    'dense': ['dense_bge', 'dense_gte', 'dense_e5', 'en_bge', 'en_gte', 'en_e5'],
+    'hybrid': ['hybrid_'],
+    'hierarchical': ['hier_', 'hierarchical_'],
+}
+
+# Embedding model detection
+EMBEDDING_MAP = {
+    'bge_large': 'BGE-large',
+    'bge_m3': 'BGE-M3',
+    'gte_qwen2': 'GTE-Qwen2-1.5B',
+    'e5_mistral': 'E5-Mistral-7B',
+}
+
+
+# =============================================================================
+# STYLING
+# =============================================================================
+
+def setup_plotting():
+    """Configure matplotlib and seaborn for consistent styling."""
+    plt.style.use('seaborn-v0_8-whitegrid')
+    sns.set_palette("husl")
+    plt.rcParams['figure.figsize'] = (12, 6)
+    plt.rcParams['font.size'] = 11
+
+
+# =============================================================================
+# DATA LOADING
+# =============================================================================
+
+def parse_experiment_name(name: str) -> Dict[str, Any]:
+    """
+    Parse experiment name into structured components.
+    
+    Handles formats:
+    - direct_vllm_metallamaLlama3.23BInstruct_concise_nq
+    - rag_vllm_metallamaLlama3.23BInstruct_dense_bge_large_512_k5_hyde_bge_concise_nq
+    - Singleton experiments (iterative_*, selfrag_*, premium_*)
+    """
+    config = {
+        'name': name,
+        'exp_type': 'unknown',
+        'model': 'unknown',
+        'model_short': 'unknown',
+        'dataset': 'unknown',
+        'prompt': 'unknown',
+        'retriever': None,
+        'retriever_type': None,
+        'embedding_model': None,
+        'top_k': None,
+        'query_transform': 'none',
+        'reranker': 'none',
+        'is_singleton': False,
+    }
+    
+    # Detect dataset (at end of name)
+    for ds in ['nq', 'triviaqa', 'hotpotqa']:
+        if name.endswith(f'_{ds}'):
+            config['dataset'] = ds
+            break
+    
+    # Fallback: look for dataset anywhere in the name
+    if config['dataset'] == 'unknown':
+        for ds in ['triviaqa', 'hotpotqa', 'nq']:
+            if f'_{ds}_' in name or f'_{ds}' in name:
+                config['dataset'] = ds
+                break
+    
+    # Handle singleton experiments
+    if name.startswith('iterative_') or name.startswith('selfrag_') or name.startswith('premium_'):
+        config['is_singleton'] = True
+        config['exp_type'] = 'rag'
+        if 'llama' in name.lower():
+            config['model_short'] = 'Llama-3.2-3B'
+        elif 'phi' in name.lower():
+            config['model_short'] = 'Phi-3-mini'
+        elif 'qwen' in name.lower():
+            config['model_short'] = 'Qwen-2.5-3B'
+        
+        if name.startswith('iterative_'):
+            config['retriever_type'] = 'iterative'
+            iter_match = re.search(r'(\d+)iter', name)
+            config['query_transform'] = f"iterative_{iter_match.group(1)}" if iter_match else 'iterative'
+        elif name.startswith('selfrag_'):
+            config['retriever_type'] = 'self_rag'
+            config['query_transform'] = 'self_rag'
+        elif name.startswith('premium_'):
+            config['retriever_type'] = 'hybrid'
+            config['query_transform'] = 'hyde'
+            config['reranker'] = 'bge-v2'
+        return config
+    
+    # Direct experiments
+    if name.startswith('direct_'):
+        config['exp_type'] = 'direct'
+        for key, display in MODEL_MAP.items():
+            if key.lower() in name.lower():
+                config['model_short'] = display
+                break
+        for prompt in ['concise', 'structured', 'cot', 'fewshot_3', 'fewshot', 'extractive', 'cited']:
+            if f'_{prompt}_' in name or name.endswith(f'_{prompt}_{config["dataset"]}'):
+                config['prompt'] = prompt
+                break
+        return config
+    
+    # RAG experiments
+    if name.startswith('rag_'):
+        config['exp_type'] = 'rag'
+        
+        for key, display in MODEL_MAP.items():
+            if key.lower() in name.lower():
+                config['model_short'] = display
+                break
+        
+        k_match = re.search(r'_k(\d+)_', name)
+        if k_match:
+            config['top_k'] = int(k_match.group(1))
+        
+        for rtype, patterns in RETRIEVER_TYPES.items():
+            for pattern in patterns:
+                if pattern in name.lower():
+                    config['retriever_type'] = rtype
+                    break
+        
+        for key, display in EMBEDDING_MAP.items():
+            if key in name.lower():
+                config['embedding_model'] = display
+                break
+        
+        if '_hyde_' in name.lower():
+            config['query_transform'] = 'hyde'
+        elif '_multiquery_' in name.lower():
+            config['query_transform'] = 'multiquery'
+        
+        if '_bgev2_' in name.lower() or '_bge-v2_' in name.lower():
+            config['reranker'] = 'bge-v2'
+        elif '_bge_' in name.lower() and config['embedding_model'] is None:
+            config['reranker'] = 'bge'
+        
+        for prompt in ['concise', 'structured', 'cot', 'fewshot_3', 'fewshot', 'extractive', 'cited']:
+            if f'_{prompt}_' in name:
+                config['prompt'] = prompt
+                break
+        
+        if k_match:
+            retriever_match = re.search(r'Instruct_(.+?)_k\d+', name)
+            if retriever_match:
+                config['retriever'] = retriever_match.group(1)
+    
+    return config
+
+
+def load_all_results(study_path: Path = None) -> pd.DataFrame:
+    """Load all experiment results into a DataFrame."""
+    if study_path is None:
+        study_path = DEFAULT_STUDY_PATH
+    
+    results = []
+    loading_errors = []
+    
+    if not study_path.exists():
+        print(f"Warning: Study path does not exist: {study_path}")
+        return pd.DataFrame()
+    
+    for exp_dir in study_path.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        
+        results_file = exp_dir / "results.json"
+        metadata_file = exp_dir / "metadata.json"
+        
+        data = None
+        if results_file.exists():
+            with open(results_file) as f:
+                data = json.load(f)
+        elif metadata_file.exists():
+            with open(metadata_file) as f:
+                data = json.load(f)
+            summary_files = list(exp_dir.glob("*_summary.json"))
+            if summary_files:
+                with open(summary_files[0]) as f:
+                    summary = json.load(f)
+                data['metrics'] = summary.get('overall_metrics', summary)
+        
+        if data is None:
+            continue
+        
+        try:
+            exp_name = data.get('name', exp_dir.name)
+            config = parse_experiment_name(exp_name)
+            
+            row = config.copy()
+            metrics = data.get('metrics', data)
+            
+            if isinstance(metrics, list):
+                metrics = data.get('overall_metrics', {})
+            
+            if not isinstance(metrics, dict):
+                metrics = {}
+            
+            for metric in METRICS:
+                if metric in metrics:
+                    row[metric] = metrics[metric]
+                elif metric in data:
+                    row[metric] = data[metric]
+            
+            row['n_samples'] = data.get('n_samples', data.get('num_questions', None))
+            row['duration'] = data.get('duration', 0)
+            row['throughput'] = data.get('throughput_qps', 0)
+            
+            results.append(row)
+        except Exception as e:
+            loading_errors.append((exp_dir.name, str(e)))
+    
+    if loading_errors:
+        print(f"⚠️ Failed to load {len(loading_errors)} experiments")
+    
+    df = pd.DataFrame(results)
+    if not df.empty:
+        df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
+    
+    return df
+
+
+# =============================================================================
+# STATISTICAL FUNCTIONS
+# =============================================================================
+
+def weighted_mean_with_ci(
+    df: pd.DataFrame, 
+    group_col: str, 
+    metric: str = PRIMARY_METRIC,
+    weight_by: str = None,
+    confidence: float = 0.95,
+    n_bootstrap: int = 1000,
+) -> pd.DataFrame:
+    """
+    Compute weighted mean with bootstrap confidence intervals.
+    """
+    if metric not in df.columns:
+        return pd.DataFrame()
+    
+    results = []
+    
+    for group_val, group_df in df.groupby(group_col):
+        values = group_df[metric].dropna().values
+        if len(values) == 0:
+            continue
+        
+        if weight_by and weight_by in group_df.columns:
+            weight_counts = group_df[weight_by].value_counts()
+            weights = group_df[weight_by].map(lambda x: 1.0 / weight_counts.get(x, 1))
+            weights = weights / weights.sum()
+            weighted_mean = (group_df[metric] * weights).sum()
+        else:
+            weighted_mean = np.mean(values)
+        
+        if len(values) >= 3:
+            bootstrap_means = []
+            for _ in range(n_bootstrap):
+                sample = np.random.choice(values, size=len(values), replace=True)
+                bootstrap_means.append(np.mean(sample))
+            alpha = (1 - confidence) / 2
+            ci_low = np.percentile(bootstrap_means, alpha * 100)
+            ci_high = np.percentile(bootstrap_means, (1 - alpha) * 100)
+        else:
+            ci_low = ci_high = weighted_mean
+        
+        results.append({
+            group_col: group_val,
+            'mean': weighted_mean,
+            'std': np.std(values) if len(values) > 1 else 0,
+            'ci_low': ci_low,
+            'ci_high': ci_high,
+            'n': len(values),
+            'min': np.min(values),
+            'max': np.max(values),
+        })
+    
+    return pd.DataFrame(results).sort_values('mean', ascending=False).reset_index(drop=True)
+
+
+def effect_size(baseline_values: np.ndarray, treatment_values: np.ndarray) -> Tuple[float, float, str]:
+    """
+    Compute Cohen's d effect size and interpret it.
+    
+    Returns: (effect_size, p_value, interpretation)
+    """
+    if len(baseline_values) < 2 or len(treatment_values) < 2:
+        return 0, 1, 'insufficient data'
+    
+    pooled_std = np.sqrt((
+        (len(baseline_values) - 1) * np.var(baseline_values, ddof=1) + 
+        (len(treatment_values) - 1) * np.var(treatment_values, ddof=1)
+    ) / (len(baseline_values) + len(treatment_values) - 2))
+    
+    if pooled_std == 0:
+        return 0, 1, 'no variance'
+    
+    d = (np.mean(treatment_values) - np.mean(baseline_values)) / pooled_std
+    t_stat, p_value = scipy_stats.ttest_ind(treatment_values, baseline_values)
+    
+    if abs(d) < 0.2:
+        interpretation = 'negligible'
+    elif abs(d) < 0.5:
+        interpretation = 'small'
+    elif abs(d) < 0.8:
+        interpretation = 'medium'
+    else:
+        interpretation = 'large'
+    
+    return d, p_value, interpretation
+
+
+def compute_marginal_means(
+    df: pd.DataFrame,
+    factor: str,
+    metric: str = PRIMARY_METRIC,
+    control_vars: List[str] = ['model_short', 'dataset'],
+) -> pd.DataFrame:
+    """
+    Compute marginal means for a factor, controlling for confounding variables.
+    """
+    if metric not in df.columns or factor not in df.columns:
+        return pd.DataFrame()
+    
+    needed_cols = [factor, metric] + [c for c in control_vars if c in df.columns]
+    work_df = df[needed_cols].dropna()
+    
+    if len(work_df) < 5:
+        return pd.DataFrame()
+    
+    strata_cols = [c for c in control_vars if c in work_df.columns]
+    if strata_cols:
+        work_df['_stratum'] = work_df[strata_cols].apply(lambda x: '_'.join(x.astype(str)), axis=1)
+    else:
+        work_df['_stratum'] = 'all'
+    
+    results = []
+    factor_levels = work_df[factor].dropna().unique()
+    
+    for level in factor_levels:
+        level_df = work_df[work_df[factor] == level]
+        stratum_means = level_df.groupby('_stratum')[metric].mean()
+        
+        if len(stratum_means) == 0:
+            continue
+        
+        marginal_mean = stratum_means.mean()
+        
+        all_values = level_df[metric].values
+        if len(all_values) >= 3:
+            bootstrap_means = []
+            for _ in range(500):
+                sample = np.random.choice(all_values, size=len(all_values), replace=True)
+                bootstrap_means.append(np.mean(sample))
+            ci_low = np.percentile(bootstrap_means, 2.5)
+            ci_high = np.percentile(bootstrap_means, 97.5)
+        else:
+            ci_low = ci_high = marginal_mean
+        
+        results.append({
+            factor: level,
+            'marginal_mean': marginal_mean,
+            'raw_mean': level_df[metric].mean(),
+            'ci_low': ci_low,
+            'ci_high': ci_high,
+            'n_experiments': len(level_df),
+            'n_strata': len(stratum_means),
+        })
+    
+    result_df = pd.DataFrame(results)
+    if not result_df.empty:
+        result_df = result_df.sort_values('marginal_mean', ascending=False).reset_index(drop=True)
+    return result_df
+
+
+# =============================================================================
+# RAG BENEFIT ANALYSIS
+# =============================================================================
+
+def analyze_rag_benefit_distribution(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict:
+    """
+    Analyze the distribution of RAG benefit across configurations.
+    """
+    rag_df = df[df['exp_type'] == 'rag'].copy()
+    direct_df = df[df['exp_type'] == 'direct'].copy()
+    
+    if len(rag_df) == 0 or len(direct_df) == 0:
+        return {}
+    
+    group_cols = []
+    if 'model_short' in direct_df.columns:
+        group_cols.append('model_short')
+    if 'dataset' in direct_df.columns:
+        group_cols.append('dataset')
+    
+    if not group_cols:
+        direct_baseline = direct_df[metric].mean()
+        rag_df['direct_baseline'] = direct_baseline
+    else:
+        direct_baselines = direct_df.groupby(group_cols)[metric].mean().reset_index()
+        direct_baselines.columns = group_cols + ['direct_baseline']
+        rag_df = rag_df.merge(direct_baselines, on=group_cols, how='left')
+    
+    rag_df['rag_benefit'] = rag_df[metric] - rag_df['direct_baseline']
+    rag_df['rag_benefit_pct'] = (rag_df['rag_benefit'] / rag_df['direct_baseline'] * 100).replace([np.inf, -np.inf], np.nan)
+    
+    rag_df['rag_helps'] = rag_df['rag_benefit'] > 0.01
+    rag_df['rag_hurts'] = rag_df['rag_benefit'] < -0.01
+    rag_df['rag_neutral'] = ~rag_df['rag_helps'] & ~rag_df['rag_hurts']
+    
+    return {
+        'rag_df': rag_df,
+        'n_helps': rag_df['rag_helps'].sum(),
+        'n_hurts': rag_df['rag_hurts'].sum(),
+        'n_neutral': rag_df['rag_neutral'].sum(),
+        'pct_helps': rag_df['rag_helps'].mean() * 100,
+        'pct_hurts': rag_df['rag_hurts'].mean() * 100,
+        'mean_benefit_when_helps': rag_df.loc[rag_df['rag_helps'], 'rag_benefit'].mean(),
+        'mean_hurt_when_hurts': rag_df.loc[rag_df['rag_hurts'], 'rag_benefit'].mean(),
+        'best_rag_benefit': rag_df['rag_benefit'].max(),
+        'worst_rag_benefit': rag_df['rag_benefit'].min(),
+    }
+
+
+def compare_best_rag_vs_direct(df: pd.DataFrame, metric: str = PRIMARY_METRIC, 
+                                top_k: int = 5) -> pd.DataFrame:
+    """
+    Compare only the top-K best RAG configurations against direct baseline.
+    """
+    rag_df = df[df['exp_type'] == 'rag'].copy()
+    direct_df = df[df['exp_type'] == 'direct'].copy()
+    
+    results = []
+    
+    group_cols = []
+    if 'model_short' in df.columns:
+        group_cols.append('model_short')
+    if 'dataset' in df.columns:
+        group_cols.append('dataset')
+    
+    if not group_cols:
+        direct_mean = direct_df[metric].mean()
+        top_rag = rag_df.nlargest(top_k, metric)
+        
+        results.append({
+            'group': 'overall',
+            'direct_mean': direct_mean,
+            'top_rag_mean': top_rag[metric].mean(),
+            'best_rag': top_rag[metric].max(),
+            'rag_advantage': top_rag[metric].mean() - direct_mean,
+            'rag_advantage_pct': (top_rag[metric].mean() - direct_mean) / direct_mean * 100 if direct_mean > 0 else 0
+        })
+    else:
+        for group_vals, rag_group in rag_df.groupby(group_cols):
+            if not isinstance(group_vals, tuple):
+                group_vals = (group_vals,)
+            
+            direct_mask = pd.Series([True] * len(direct_df))
+            for col, val in zip(group_cols, group_vals):
+                direct_mask &= (direct_df[col] == val)
+            
+            direct_group = direct_df[direct_mask]
+            if len(direct_group) == 0:
+                continue
+            
+            direct_mean = direct_group[metric].mean()
+            top_rag = rag_group.nlargest(min(top_k, len(rag_group)), metric)
+            
+            results.append({
+                'group': ' / '.join(str(v) for v in group_vals),
+                **{col: val for col, val in zip(group_cols, group_vals)},
+                'direct_mean': direct_mean,
+                'top_rag_mean': top_rag[metric].mean(),
+                'best_rag': top_rag[metric].max(),
+                'rag_advantage': top_rag[metric].mean() - direct_mean,
+                'rag_advantage_pct': (top_rag[metric].mean() - direct_mean) / direct_mean * 100 if direct_mean > 0 else 0,
+                'n_rag_configs': len(rag_group)
+            })
+    
+    return pd.DataFrame(results)
+
+
+def identify_rag_success_factors(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict:
+    """
+    Identify which factors predict RAG success (helping vs hurting).
+    """
+    benefit_analysis = analyze_rag_benefit_distribution(df, metric)
+    if not benefit_analysis:
+        return {}
+    
+    rag_df = benefit_analysis['rag_df']
+    
+    factors = ['retriever_type', 'embedding_model', 'reranker', 'prompt', 'query_transform', 'top_k']
+    available_factors = [f for f in factors if f in rag_df.columns]
+    
+    success_factors = {}
+    for factor in available_factors:
+        factor_success = rag_df.groupby(factor).agg({
+            'rag_helps': 'mean',
+            'rag_benefit': ['mean', 'std'],
+            'rag_benefit_pct': 'mean'
+        }).round(3)
+        factor_success.columns = ['pct_helps', 'mean_benefit', 'std_benefit', 'mean_benefit_pct']
+        factor_success = factor_success.sort_values('pct_helps', ascending=False)
+        success_factors[factor] = factor_success
+    
+    return success_factors
+
+
+# =============================================================================
+# BOTTLENECK ANALYSIS
+# =============================================================================
+
+def identify_bottlenecks(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict:
+    """
+    Identify which RAG components contribute most to performance variance.
+    """
+    rag_df = df[df['exp_type'] == 'rag']
+    
+    factors = ['model_short', 'retriever_type', 'embedding_model', 'reranker', 
+               'prompt', 'query_transform', 'top_k']
+    
+    bottleneck_results = {}
+    total_var = rag_df[metric].var()
+    
+    if total_var == 0:
+        return {}
+    
+    for factor in factors:
+        if factor not in rag_df.columns or rag_df[factor].nunique() <= 1:
+            continue
+        
+        group_means = rag_df.groupby(factor)[metric].mean()
+        overall_mean = rag_df[metric].mean()
+        
+        between_group_var = np.sum(
+            (group_means - overall_mean)**2 * rag_df.groupby(factor).size() / len(rag_df)
+        )
+        
+        variance_explained = (between_group_var / total_var) * 100
+        bottleneck_results[factor] = variance_explained
+    
+    return dict(sorted(bottleneck_results.items(), key=lambda x: x[1], reverse=True))
+
+
+# =============================================================================
+# INTERACTION ANALYSIS
+# =============================================================================
+
+def analyze_interactions(df: pd.DataFrame, factor1: str, factor2: str, 
+                         metric: str = PRIMARY_METRIC) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    Analyze interaction effects between two RAG components.
+    """
+    rag_df = df[df['exp_type'] == 'rag'].copy()
+    
+    if factor1 not in rag_df.columns or factor2 not in rag_df.columns:
+        return None
+    
+    interaction = rag_df.groupby([factor1, factor2])[metric].agg(['mean', 'std', 'count']).reset_index()
+    interaction.columns = [factor1, factor2, 'mean', 'std', 'count']
+    
+    pivot = interaction.pivot(index=factor1, columns=factor2, values='mean')
+    
+    return pivot, interaction
+
+
+def find_synergistic_combinations(df: pd.DataFrame, factor1: str, factor2: str,
+                                   metric: str = PRIMARY_METRIC) -> List[dict]:
+    """
+    Identify synergistic and redundant component combinations.
+    """
+    rag_df = df[df['exp_type'] == 'rag'].copy()
+    
+    if factor1 not in rag_df.columns or factor2 not in rag_df.columns:
+        return []
+    
+    overall_mean = rag_df[metric].mean()
+    f1_means = rag_df.groupby(factor1)[metric].mean()
+    f2_means = rag_df.groupby(factor2)[metric].mean()
+    combo_means = rag_df.groupby([factor1, factor2])[metric].mean()
+    
+    results = []
+    for (v1, v2), actual in combo_means.items():
+        expected = overall_mean + (f1_means[v1] - overall_mean) + (f2_means[v2] - overall_mean)
+        interaction_effect = actual - expected
+        
+        results.append({
+            factor1: v1,
+            factor2: v2,
+            'actual': actual,
+            'expected': expected,
+            'interaction_effect': interaction_effect,
+            'synergy': 'Synergistic' if interaction_effect > 0.01 else 
+                       'Redundant' if interaction_effect < -0.01 else 'Neutral'
+        })
+    
+    return sorted(results, key=lambda x: x['interaction_effect'], reverse=True)
+
+
+# =============================================================================
+# VISUALIZATION HELPERS
+# =============================================================================
+
+def plot_rag_vs_direct(df: pd.DataFrame, metric: str = PRIMARY_METRIC, ax=None):
+    """Plot RAG vs Direct comparison with confidence intervals."""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    
+    rag_df = df[df['exp_type'] == 'rag']
+    direct_df = df[df['exp_type'] == 'direct']
+    
+    rag_mean = rag_df[metric].mean()
+    direct_mean = direct_df[metric].mean()
+    rag_std = rag_df[metric].std()
+    direct_std = direct_df[metric].std()
+    
+    x = [0, 1]
+    means = [direct_mean, rag_mean]
+    stds = [direct_std, rag_std]
+    labels = ['Direct', 'RAG']
+    colors = ['steelblue', 'coral']
+    
+    bars = ax.bar(x, means, yerr=stds, capsize=5, color=colors, alpha=0.7)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(metric.upper())
+    ax.set_title(f'Direct vs RAG Performance ({metric})')
+    ax.grid(axis='y', alpha=0.3)
+    
+    return ax
+
+
+def plot_component_effects(df: pd.DataFrame, factor: str, metric: str = PRIMARY_METRIC, ax=None):
+    """Plot component effects with confidence intervals."""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 5))
+    
+    marginal = compute_marginal_means(df[df['exp_type'] == 'rag'], factor, metric)
+    
+    if marginal.empty:
+        return ax
+    
+    x = range(len(marginal))
+    ax.bar(x, marginal['marginal_mean'], 
+           yerr=[marginal['marginal_mean'] - marginal['ci_low'], 
+                 marginal['ci_high'] - marginal['marginal_mean']],
+           capsize=5, alpha=0.7)
+    ax.set_xticks(x)
+    ax.set_xticklabels(marginal[factor], rotation=45, ha='right')
+    ax.set_ylabel(f'Marginal Mean ({metric})')
+    ax.set_title(f'{factor} Effect on {metric}')
+    ax.grid(axis='y', alpha=0.3)
+    
+    return ax
+
+
+def plot_rag_benefit_distribution(benefit_data: dict, ax=None):
+    """Plot the distribution of RAG benefit."""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 5))
+    
+    rag_benefits = benefit_data['rag_df']['rag_benefit'].dropna()
+    
+    ax.hist(rag_benefits, bins=30, color='steelblue', alpha=0.7, edgecolor='black')
+    ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Break-even')
+    ax.axvline(x=rag_benefits.mean(), color='orange', linestyle='-', linewidth=2, 
+               label=f'Mean: {rag_benefits.mean():.3f}')
+    ax.axvline(x=rag_benefits.median(), color='green', linestyle='-', linewidth=2, 
+               label=f'Median: {rag_benefits.median():.3f}')
+    ax.set_xlabel('RAG Benefit')
+    ax.set_ylabel('Number of Configurations')
+    ax.set_title('Distribution of RAG Benefit vs Direct Baseline')
+    ax.legend()
+    ax.grid(alpha=0.3)
+    
+    return ax
+
+
+def plot_interaction_heatmap(df: pd.DataFrame, factor1: str, factor2: str, 
+                              metric: str = PRIMARY_METRIC, ax=None):
+    """Plot a heatmap showing interaction between two factors."""
+    result = analyze_interactions(df, factor1, factor2, metric)
+    if result is None:
+        return ax
+    
+    pivot, _ = result
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    
+    sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', 
+                center=pivot.values.mean(), ax=ax)
+    ax.set_title(f'{factor1} × {factor2} Interaction\n(Mean {metric})')
+    ax.set_xlabel(factor2)
+    ax.set_ylabel(factor1)
+    
+    return ax
