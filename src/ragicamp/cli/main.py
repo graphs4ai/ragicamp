@@ -73,9 +73,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--sample-mode",
-        choices=["random", "stratified"],
+        choices=["random", "tpe"],
         default="random",
-        help="Sampling mode: random (uniform) or stratified (ensure coverage)",
+        help="Sampling mode: random (uniform) or tpe (Bayesian optimization)",
     )
     run_parser.add_argument(
         "--sample-seed",
@@ -84,10 +84,10 @@ def create_parser() -> argparse.ArgumentParser:
         help="Random seed for reproducible sampling",
     )
     run_parser.add_argument(
-        "--stratify-by",
+        "--optimize-metric",
         type=str,
-        default="model,retriever",
-        help="Dimensions to stratify by (comma-separated, for stratified mode)",
+        default="f1",
+        help="Metric to optimize when using --sample-mode tpe (default: f1)",
     )
     run_parser.set_defaults(func=cmd_run)
 

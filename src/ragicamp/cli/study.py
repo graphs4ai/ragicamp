@@ -265,41 +265,94 @@ def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):
     return None
 
 
-def _get_completed_experiment_names(output_dir: Path) -> set[str]:
-    """Scan output directory for completed experiments.
 
-    Used to exclude already-completed experiments from sampling, ensuring
-    that when resampling with a new seed, we only sample NEW experiments.
+def _run_spec_list(
+    specs: list,
+    *,
+    limit: Optional[int],
+    metrics: list[str],
+    out: Path,
+    judge_model: Any = None,
+    llm_judge_config: Optional[dict[str, Any]] = None,
+    force: bool = False,
+) -> dict[str, int]:
+    """Run a list of ExperimentSpecs, tracking results.
+
+    This is the shared execution loop used by all study modes.
 
     Args:
-        output_dir: Path to study output directory
+        specs: List of ExperimentSpec objects to run.
+        limit: Max questions per experiment.
+        metrics: List of metric names to compute.
+        out: Output directory for experiment results.
+        judge_model: Optional LLM judge model instance.
+        llm_judge_config: Optional LLM judge configuration.
+        force: Force re-run of completed/failed experiments.
 
     Returns:
-        Set of experiment names that are already complete
+        Dict with counts: ``{"completed": N, "failed": N, "skipped": N}``.
     """
-    from ragicamp.state.health import check_health
+    results = {"completed": 0, "failed": 0, "skipped": 0}
 
-    completed = set()
+    for i, spec in enumerate(specs):
+        print(f"\n[{i + 1}/{len(specs)}] {spec.name}")
 
-    if not output_dir.exists():
-        return completed
+        status = run_spec(
+            spec=spec,
+            limit=limit,
+            metrics=metrics,
+            out=out,
+            judge_model=judge_model,
+            llm_judge_config=llm_judge_config,
+            force=force,
+            use_subprocess=True,
+        )
 
-    for exp_dir in output_dir.iterdir():
-        if not exp_dir.is_dir():
-            continue
-        # Skip non-experiment directories
-        if exp_dir.name.startswith(".") or exp_dir.name == "study_meta.json":
-            continue
+        if status in ("complete", "ran", "resumed"):
+            results["completed"] += 1
+        elif status == "failed":
+            results["failed"] += 1
+        else:
+            results["skipped"] += 1
 
-        try:
-            health = check_health(exp_dir)
-            if health.is_complete:
-                completed.add(exp_dir.name)
-        except Exception:
-            # If health check fails, assume incomplete
-            pass
+    return results
 
-    return completed
+
+def _build_specs_for_mode(
+    config: dict[str, Any],
+    sampling_override: Optional[dict[str, Any]],
+) -> tuple[list, dict[str, Any]]:
+    """Build experiment specs based on the active sampling mode.
+
+    When a sampling mode is set (random, tpe, etc.), only baseline + singleton
+    specs are built here; RAG specs are generated trial-by-trial by Optuna.
+
+    When no sampling mode is set, the full experiment grid is built.
+
+    Args:
+        config: Full study YAML config dict.
+        sampling_override: Optional CLI sampling override.
+
+    Returns:
+        Tuple of (specs, effective_sampling_config).
+    """
+    rag_config = config.get("rag", {})
+    effective_sampling = sampling_override or rag_config.get("sampling", {})
+    if not isinstance(effective_sampling, dict):
+        effective_sampling = {}
+
+    sampling_mode = effective_sampling.get("mode")
+
+    if sampling_mode:
+        # Any sampling mode → Optuna handles RAG; only build baselines + singletons
+        baseline_config = dict(config)
+        baseline_config["rag"] = {**rag_config, "enabled": False}
+        specs = build_specs(baseline_config)
+    else:
+        # No sampling → full grid
+        specs = build_specs(config)
+
+    return specs, effective_sampling
 
 
 def run_study(
@@ -314,24 +367,39 @@ def run_study(
 ) -> None:
     """Run a study from a configuration dictionary.
 
-    This is the main orchestration function that:
-    1. Validates the config
-    2. Ensures all required indexes exist
-    3. Builds the experiment matrix (with optional sampling)
-    4. Runs each experiment
+    Orchestrates the full study lifecycle:
+
+    1. Validate config
+    2. Ensure required indexes exist
+    3. Build experiment specs (mode-aware)
+    4. Run baseline/singleton experiments
+    5. Run Optuna-driven RAG trials (if sampling mode is set)
+    6. Print summary
+
+    Sampling modes (``rag.sampling.mode`` in YAML or ``--sample-mode`` CLI):
+
+    - **(none)**: Full Cartesian product of all dimensions.
+    - **random**: Uniform random search via Optuna ``RandomSampler``.
+    - **tpe**: Bayesian optimization via Optuna ``TPESampler`` that learns
+      from previous trials to maximize the target metric.
+
+    All sampling modes go through Optuna, which provides SQLite persistence,
+    transparent resume, and warm-starting from existing experiments on disk.
 
     Args:
-        config: Study configuration dict (already loaded from YAML)
-        dry_run: If True, just print what would be done
-        skip_existing: If True, skip completed experiments
-        validate_only: If True, just validate config and exit
-        limit: Optional limit on examples per experiment
-        force: Force re-run of completed/failed experiments
-        experiment_filter: Optional filter pattern for experiment names
-        sampling_override: Optional sampling config to override YAML settings
-            Example: {"mode": "random", "n_experiments": 50, "seed": 42}
+        config: Study configuration dict (already loaded from YAML).
+        dry_run: If True, just print what would be done.
+        skip_existing: If True, skip completed experiments.
+        validate_only: If True, just validate config and exit.
+        limit: Optional limit on examples per experiment.
+        force: Force re-run of completed/failed experiments.
+        experiment_filter: Optional filter pattern for experiment names.
+        sampling_override: Optional sampling config to override YAML settings.
+            Example: ``{"mode": "tpe", "n_experiments": 100, "optimize_metric": "f1"}``
     """
-    # Validate
+    # ===================================================================
+    # 1. Validate
+    # ===================================================================
     warnings = validate_config(config)
     for w in warnings:
         print(f"⚠️  {w}")
@@ -351,81 +419,89 @@ def run_study(
         print(f"  {description}")
     print(f"{'=' * 70}")
 
-    # Override limit from config if not specified
     if limit is None:
         limit = config.get("num_questions")
 
-    # Get metrics
     metrics = config.get("metrics", ["f1", "exact_match"])
-
-    # Get LLM judge config
     llm_judge_config = config.get("llm_judge")
     judge_model = create_judge_model(llm_judge_config)
 
-    # Ensure indexes exist for RAG experiments
+    # ===================================================================
+    # 2. Ensure indexes exist
+    # ===================================================================
     rag_config = config.get("rag", {})
     if rag_config.get("enabled"):
         corpus_config = rag_config.get("corpus", {})
         all_retrievers = rag_config.get("retrievers", [])
-        # Only build indexes for retrievers that are actually used in the study
         active_retriever_names = set(rag_config.get("retriever_names", []))
         retriever_configs = [
             r for r in all_retrievers if r.get("name") in active_retriever_names
         ]
         ensure_indexes_exist(retriever_configs, corpus_config)
 
-    # When sampling, exclude already-completed experiments from the pool
-    # This prevents resampling experiments that were already run
-    exclude_names: Optional[set[str]] = None
-    if sampling_override or rag_config.get("sampling"):
-        exclude_names = _get_completed_experiment_names(out)
-        if exclude_names:
-            print(f"📊 Found {len(exclude_names)} completed experiments in {out}")
+    # ===================================================================
+    # 3. Build experiment specs (mode-aware)
+    # ===================================================================
+    specs, effective_sampling = _build_specs_for_mode(config, sampling_override)
+    sampling_mode = effective_sampling.get("mode")
 
-    # Build experiment specs (with optional sampling, excluding completed)
-    specs = build_specs(config, sampling_override=sampling_override, exclude_names=exclude_names)
-
-    # Filter if requested
     if experiment_filter:
         specs = [s for s in specs if experiment_filter in s.name]
 
-    print(f"\n📋 Experiments: {len(specs)}")
+    # ===================================================================
+    # 4. Preview
+    # ===================================================================
+    label = "Baseline/singleton" if sampling_mode else "Total"
+    print(f"\n📋 {label} experiments: {len(specs)}")
     for s in specs:
         print(f"   - {s.name}")
 
-    # Dry run - just show what would be done
+    if sampling_mode and rag_config.get("enabled"):
+        n_trials = effective_sampling.get("n_experiments", 50)
+        optimize_metric = effective_sampling.get("optimize_metric", "f1")
+        mode_desc = "optimizing" if sampling_mode != "random" else "sampling"
+        print(f"🔬 + {n_trials} RAG trials ({sampling_mode} {mode_desc} {optimize_metric})")
+
     if dry_run:
         print("\n[DRY RUN] Would run the above experiments")
         return
 
-    # Run experiments
-    results = {"completed": 0, "failed": 0, "skipped": 0}
-
-    # Determine if we should skip existing (inverse of force)
+    # ===================================================================
+    # 5. Run experiments
+    # ===================================================================
     should_force = force or not skip_existing
 
-    for i, spec in enumerate(specs):
-        print(f"\n[{i + 1}/{len(specs)}] {spec.name}")
+    results = _run_spec_list(
+        specs,
+        limit=limit,
+        metrics=metrics,
+        out=out,
+        judge_model=judge_model,
+        llm_judge_config=llm_judge_config,
+        force=should_force,
+    )
 
-        status = run_spec(
-            spec=spec,
+    # ===================================================================
+    # 6. Optuna-driven RAG trials
+    # ===================================================================
+    if sampling_mode and rag_config.get("enabled"):
+        from ragicamp.optimization.optuna_search import run_optuna_study as _optuna
+
+        _optuna(
+            config=config,
+            n_trials=effective_sampling.get("n_experiments", 50),
+            output_dir=out,
+            sampler_mode=sampling_mode,
+            optimize_metric=effective_sampling.get("optimize_metric", "f1"),
             limit=limit,
-            metrics=metrics,
-            out=out,
             judge_model=judge_model,
             llm_judge_config=llm_judge_config,
-            force=should_force,
-            use_subprocess=True,
+            seed=effective_sampling.get("seed"),
         )
 
-        if status in ("complete", "ran", "resumed"):
-            results["completed"] += 1
-        elif status == "failed":
-            results["failed"] += 1
-        else:
-            results["skipped"] += 1
-
-    # Summary
+    # ===================================================================
+    # 7. Summary
+    # ===================================================================
     print(f"\n{'=' * 70}")
     print(f"Study Complete: {study_name}")
     print(f"  Completed: {results['completed']}")
@@ -433,7 +509,6 @@ def run_study(
     print(f"  Skipped: {results['skipped']}")
     print(f"{'=' * 70}")
 
-    # Save study metadata
     meta = {
         "name": study_name,
         "num_experiments": len(specs),

@@ -122,10 +122,10 @@ rag:
   # 
   # With 1000 sampled RAG experiments: 48 + 40 + 1000 = ~1088 experiments
   sampling:
-    mode: stratified        # Ensures coverage across all models × retrievers
-    n_experiments: 1000     # Sample from 58,320 RAG grid combinations
-    seed: 42                # Reproducible sampling
-    stratify_by: [model, retriever, prompt]  # Coverage across key dimensions
+    mode: tpe               # Bayesian optimization (TPE) to find best RAG configs
+    n_experiments: 1000     # Target trials from 58,320 RAG grid combinations
+    optimize_metric: f1     # Metric to maximize
+    seed: 42                # Reproducible sampler
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)

@@ -26,9 +26,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             "mode": args.sample_mode,
             "n_experiments": args.sample,
             "seed": args.sample_seed,
+            "optimize_metric": getattr(args, "optimize_metric", "f1"),
         }
-        if args.sample_mode == "stratified":
-            sampling_override["stratify_by"] = [s.strip() for s in args.stratify_by.split(",")]
         print(f"🎲 Sampling mode: {args.sample_mode}, n={args.sample}")
         if args.sample_seed:
             print(f"   Seed: {args.sample_seed}")
