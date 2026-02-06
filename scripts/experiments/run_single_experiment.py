@@ -54,7 +54,8 @@ _log_gpu_mem("before imports")
 
 # Reuse existing abstractions - NO DUPLICATION
 from ragicamp.cli.study import create_judge_model  # noqa: E402
-from ragicamp.execution.runner import ExpSpec, run_spec  # noqa: E402
+from ragicamp.execution.runner import run_spec  # noqa: E402
+from ragicamp.spec.experiment import ExperimentSpec  # noqa: E402
 
 _log_gpu_mem("after imports")
 
@@ -80,7 +81,7 @@ def main():
         # Create the judge model in this subprocess
         judge_model = create_judge_model(llm_judge_config)
 
-    # Convert dict back to ExpSpec dataclass
+    # Convert dict back to ExperimentSpec dataclass
     # Use metrics from spec_dict (passed from parent) or fall back to CLI arg
     spec_metrics = spec_dict.get("metrics", metrics)
 
@@ -88,7 +89,7 @@ def main():
     agent_params = spec_dict.get("agent_params", {})
     agent_params_tuple = tuple(agent_params.items()) if agent_params else ()
 
-    spec = ExpSpec(
+    spec = ExperimentSpec(
         name=spec_dict["name"],
         exp_type=spec_dict["exp_type"],
         model=spec_dict["model"],
