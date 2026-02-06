@@ -124,6 +124,7 @@ rag:
     n_experiments: 1000     # Target trials from RAG grid combinations
     optimize_metric: f1     # Metric to maximize
     seed: 42                # Reproducible sampler
+    trial_timeout: 1200     # Kill subprocess after 20 minutes (returns 0.0)
     # Stratified search: these dimensions are explored uniformly via
     # round-robin instead of being optimized by TPE.  This prevents the
     # optimizer from biasing towards easy datasets or strong models.

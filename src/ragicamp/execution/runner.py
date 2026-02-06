@@ -370,6 +370,7 @@ def run_spec(
     llm_judge_config: Optional[dict[str, Any]] = None,
     force: bool = False,
     use_subprocess: bool = True,
+    timeout: int = 7200,
 ) -> str:
     """Run a single experiment with phase-aware dispatching.
 
@@ -386,12 +387,16 @@ def run_spec(
         llm_judge_config: LLM judge configuration
         force: Force re-run even if complete/failed
         use_subprocess: Run in subprocess for isolation
+        timeout: Subprocess timeout in seconds (default: 7200)
 
     Returns:
         Status string
     """
     if use_subprocess:
-        return run_spec_subprocess(spec, limit, metrics, out, llm_judge_config=llm_judge_config)
+        return run_spec_subprocess(
+            spec, limit, metrics, out,
+            llm_judge_config=llm_judge_config, timeout=timeout,
+        )
 
     # In-process execution with phase-aware dispatching
     from ragicamp.state import ExperimentPhase, check_health

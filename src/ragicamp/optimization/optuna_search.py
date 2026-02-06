@@ -744,8 +744,12 @@ def run_optuna_study(
             f"\n  Trials per combo: ~{trials_per}"
             f"{f' (+1 for {leftover} combos)' if leftover else ''}"
         )
+    # --- Trial timeout (seconds) ---
+    trial_timeout: int = sampling_cfg.get("trial_timeout", 1200)
+
     # --- Context feasibility constraints ---
     constraints = sampling_cfg.get("constraints", {})
+    summary += f"\n  Trial timeout: {trial_timeout}s ({trial_timeout // 60}min)"
     if constraints:
         n_constrained = len(constraints.get("model_context_lengths", {}))
         summary += f"\n  Context constraints: {n_constrained} model(s) with context limits"
@@ -808,6 +812,7 @@ def run_optuna_study(
             llm_judge_config=llm_judge_config,
             force=False,
             use_subprocess=True,
+            timeout=trial_timeout,
         )
 
         # Extract metric from results
