@@ -36,6 +36,9 @@ class GenerationHandler(PhaseHandler):
         context: ExecutionContext,
     ) -> ExperimentState:
         """Run the agent on all pending questions."""
+        import time as _time
+
+        _phase_t0 = _time.perf_counter()
         logger.info("Phase: GENERATING")
 
         questions_path = context.output_path / "questions.json"
@@ -96,7 +99,8 @@ class GenerationHandler(PhaseHandler):
         if checkpoint_path.exists():
             checkpoint_path.unlink()
         
-        logger.info("Generated %d predictions", len(results))
+        _phase_s = _time.perf_counter() - _phase_t0
+        logger.info("Generated %d predictions in %.1fs", len(results), _phase_s)
         return state
 
     def _result_to_prediction(self, result: AgentResult) -> dict[str, Any]:

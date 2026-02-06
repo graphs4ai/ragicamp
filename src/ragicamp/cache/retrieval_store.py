@@ -36,10 +36,18 @@ def _query_hash(text: str) -> str:
 
 
 class RetrievalStore:
-    """Disk-backed KV cache for retrieval results.
+    """Disk-backed KV cache for retrieval results with in-memory read-through.
 
     Keys are ``(retriever_name, query_hash, top_k)``; values are JSON-
     serialized lists of search result dicts.
+
+    Performance:
+        An in-memory dict (``_mem``) sits in front of SQLite.  On the first
+        ``get_batch`` call each entry is loaded from disk and cached in the
+        dict.  Subsequent lookups for the same key are pure Python dict
+        lookups — no SQL, no JSON deserialization.  ``put_batch`` writes to
+        both the dict and SQLite (write-through) so new entries are
+        immediately available in memory and durable on disk.
 
     Thread/process safety:
         Same as :class:`EmbeddingStore` — WAL mode, ``INSERT OR IGNORE``.
@@ -60,6 +68,8 @@ class RetrievalStore:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
+        # In-memory read-through cache: {(retriever, query_hash, top_k): list[dict]}
+        self._mem: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
         self._ensure_table()
 
     @classmethod

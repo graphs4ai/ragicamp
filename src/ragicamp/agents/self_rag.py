@@ -170,11 +170,14 @@ class SelfRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from time import perf_counter as _pc
+
         logger.info(
             "SelfRAG: Processing %d queries (threshold=%.2f, batched)",
             len(pending),
             self.retrieval_threshold,
         )
+        _run_t0 = _pc()
 
         # Initialise per-query state
         states: dict[int, _QueryState] = {
@@ -182,7 +185,9 @@ class SelfRAGAgent(Agent):
         }
 
         # Phase 1: Batch assess  (1 generator load)
+        _phase_t0 = _pc()
         self._phase_assess(states)
+        logger.info("Phase 1 (assess) completed in %.1fs", _pc() - _phase_t0)
 
         # Split into retrieval / direct groups
         retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
@@ -196,7 +201,9 @@ class SelfRAGAgent(Agent):
 
         # Phase 2: Batch retrieve  (1 embedder load, only for retrieval group)
         if retrieval_group:
+            _phase_t0 = _pc()
             self._phase_retrieve(retrieval_group)
+            logger.info("Phase 2 (retrieve) completed in %.1fs", _pc() - _phase_t0)
 
         # Build prompts for all queries
         for state in retrieval_group.values():
@@ -205,7 +212,9 @@ class SelfRAGAgent(Agent):
             state.prompt = self.prompt_builder.build_direct(state.query.text)
 
         # Phase 3: Batch generate + verify + fallback  (1 generator load)
+        _phase_t0 = _pc()
         self._phase_generate_and_verify(states, retrieval_group, direct_group)
+        logger.info("Phase 3 (generate+verify) completed in %.1fs", _pc() - _phase_t0)
 
         # Build results in original query order
         new_results = self._build_results(states, pending)
@@ -218,7 +227,7 @@ class SelfRAGAgent(Agent):
         if checkpoint_path:
             self._save_checkpoint(results, checkpoint_path)
 
-        logger.info("Completed %d queries", len(new_results))
+        logger.info("Completed %d queries in %.1fs", len(new_results), _pc() - _run_t0)
         return results
 
     # ------------------------------------------------------------------

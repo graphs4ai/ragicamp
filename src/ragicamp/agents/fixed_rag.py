@@ -116,16 +116,23 @@ class FixedRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from time import perf_counter as _pc
+
         logger.info("Processing %d queries with phase-based execution", len(pending))
+        _run_t0 = _pc()
 
         # Phase 1 & 2: Encode and search (embedder loaded)
         logger.info("=== Phase 1: Encoding & Searching ===")
+        _phase_t0 = _pc()
         query_texts = [q.text for q in pending]
         retrievals, embed_steps = self._phase_retrieve(query_texts, show_progress)
+        logger.info("Phase 1 (retrieve) completed in %.1fs", _pc() - _phase_t0)
 
         # Phase 3: Generate (generator loaded)
         logger.info("=== Phase 2: Generating ===")
+        _phase_t0 = _pc()
         new_results = self._phase_generate(pending, retrievals, embed_steps, show_progress)
+        logger.info("Phase 2 (generate) completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:
@@ -136,7 +143,7 @@ class FixedRAGAgent(Agent):
         if checkpoint_path:
             self._save_checkpoint(results, checkpoint_path)
 
-        logger.info("Completed %d queries", len(new_results))
+        logger.info("Completed %d queries in %.1fs", len(new_results), _pc() - _run_t0)
         return results
 
     def _phase_retrieve(

@@ -315,6 +315,9 @@ class Experiment:
 
     def _run_phase(self, phase: ExperimentPhase) -> None:
         """Execute a single phase."""
+        _phase_t0 = time.perf_counter()
+        logger.info("--- Phase [%s] starting ---", phase.value)
+
         if self._callbacks.on_phase_start:
             self._callbacks.on_phase_start(phase)
 
@@ -341,6 +344,9 @@ class Experiment:
             self._phase_complete()
 
         self._state.save(self.state_path)
+
+        _phase_s = time.perf_counter() - _phase_t0
+        logger.info("--- Phase [%s] completed in %.1fs ---", phase.value, _phase_s)
 
         if self._callbacks.on_phase_end:
             self._callbacks.on_phase_end(phase)
@@ -455,6 +461,37 @@ class Experiment:
         except ValueError:
             return all_phases
 
+    @staticmethod
+    def _build_index_loader(
+        retriever_type: str, index_name: str, index_path: Path,
+    ) -> "Callable[[], Any]":
+        """Return a zero-arg callable that loads the search backend from disk.
+
+        Used by :meth:`from_spec` to defer expensive index loading via
+        :class:`~ragicamp.retrievers.lazy.LazySearchBackend`.
+        """
+
+        def _load():
+            _t0 = time.perf_counter()
+            logger.info("Loading index: %s (type=%s, path=%s)", index_name, retriever_type, index_path)
+
+            if retriever_type == "hierarchical":
+                from ragicamp.indexes.hierarchical import HierarchicalIndex
+                from ragicamp.retrievers.hierarchical import HierarchicalSearcher
+
+                backend = HierarchicalSearcher(
+                    HierarchicalIndex.load(name=index_name, path=index_path),
+                )
+            else:
+                from ragicamp.indexes.vector_index import VectorIndex
+
+                backend = VectorIndex.load(index_path)
+
+            logger.info("Index loaded in %.1fs: %s", time.perf_counter() - _t0, index_name)
+            return backend
+
+        return _load
+
     @classmethod
     def from_spec(
         cls,
@@ -484,6 +521,9 @@ class Experiment:
         from ragicamp.indexes import VectorIndex
         from ragicamp.utils.artifacts import get_artifact_manager
 
+        _setup_t0 = time.perf_counter()
+        logger.info("Setting up experiment from spec: %s", spec.name)
+
         # Create providers (lazy loading)
         generator_provider = ProviderFactory.create_generator(spec.model)
         
@@ -509,18 +549,23 @@ class Experiment:
                     backend=embedding_backend,
                 )
                 
-                # Load index based on retriever type
+                # Lazy-load index — deferred until first batch_search call.
+                # When retrieval cache gives 100% hits the index is never
+                # touched, saving ~3 min of pickle/FAISS deserialization.
                 retriever_type = retriever_config.get("type", "dense")
                 index_name = retriever_config.get("embedding_index", spec.retriever)
                 index_path = manager.get_embedding_index_path(index_name)
-                
-                if retriever_type == "hierarchical":
-                    from ragicamp.indexes.hierarchical import HierarchicalIndex
-                    from ragicamp.retrievers.hierarchical import HierarchicalSearcher
-                    hier_index = HierarchicalIndex.load(name=index_name, path=index_path)
-                    index = HierarchicalSearcher(hier_index)
-                else:
-                    index = VectorIndex.load(index_path)
+
+                from ragicamp.retrievers.lazy import LazySearchBackend
+
+                index = LazySearchBackend(
+                    loader=cls._build_index_loader(retriever_type, index_name, index_path),
+                    is_hybrid=(retriever_type == "hybrid"),
+                )
+                logger.info(
+                    "Index deferred (lazy): %s (type=%s)",
+                    index_name, retriever_type,
+                )
 
         # Create dataset
         dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
@@ -547,6 +592,9 @@ class Experiment:
 
         # Create metrics
         metrics = MetricFactory.create(spec.metrics, judge_model=judge_model)
+
+        _setup_s = time.perf_counter() - _setup_t0
+        logger.info("Experiment setup completed in %.1fs: %s", _setup_s, spec.name)
 
         return cls(
             name=spec.name,

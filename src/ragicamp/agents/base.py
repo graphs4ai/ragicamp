@@ -59,6 +59,8 @@ class StepTimer:
         with StepTimer("retrieve", model="bge-large") as step:
             docs = retriever.retrieve(query)
             step.output = docs
+    
+    Automatically logs the step type and elapsed time on exit.
     """
     
     def __init__(self, step_type: str, model: str | None = None, **metadata):
@@ -71,6 +73,11 @@ class StepTimer:
     
     def __exit__(self, *args):
         self.step.timing_ms = (perf_counter() - self._start) * 1000
+        model_str = f" ({self.step.model})" if self.step.model else ""
+        logger.info(
+            "Step [%s]%s completed in %.1fs",
+            self.step.type, model_str, self.step.timing_ms / 1000,
+        )
 
 
 @dataclass
@@ -238,6 +245,8 @@ def batch_embed_and_search(
     Returns:
         Tuple of (search_results, encode_step, search_step).
     """
+    from time import perf_counter as _pc
+
     import numpy as np
 
     from ragicamp.core.types import Document, SearchResult
@@ -247,10 +256,15 @@ def batch_embed_and_search(
     miss_indices: list[int] | None = None
 
     if retrieval_store is not None and retriever_name:
+        _cache_t0 = _pc()
         cached_batch, hit_mask = retrieval_store.get_batch(
             retriever_name, query_texts, top_k,
         )
+        _cache_lookup_s = _pc() - _cache_t0
         n_hits = sum(hit_mask)
+        logger.info(
+            "Retrieval cache lookup: %.2fs (%d queries)", _cache_lookup_s, len(query_texts),
+        )
 
         if n_hits == len(query_texts):
             # 100% cache hit — skip embedding and search entirely
@@ -307,6 +321,10 @@ def batch_embed_and_search(
         texts_to_search = query_texts
 
     # --- Embed -----------------------------------------------------------
+    logger.info(
+        "Embedding %d queries (model=%s)...",
+        len(texts_to_search), embedder_provider.model_name,
+    )
     with embedder_provider.load() as embedder:
         with StepTimer("batch_encode", model=embedder_provider.model_name) as encode_step:
             encode_step.input = {"n_queries": len(texts_to_search)}
@@ -314,8 +332,13 @@ def batch_embed_and_search(
             if not isinstance(embeddings, np.ndarray):
                 embeddings = np.asarray(embeddings, dtype=np.float32)
             encode_step.output = {"embedding_shape": list(embeddings.shape)}
+    logger.info("Embedding done in %.1fs", encode_step.timing_ms / 1000)
 
     # --- Search ----------------------------------------------------------
+    logger.info(
+        "Searching index (%d queries, top_k=%d)...",
+        len(texts_to_search), top_k,
+    )
     with StepTimer("batch_search") as search_step:
         search_step.input = {"n_queries": len(texts_to_search), "top_k": top_k}
         if is_hybrid:
@@ -323,6 +346,11 @@ def batch_embed_and_search(
         else:
             search_results = index.batch_search(embeddings, top_k=top_k)
         search_step.output = {"n_results": sum(len(r) for r in search_results)}
+    logger.info(
+        "Search done in %.1fs (%d results)",
+        search_step.timing_ms / 1000,
+        search_step.output["n_results"],
+    )
 
     # --- Merge cached + fresh results ------------------------------------
     if miss_indices is not None and cached_results is not None:
@@ -347,6 +375,7 @@ def batch_embed_and_search(
 
     # --- Store fresh results in cache ------------------------------------
     if retrieval_store is not None and retriever_name:
+        _store_t0 = _pc()
         if miss_indices is not None:
             # Only store the misses
             miss_queries = [query_texts[i] for i in miss_indices]
@@ -363,6 +392,9 @@ def batch_embed_and_search(
             ]
         retrieval_store.put_batch(
             retriever_name, miss_queries, miss_results_dicts, top_k,
+        )
+        logger.info(
+            "Retrieval cache store: %.2fs (%d queries)", _pc() - _store_t0, len(miss_queries),
         )
 
     return retrievals, encode_step, search_step

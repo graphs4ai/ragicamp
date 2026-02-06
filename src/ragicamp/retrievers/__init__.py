@@ -14,6 +14,7 @@ from ragicamp.indexes.sparse import SparseIndex, SparseMethod
 from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.retrievers.hierarchical import HierarchicalSearcher
 from ragicamp.retrievers.hybrid import HybridSearcher
+from ragicamp.retrievers.lazy import LazySearchBackend
 
 __all__ = [
     "VectorIndex",
@@ -21,4 +22,5 @@ __all__ = [
     "SparseMethod",
     "HybridSearcher",
     "HierarchicalSearcher",
+    "LazySearchBackend",
 ]

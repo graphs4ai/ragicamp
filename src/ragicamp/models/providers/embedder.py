@@ -45,16 +45,22 @@ class EmbedderProvider(ModelProvider):
     @contextmanager
     def load(self, gpu_fraction: float | None = None) -> Iterator["Embedder"]:
         """Load embedder, yield it, then unload."""
+        from time import perf_counter as _pc
+
         if gpu_fraction is None:
             gpu_fraction = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL
 
         logger.info("Loading embedder: %s (gpu=%.0f%%)", self.model_name, gpu_fraction * 100)
+        _t0 = _pc()
 
         try:
             if self.config.backend == "vllm":
                 embedder = self._load_vllm(gpu_fraction)
             else:
                 embedder = self._load_sentence_transformers()
+
+            _load_s = _pc() - _t0
+            logger.info("Embedder loaded in %.1fs: %s", _load_s, self.model_name)
 
             self._embedder = embedder
             yield embedder

@@ -153,11 +153,14 @@ class IterativeRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from time import perf_counter as _pc
+
         logger.info(
             "IterativeRAG: Processing %d queries (max %d iterations, batched)",
             len(pending),
             self.max_iterations,
         )
+        _run_t0 = _pc()
 
         # --- Initialise per-query state ---
         active: dict[int, _QueryState] = {
@@ -174,9 +177,12 @@ class IterativeRAGAgent(Agent):
             logger.info(
                 "=== Iteration %d: %d active queries ===", iteration, len(active),
             )
+            _iter_t0 = _pc()
 
             # Phase 1: Batch embed + search  (1 embedder load)
+            _phase_t0 = _pc()
             self._phase_embed_and_search(active, iteration)
+            logger.info("Iteration %d embed+search completed in %.1fs", iteration, _pc() - _phase_t0)
 
             # If this was the last allowed iteration, everyone goes to final gen
             if iteration >= self.max_iterations:
@@ -185,6 +191,7 @@ class IterativeRAGAgent(Agent):
                 break
 
             # Phase 2: Batch sufficiency check + refine  (1 generator load)
+            _phase_t0 = _pc()
             if self.stop_on_sufficient:
                 newly_sufficient = self._phase_evaluate_and_refine(
                     active, iteration,
@@ -195,13 +202,18 @@ class IterativeRAGAgent(Agent):
             else:
                 # No sufficiency check -- just refine all
                 self._phase_refine_only(active, iteration)
+            logger.info("Iteration %d evaluate+refine completed in %.1fs", iteration, _pc() - _phase_t0)
+
+            logger.info("Iteration %d total: %.1fs", iteration, _pc() - _iter_t0)
 
         # Merge remaining active into converged
         converged.update(active)
 
         # Phase 3: Batch generate ALL final answers  (1 generator load)
         logger.info("=== Final generation: %d queries ===", len(converged))
+        _phase_t0 = _pc()
         new_results = self._phase_generate_answers(converged, pending)
+        logger.info("Final generation completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:
@@ -212,7 +224,7 @@ class IterativeRAGAgent(Agent):
         if checkpoint_path:
             self._save_checkpoint(results, checkpoint_path)
 
-        logger.info("Completed %d queries", len(new_results))
+        logger.info("Completed %d queries in %.1fs", len(new_results), _pc() - _run_t0)
         return results
 
     # ------------------------------------------------------------------
