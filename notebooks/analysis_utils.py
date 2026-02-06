@@ -32,13 +32,25 @@ METRICS = ['f1', 'exact_match', 'bertscore', 'bleurt', 'llm_judge']
 PRIMARY_METRIC = 'f1'
 
 # Model name mappings
+# Keys are substrings that appear in experiment names after normalization:
+# model.replace(":", "_").replace("/", "_").replace("-", "")
+# Order matters: more specific patterns should come first!
 MODEL_MAP = {
+    # Medium models (7-9B) - most specific first
+    'mistral7binstructv0.3': 'Mistral-7B',
+    'qwen2.57binstruct': 'Qwen2.5-7B',
+    'gemma29bit': 'Gemma2-9B',
+    # Tiny models (1-2B)
+    'qwen2.51.5binstruct': 'Qwen2.5-1.5B',
+    'gemma22bit': 'Gemma2-2B',
+    # Small models (3B)
+    'llama3.23binstruct': 'Llama-3.2-3B',
+    'phi3mini4kinstruct': 'Phi-3-mini',
+    'qwen2.53binstruct': 'Qwen2.5-3B',
+    # Legacy fallbacks (shorter patterns - must be last)
     'llama': 'Llama-3.2-3B',
-    'Llama3.23BInstruct': 'Llama-3.2-3B',
     'phi': 'Phi-3-mini',
-    'Phi3mini4kinstruct': 'Phi-3-mini',
-    'qwen': 'Qwen-2.5-3B',
-    'Qwen2.53BInstruct': 'Qwen-2.5-3B',
+    'qwen': 'Qwen2.5-3B',
 }
 
 # Retriever type detection
@@ -142,7 +154,10 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
             if key.lower() in name.lower():
                 config['model_short'] = display
                 break
-        for prompt in ['concise', 'structured', 'cot', 'fewshot_3', 'fewshot', 'extractive', 'cited']:
+        # Order matters: more specific patterns first
+        for prompt in ['concise_strict', 'concise_json', 'extractive_quoted', 'cot_final', 
+                       'fewshot_3', 'fewshot_1', 'fewshot', 'concise', 'structured', 
+                       'cot', 'extractive', 'cited']:
             if f'_{prompt}_' in name or name.endswith(f'_{prompt}_{config["dataset"]}'):
                 config['prompt'] = prompt
                 break
@@ -182,7 +197,10 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
         elif '_bge_' in name.lower() and config['embedding_model'] is None:
             config['reranker'] = 'bge'
         
-        for prompt in ['concise', 'structured', 'cot', 'fewshot_3', 'fewshot', 'extractive', 'cited']:
+        # Order matters: more specific patterns first
+        for prompt in ['concise_strict', 'concise_json', 'extractive_quoted', 'cot_final',
+                       'fewshot_3', 'fewshot_1', 'fewshot', 'concise', 'structured',
+                       'cot', 'extractive', 'cited']:
             if f'_{prompt}_' in name:
                 config['prompt'] = prompt
                 break
