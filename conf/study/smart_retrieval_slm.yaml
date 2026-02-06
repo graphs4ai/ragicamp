@@ -14,9 +14,10 @@
 # =============================================================================
 # DESIGN
 # =============================================================================
-# - Uses GRID SEARCH for systematic coverage of combinations
-# - Uses SINGLETON experiments for agent-based strategies (iterative, self-rag)
-# - Uses STRATIFIED RANDOM SAMPLING to keep experiment count manageable
+# - Uses Optuna TPE Bayesian optimization over the full RAG grid
+# - Agent strategies (iterative_rag, self_rag) are conditional dimensions
+#   in the search space — Optuna learns which agents + params work best
+# - Direct baselines run as a fixed grid for comparison
 #
 # Model Tiers:
 #   Tiny (1-2B):   SmolLM2-1.7B, Gemma2-2B
@@ -111,21 +112,27 @@ rag:
   models: *slm_models
   
   # --------------------------------------------------------------------------
-  # Sampling Mode (Random Search)
+  # Sampling Mode (Optuna TPE)
   # --------------------------------------------------------------------------
-  # Sample experiments from the grid to keep total manageable.
-  # Grid: 8 models × 6 retrievers × 5 top_k × 3 query_transform × 3 reranker × 9 prompts × 3 datasets
-  #     = 58,320 possible combinations
-  # Fixed experiments (always included):
-  #   - Direct baselines: 48 (8 models × 2 prompts × 3 datasets)
-  #   - Singleton experiments: ~40 (iterative_rag, self_rag, premium × 3 datasets)
-  # 
-  # With 1000 sampled RAG experiments: 48 + 40 + 1000 = ~1088 experiments
+  # Optuna explores the full grid (models × retrievers × top_k × qt × reranker
+  # × prompts × datasets × agent_types) using Bayesian optimization.
+  # Agent-specific params (e.g. max_iterations for iterative_rag) are
+  # conditionally suggested only when the corresponding agent_type is chosen.
+  # Direct baselines are always run as a fixed grid for comparison.
   sampling:
     mode: tpe               # Bayesian optimization (TPE) to find best RAG configs
-    n_experiments: 1000     # Target trials from 58,320 RAG grid combinations
+    n_experiments: 1000     # Target trials from RAG grid combinations
     optimize_metric: f1     # Metric to maximize
     seed: 42                # Reproducible sampler
+    # Agent strategies: Optuna conditionally suggests agent-specific params
+    agent_types:
+      - fixed_rag           # Standard single-pass RAG (default)
+      - iterative_rag       # Multi-iteration query refinement
+      - self_rag            # Adaptive retrieval (model decides when to retrieve)
+    agent_params:
+      iterative_rag:
+        max_iterations: [1, 2, 3]
+        stop_on_sufficient: [true]
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)
@@ -353,178 +360,6 @@ rag:
     # --- Few-shot ---
     - fewshot_3         # 3 few-shot examples from training set
     - fewshot_1         # 1 example - lighter context, less token overhead
-
-# =============================================================================
-# SINGLETON EXPERIMENTS (Agent-Based Strategies)
-# =============================================================================
-# These require agent_type which can't be expressed in grid search.
-# Each tests ONE agent strategy with each SLM for comparison.
-
-experiments:
-  # ========================================================================
-  # GROUP: Iterative RAG (Query Refinement)
-  # ========================================================================
-  # Tests query refinement over multiple iterations.
-  
-  - name: iterative_llama_1iter
-    hypothesis: "Llama + 1 iteration refinement"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    agent_type: iterative_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    max_iterations: 1
-    stop_on_sufficient: true
-    prompt: concise
-  
-  - name: iterative_phi3_1iter
-    hypothesis: "Phi-3 + 1 iteration - better reasoning?"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    agent_type: iterative_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    max_iterations: 1
-    stop_on_sufficient: true
-    prompt: concise
-  
-  - name: iterative_qwen_1iter
-    hypothesis: "Qwen + 1 iteration refinement"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    agent_type: iterative_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    max_iterations: 1
-    stop_on_sufficient: true
-    prompt: concise
-  
-  # 2 iterations - does more help?
-  - name: iterative_qwen_2iter
-    hypothesis: "Qwen + 2 iterations - more refinement helps?"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    agent_type: iterative_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    max_iterations: 2
-    stop_on_sufficient: true
-    prompt: concise
-
-  # ========================================================================
-  # GROUP: Self-RAG (Adaptive Retrieval)
-  # ========================================================================
-  # Tests adaptive retrieval - model decides when to retrieve.
-  
-  - name: selfrag_llama
-    hypothesis: "Llama + Self-RAG adaptive retrieval"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    agent_type: self_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-  
-  - name: selfrag_phi3
-    hypothesis: "Phi-3 + Self-RAG - better self-assessment?"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    agent_type: self_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-  
-  - name: selfrag_qwen
-    hypothesis: "Qwen + Self-RAG adaptive retrieval"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    agent_type: self_rag
-    retriever: dense_bge_large_512
-    top_k: 5
-    prompt: concise
-
-  # ========================================================================
-  # GROUP: Premium Combo (Hybrid + Rerank + HyDE) - Best of Everything
-  # ========================================================================
-  # Tests maximum retrieval investment per model tier.
-  # Key comparison: Does premium retrieval help tiny models more than medium?
-  
-  # --- TINY MODELS (1-2B) with premium retrieval ---
-  - name: premium_qwen1.5b
-    hypothesis: "Qwen2.5-1.5B + premium stack - can retrieval save tiny models?"
-    model: vllm:Qwen/Qwen2.5-1.5B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-
-  - name: premium_gemma2_2b
-    hypothesis: "Gemma2-2B + premium stack"
-    model: vllm:google/gemma-2-2b-it
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-  
-  # --- SMALL MODELS (3-4B) with premium retrieval ---
-  - name: premium_llama
-    hypothesis: "Llama-3.2-3B + hybrid + rerank + hyde (maximum retrieval)"
-    model: vllm:meta-llama/Llama-3.2-3B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-  
-  - name: premium_phi3
-    hypothesis: "Phi-3 + premium stack"
-    model: vllm:microsoft/Phi-3-mini-4k-instruct
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-  
-  - name: premium_qwen3b
-    hypothesis: "Qwen2.5-3B + premium stack"
-    model: vllm:Qwen/Qwen2.5-3B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-
-  # --- MEDIUM MODELS (7-9B) with premium retrieval ---
-  # Key question: Do bigger models still benefit from premium retrieval?
-  - name: premium_mistral7b
-    hypothesis: "Mistral-7B + premium stack - does 7B still benefit?"
-    model: vllm:mistralai/Mistral-7B-Instruct-v0.3
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-
-  - name: premium_qwen7b
-    hypothesis: "Qwen2.5-7B + premium stack"
-    model: vllm:Qwen/Qwen2.5-7B-Instruct
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
-
-  - name: premium_gemma9b
-    hypothesis: "Gemma2-9B + premium stack - upper bound comparison"
-    model: vllm:google/gemma-2-9b-it
-    retriever: hybrid_bge_large_bm25_07
-    query_transform: hyde
-    top_k: 5
-    fetch_k: 25
-    reranker: bge-v2
-    prompt: concise
 
 # =============================================================================
 # Output Configuration

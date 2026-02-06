@@ -29,6 +29,7 @@ Usage (CLI override):
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -52,6 +53,10 @@ def _extract_search_space(config: dict[str, Any]) -> dict[str, list[Any]]:
 
     Reads the same YAML fields that grid search uses, so the search space
     is always consistent with what the user configured.
+
+    When ``rag.sampling.agent_types`` is set, an ``agent_type`` dimension is
+    added so the optimizer can explore different agent strategies (e.g.
+    ``iterative_rag``, ``self_rag``) alongside the standard RAG grid.
 
     Returns:
         Dict mapping dimension names to their possible values.
@@ -84,6 +89,12 @@ def _extract_search_space(config: dict[str, Any]) -> dict[str, list[Any]]:
         reranker_names = ["none"]
 
     space["reranker"] = reranker_names
+
+    # Optional: agent_type dimension (from rag.sampling.agent_types)
+    sampling_config = rag.get("sampling", {})
+    agent_types = sampling_config.get("agent_types")
+    if agent_types and len(agent_types) > 1:
+        space["agent_type"] = agent_types
 
     return space
 
@@ -124,6 +135,78 @@ def _build_reranker_lookup(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _suggest_agent_params(
+    trial: optuna.Trial,
+    agent_type: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Conditionally suggest agent-specific parameters based on *agent_type*.
+
+    Reads ``rag.sampling.agent_params.<agent_type>`` from the config to
+    discover which extra dimensions to add for a given agent strategy.
+
+    Returns:
+        Dict of agent param name → suggested value (empty for ``fixed_rag``).
+    """
+    if agent_type == "fixed_rag":
+        return {}
+
+    agent_params_config = (
+        config.get("rag", {})
+        .get("sampling", {})
+        .get("agent_params", {})
+        .get(agent_type, {})
+    )
+
+    params: dict[str, Any] = {}
+    for param_name, choices in agent_params_config.items():
+        if isinstance(choices, list) and len(choices) > 0:
+            params[param_name] = trial.suggest_categorical(param_name, choices)
+        else:
+            # Scalar value → fixed (no suggestion needed)
+            params[param_name] = choices
+
+    return params
+
+
+def _build_agent_name(
+    base_name: str,
+    agent_type: str,
+    agent_params: dict[str, Any],
+) -> str:
+    """Build an experiment name that encodes the agent type and params.
+
+    For ``fixed_rag`` the standard ``rag_…`` name is returned unchanged.
+    For other agents the ``rag_`` prefix is replaced with the agent type
+    and any agent-specific parameters are appended:
+
+        ``iterative_rag_iter2_hf_gemma22bit_dense_minilm_k5_concise_nq``
+    """
+    if agent_type == "fixed_rag":
+        return base_name
+
+    # Replace the leading "rag_" prefix with the agent type
+    if base_name.startswith("rag_"):
+        suffix = base_name[len("rag_"):]
+    else:
+        suffix = base_name
+
+    parts = [agent_type]
+
+    # Append compact agent param tokens
+    for key, value in sorted(agent_params.items()):
+        if key == "max_iterations":
+            parts.append(f"iter{value}")
+        elif key == "stop_on_sufficient":
+            if value:
+                parts.append("stopok")
+        else:
+            parts.append(f"{key}{value}")
+
+    parts.append(suffix)
+    return "_".join(parts)
+
+
 def _trial_to_spec(
     trial: optuna.Trial,
     search_space: dict[str, list[Any]],
@@ -136,6 +219,11 @@ def _trial_to_spec(
     Uses the same logic as ``_build_rag_specs`` for fetch_k computation,
     naming, and retriever/reranker resolution so that Optuna-generated
     experiments are fully compatible with the rest of the framework.
+
+    When the search space includes an ``agent_type`` dimension, the trial
+    will additionally suggest agent-specific parameters (e.g.
+    ``max_iterations`` for ``iterative_rag``) and encode them in both the
+    experiment name and the ``ExperimentSpec``.
     """
     rag = config.get("rag", {})
 
@@ -147,6 +235,17 @@ def _trial_to_spec(
     qt = trial.suggest_categorical("query_transform", search_space["query_transform"])
     dataset = trial.suggest_categorical("dataset", search_space["dataset"])
     reranker = trial.suggest_categorical("reranker", search_space["reranker"])
+
+    # --- Agent type (conditional dimension) ---
+    if "agent_type" in search_space:
+        agent_type = trial.suggest_categorical("agent_type", search_space["agent_type"])
+    else:
+        # Single agent type from config, or default to fixed_rag
+        sampling_cfg = rag.get("sampling", {})
+        agent_types = sampling_cfg.get("agent_types", ["fixed_rag"])
+        agent_type = agent_types[0] if agent_types else "fixed_rag"
+
+    agent_params = _suggest_agent_params(trial, agent_type, config)
 
     # --- Resolve retriever config ---
     ret_cfg = retriever_lookup.get(retriever, {})
@@ -171,7 +270,7 @@ def _trial_to_spec(
         fetch_k = None
 
     # --- Build canonical name ---
-    name = name_rag(
+    base_name = name_rag(
         model,
         prompt,
         dataset,
@@ -180,9 +279,13 @@ def _trial_to_spec(
         qt,
         reranker if has_reranker else "none",
     )
+    name = _build_agent_name(base_name, agent_type, agent_params)
 
     batch_size = config.get("batch_size", 8)
     metrics = config.get("metrics", ["f1", "exact_match"])
+
+    # Spec agent_type: None means default (fixed_rag) — keep compat
+    spec_agent_type = agent_type if agent_type != "fixed_rag" else None
 
     return ExperimentSpec(
         name=name,
@@ -200,6 +303,8 @@ def _trial_to_spec(
         reranker_model=rr_model,
         batch_size=batch_size,
         metrics=metrics,
+        agent_type=spec_agent_type,
+        agent_params=tuple(agent_params.items()) if agent_params else (),
     )
 
 
@@ -279,6 +384,7 @@ def _seed_from_existing(
     search_space: dict[str, list[Any]],
     output_dir: Path,
     optimize_metric: str,
+    config: dict[str, Any],
 ) -> int:
     """Register completed experiments on disk as Optuna trials (warm-start).
 
@@ -292,17 +398,18 @@ def _seed_from_existing(
 
     Only experiments whose parameters fall within the current search space
     are registered (experiments from a different study config are skipped).
+    For experiments with an ``agent_type``, the corresponding conditional
+    agent parameters are also read from metadata and validated.
 
     Returns:
         Number of trials seeded.
     """
     from optuna.distributions import CategoricalDistribution
 
-    # Build Optuna distributions from the search space
-    distributions = {
-        dim: CategoricalDistribution(choices=values)
-        for dim, values in search_space.items()
-    }
+    # Read agent_params config so we know valid choices for conditional dims
+    agent_params_config = (
+        config.get("rag", {}).get("sampling", {}).get("agent_params", {})
+    )
 
     # Build a set of param fingerprints already in the study to avoid dupes
     existing_params: set[tuple] = set()
@@ -331,7 +438,7 @@ def _seed_from_existing(
             continue
 
         # Map metadata fields to Optuna param names
-        params = {
+        params: dict[str, Any] = {
             "model": meta.get("model"),
             "retriever": meta.get("retriever"),
             "top_k": meta.get("top_k"),
@@ -341,10 +448,34 @@ def _seed_from_existing(
             "reranker": meta.get("reranker") or "none",
         }
 
-        # Validate every param is within the current search space
+        # Handle agent_type dimension
+        meta_agent_type = meta.get("agent_type") or "fixed_rag"
+        if "agent_type" in search_space:
+            if meta_agent_type not in search_space["agent_type"]:
+                continue
+            params["agent_type"] = meta_agent_type
+
+        # Handle conditional agent params from metadata
+        meta_agent_params = meta.get("agent_params", {})
+        agent_cfg = agent_params_config.get(meta_agent_type, {})
+        agent_params_valid = True
+        for param_name, valid_choices in agent_cfg.items():
+            if isinstance(valid_choices, list) and len(valid_choices) > 0:
+                value = meta_agent_params.get(param_name)
+                if value is not None and value in valid_choices:
+                    params[param_name] = value
+                elif meta_agent_type != "fixed_rag":
+                    # Non-default agent missing a required param → skip
+                    agent_params_valid = False
+                    break
+
+        if not agent_params_valid:
+            continue
+
+        # Validate every base param is within the current search space
         valid = True
         for dim, value in params.items():
-            if value not in search_space.get(dim, []):
+            if dim in search_space and value not in search_space[dim]:
                 valid = False
                 break
 
@@ -361,18 +492,34 @@ def _seed_from_existing(
         if metric_value is None:
             continue
 
+        # Build distributions matching this trial's params
+        distributions: dict[str, CategoricalDistribution] = {}
+        for dim, value in params.items():
+            if dim in search_space:
+                distributions[dim] = CategoricalDistribution(
+                    choices=search_space[dim]
+                )
+            else:
+                # Conditional param — distribution from agent_params config
+                choices = agent_cfg.get(dim, [value])
+                if not isinstance(choices, list):
+                    choices = [choices]
+                distributions[dim] = CategoricalDistribution(choices=choices)
+
         # Create and register the trial
+        _now = datetime.now()
         trial = optuna.trial.FrozenTrial(
             number=0,  # reassigned by storage
             state=optuna.trial.TrialState.COMPLETE,
             value=metric_value,
-            datetime_start=None,
-            datetime_complete=None,
+            datetime_start=_now,
+            datetime_complete=_now,
             params=params,
             distributions=distributions,
             user_attrs={"seeded_from": exp_dir.name},
             system_attrs={},
             intermediate_values={},
+            trial_id=0,  # reassigned by storage
         )
         study.add_trial(trial)
         existing_params.add(key)
@@ -448,7 +595,7 @@ def run_optuna_study(
     metrics = config.get("metrics", ["f1", "exact_match"])
 
     # --- Warm-start: seed from existing experiments on disk ---
-    seeded = _seed_from_existing(study, search_space, output_dir, optimize_metric)
+    seeded = _seed_from_existing(study, search_space, output_dir, optimize_metric, config)
     if seeded > 0:
         print(f"📊 Seeded {seeded} existing experiments into Optuna study")
 
@@ -493,12 +640,18 @@ def run_optuna_study(
 
         trial_num = trial.number + 1
         model_short = spec.model.split("/")[-1] if "/" in spec.model else spec.model
+        agent_info = ""
+        if spec.agent_type:
+            ap = spec.get_agent_params_dict()
+            agent_info = f", agent={spec.agent_type}"
+            if ap:
+                agent_info += f"({', '.join(f'{k}={v}' for k, v in ap.items())})"
         print(
             f"\n[Trial {trial_num}/{n_trials}] {spec.name}\n"
             f"  model={model_short}, retriever={spec.retriever}, "
             f"top_k={spec.top_k}, prompt={spec.prompt}, "
             f"qt={spec.query_transform or 'none'}, rr={spec.reranker or 'none'}, "
-            f"dataset={spec.dataset}"
+            f"dataset={spec.dataset}{agent_info}"
         )
 
         # Run the experiment (handles already-complete via health check)
@@ -565,12 +718,14 @@ def _print_study_summary(
     print(f"\n  Top 5 trials:")
     for t in trials_sorted[:5]:
         model_short = t.params.get("model", "?").split("/")[-1]
+        agent = t.params.get("agent_type", "fixed_rag")
+        agent_str = f", agent={agent}" if agent != "fixed_rag" else ""
         print(
             f"    #{t.number}: {optimize_metric}={t.value:.4f} "
             f"({model_short}, {t.params.get('retriever', '?')}, "
             f"top_k={t.params.get('top_k', '?')}, "
             f"prompt={t.params.get('prompt', '?')}, "
-            f"{t.params.get('dataset', '?')})"
+            f"{t.params.get('dataset', '?')}{agent_str})"
         )
 
     print(f"{'=' * 70}")
