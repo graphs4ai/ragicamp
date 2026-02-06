@@ -112,6 +112,87 @@ def _extract_search_space(config: dict[str, Any]) -> dict[str, list[Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Feasibility constraints (prune impossible combinations early)
+# ---------------------------------------------------------------------------
+
+
+def _check_context_feasibility(
+    model: str,
+    retriever_name: str,
+    top_k: int,
+    prompt: str,
+    retriever_lookup: dict[str, dict[str, Any]],
+    constraints: dict[str, Any],
+) -> tuple[bool, str]:
+    """Check whether a combination will fit in the model's context window.
+
+    Uses a conservative token estimate to decide if the prompt (retrieved
+    chunks + template + question) would exceed the model's maximum input
+    length.  This prevents wasting GPU time on combinations that always
+    crash with "prompt length exceeds model length" errors.
+
+    The check relies on ``rag.sampling.constraints`` in the study config:
+
+    .. code-block:: yaml
+
+        constraints:
+          model_context_lengths:
+            "vllm:google/gemma-2-2b-it": 8192
+            "vllm:microsoft/Phi-3-mini-4k-instruct": 4096
+          default_context_length: 32768
+          chars_per_token: 4
+          generation_buffer: 256
+          prompt_overhead_tokens:
+            default: 500
+            fewshot_3: 1500
+            fewshot_1: 800
+
+    Returns:
+        ``(True, "")`` if feasible, ``(False, reason)`` if not.
+    """
+    if not constraints:
+        return True, ""
+
+    # --- Model context length ---
+    model_ctx_map = constraints.get("model_context_lengths", {})
+    default_ctx = constraints.get("default_context_length", 32768)
+    model_ctx = model_ctx_map.get(model, default_ctx)
+
+    # --- Retriever effective chunk size (characters) ---
+    ret_cfg = retriever_lookup.get(retriever_name, {})
+    # Hierarchical retrievers return parent chunks; dense/hybrid return chunk_size
+    chunk_chars = ret_cfg.get("parent_chunk_size") or ret_cfg.get("chunk_size", 512)
+
+    # --- Convert to tokens ---
+    chars_per_token = constraints.get("chars_per_token", 4)
+    chunk_tokens = chunk_chars / chars_per_token
+
+    # --- Prompt overhead (template + question + examples) ---
+    overhead_cfg = constraints.get("prompt_overhead_tokens", {})
+    if isinstance(overhead_cfg, dict):
+        overhead = overhead_cfg.get(prompt, overhead_cfg.get("default", 500))
+    else:
+        overhead = int(overhead_cfg)
+
+    # --- Generation buffer (tokens reserved for output) ---
+    gen_buffer = constraints.get("generation_buffer", 256)
+
+    # --- Feasibility check ---
+    estimated_input = chunk_tokens * top_k + overhead
+    max_input = model_ctx - gen_buffer
+
+    if estimated_input > max_input:
+        reason = (
+            f"estimated prompt ~{int(estimated_input)} tokens "
+            f"(~{int(chunk_tokens)}tok/chunk × {top_k} + {overhead} overhead) "
+            f"> model context {model_ctx} - {gen_buffer} buffer = {int(max_input)}"
+        )
+        return False, reason
+
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # Config lookups (reuse retriever/reranker YAML definitions)
 # ---------------------------------------------------------------------------
 
@@ -663,6 +744,11 @@ def run_optuna_study(
             f"\n  Trials per combo: ~{trials_per}"
             f"{f' (+1 for {leftover} combos)' if leftover else ''}"
         )
+    # --- Context feasibility constraints ---
+    constraints = sampling_cfg.get("constraints", {})
+    if constraints:
+        n_constrained = len(constraints.get("model_context_lengths", {}))
+        summary += f"\n  Context constraints: {n_constrained} model(s) with context limits"
     summary += f"\n{'=' * 70}"
     logger.info(summary)
 
@@ -698,6 +784,19 @@ def run_optuna_study(
             spec.query_transform or "none", spec.reranker or "none",
             spec.dataset, agent_info,
         )
+
+        # --- Feasibility check: prune if prompt would exceed context ---
+        feasible, reason = _check_context_feasibility(
+            model=spec.model,
+            retriever_name=spec.retriever,
+            top_k=spec.top_k,
+            prompt=spec.prompt,
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        if not feasible:
+            logger.info("  -> pruned: %s", reason)
+            raise optuna.TrialPruned(reason)
 
         # Run the experiment (handles already-complete via health check)
         status = run_spec(

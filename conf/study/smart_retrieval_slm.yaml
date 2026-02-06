@@ -131,6 +131,29 @@ rag:
     fixed_dims:
       - dataset
       - model
+    # Context window constraints: prune combos that would overflow the
+    # model's context window (avoids wasting GPU on guaranteed failures).
+    # estimated_input ≈ (chunk_chars / chars_per_token) × top_k + overhead
+    constraints:
+      chars_per_token: 4       # rough char→token ratio for chunk sizes
+      generation_buffer: 256   # tokens reserved for model output
+      default_context_length: 32768
+      model_context_lengths:
+        "vllm:google/gemma-2-2b-it": 8192
+        "vllm:google/gemma-2-9b-it": 8192
+        "vllm:microsoft/Phi-3-mini-4k-instruct": 4096
+      prompt_overhead_tokens:
+        default: 500
+        concise: 400
+        concise_strict: 450
+        concise_json: 450
+        extractive: 450
+        extractive_quoted: 500
+        structured: 500
+        cot: 550
+        cot_final: 600
+        fewshot_1: 800
+        fewshot_3: 1500
     # Agent strategies: Optuna conditionally suggests agent-specific params
     agent_types:
       - fixed_rag           # Standard single-pass RAG (default)

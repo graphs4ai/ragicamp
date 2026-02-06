@@ -16,6 +16,7 @@ import optuna
 
 from ragicamp.optimization.optuna_search import (
     _build_agent_name,
+    _check_context_feasibility,
     _create_sampler,
     _extract_search_space,
     _get_experiment_metric,
@@ -691,6 +692,176 @@ class TestSeedFromExisting:
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", base_config)
         assert seeded == 0
+
+
+# ---------------------------------------------------------------------------
+# _check_context_feasibility
+# ---------------------------------------------------------------------------
+
+
+class TestCheckContextFeasibility:
+    """Tests for context window feasibility checks."""
+
+    @pytest.fixture
+    def retriever_lookup(self):
+        """Retriever configs with different chunk sizes."""
+        return {
+            "dense_bge_512": {"chunk_size": 512, "type": "dense"},
+            "hier_bge_2048p_448c": {
+                "parent_chunk_size": 2048,
+                "child_chunk_size": 448,
+                "type": "hierarchical",
+            },
+        }
+
+    @pytest.fixture
+    def constraints(self):
+        """Typical constraints config."""
+        return {
+            "chars_per_token": 4,
+            "generation_buffer": 256,
+            "default_context_length": 32768,
+            "model_context_lengths": {
+                "vllm:google/gemma-2-2b-it": 8192,
+                "vllm:microsoft/Phi-3-mini-4k-instruct": 4096,
+            },
+            "prompt_overhead_tokens": {
+                "default": 500,
+                "fewshot_3": 1500,
+                "concise": 400,
+            },
+        }
+
+    def test_feasible_dense_large_context(self, retriever_lookup, constraints):
+        """Dense retriever + large context model should always fit."""
+        feasible, reason = _check_context_feasibility(
+            model="vllm:Qwen/Qwen2.5-7B-Instruct",  # default 32768
+            retriever_name="dense_bge_512",
+            top_k=20,
+            prompt="concise",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        assert feasible is True
+        assert reason == ""
+
+    def test_infeasible_hier_small_context(self, retriever_lookup, constraints):
+        """Hierarchical + Gemma2-2B (8K) + top_k=20 should be pruned."""
+        # 2048 chars / 4 = 512 tok/chunk × 20 = 10240 + 400 = 10640 > 8192-256=7936
+        feasible, reason = _check_context_feasibility(
+            model="vllm:google/gemma-2-2b-it",
+            retriever_name="hier_bge_2048p_448c",
+            top_k=20,
+            prompt="concise",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        assert feasible is False
+        assert "estimated prompt" in reason
+
+    def test_infeasible_phi3_hier_k5_fewshot(self, retriever_lookup, constraints):
+        """Phi-3-mini (4K) + hierarchical + k=5 + fewshot should be pruned."""
+        # 512 tok/chunk × 5 = 2560 + 1500 = 4060 > 4096-256=3840
+        feasible, reason = _check_context_feasibility(
+            model="vllm:microsoft/Phi-3-mini-4k-instruct",
+            retriever_name="hier_bge_2048p_448c",
+            top_k=5,
+            prompt="fewshot_3",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        assert feasible is False
+
+    def test_feasible_phi3_dense_k3_concise(self, retriever_lookup, constraints):
+        """Phi-3-mini (4K) + dense (512 chars) + k=3 + concise should fit."""
+        # 128 tok/chunk × 3 = 384 + 400 = 784 < 4096-256=3840
+        feasible, _ = _check_context_feasibility(
+            model="vllm:microsoft/Phi-3-mini-4k-instruct",
+            retriever_name="dense_bge_512",
+            top_k=3,
+            prompt="concise",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        assert feasible is True
+
+    def test_no_constraints_always_feasible(self, retriever_lookup):
+        """Empty constraints dict disables the check entirely."""
+        feasible, _ = _check_context_feasibility(
+            model="vllm:google/gemma-2-2b-it",
+            retriever_name="hier_bge_2048p_448c",
+            top_k=20,
+            prompt="fewshot_3",
+            retriever_lookup=retriever_lookup,
+            constraints={},
+        )
+        assert feasible is True
+
+    def test_unknown_model_uses_default_context(self, retriever_lookup, constraints):
+        """Models not in the map use default_context_length (32768)."""
+        feasible, _ = _check_context_feasibility(
+            model="vllm:unknown/new-model",
+            retriever_name="hier_bge_2048p_448c",
+            top_k=20,
+            prompt="fewshot_3",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        # 512 × 20 + 1500 = 11740 < 32768 - 256 = 32512
+        assert feasible is True
+
+    def test_unknown_prompt_uses_default_overhead(self, retriever_lookup, constraints):
+        """Unknown prompt names fall back to the 'default' overhead."""
+        feasible, _ = _check_context_feasibility(
+            model="vllm:google/gemma-2-2b-it",
+            retriever_name="dense_bge_512",
+            top_k=5,
+            prompt="some_new_prompt",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        # 128 × 5 + 500 = 1140 < 7936 → feasible
+        assert feasible is True
+
+    def test_scalar_prompt_overhead(self, retriever_lookup):
+        """prompt_overhead_tokens can be a single number instead of dict."""
+        constraints = {
+            "model_context_lengths": {"vllm:small": 2048},
+            "prompt_overhead_tokens": 500,
+            "chars_per_token": 4,
+            "generation_buffer": 256,
+        }
+        feasible, _ = _check_context_feasibility(
+            model="vllm:small",
+            retriever_name="hier_bge_2048p_448c",
+            top_k=3,
+            prompt="concise",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        # 512 × 3 + 500 = 2036 > 2048-256=1792 → infeasible
+        assert feasible is False
+
+    def test_boundary_exact_fit(self, retriever_lookup):
+        """Edge case: estimated exactly equals max_input → feasible."""
+        # We want chunk_tokens * top_k + overhead == model_ctx - gen_buffer
+        # 128 tok/chunk * 5 = 640 + 500 = 1140, need max_input = 1140
+        # model_ctx = 1140 + 256 = 1396
+        constraints = {
+            "model_context_lengths": {"vllm:exact": 1396},
+            "prompt_overhead_tokens": {"default": 500},
+            "chars_per_token": 4,
+            "generation_buffer": 256,
+        }
+        feasible, _ = _check_context_feasibility(
+            model="vllm:exact",
+            retriever_name="dense_bge_512",
+            top_k=5,
+            prompt="anything",
+            retriever_lookup=retriever_lookup,
+            constraints=constraints,
+        )
+        assert feasible is True
 
 
 # ---------------------------------------------------------------------------
