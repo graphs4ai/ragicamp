@@ -1,28 +1,32 @@
-"""Self-RAG Agent - Adaptive retrieval based on query analysis.
+"""Self-RAG Agent - Adaptive retrieval with batched operations.
 
-Uses model providers with proper lifecycle management:
-1. Load generator → assess if retrieval needed → unload
-2. If needed: load embedder → retrieve → unload
-3. Load generator → generate answer → unload
-4. Optionally: load generator → verify answer → unload
-
-Interleaved pattern with clean resource management.
+Batched architecture (three clean phases, minimal model loads):
+  Phase 1 (Assess):   Load generator → batch assess ALL queries → unload
+  Phase 2 (Retrieve): Load embedder  → batch encode retrieval group → unload
+                       → batch search
+  Phase 3 (Generate): Load generator → batch generate ALL (RAG + direct)
+                       → optionally batch verify RAG answers
+                       → batch regenerate fallbacks → unload
 """
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
-from tqdm import tqdm
+import numpy as np
 
 from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
 from ragicamp.core.logging import get_logger
-from ragicamp.core.types import Document
+from ragicamp.core.types import Document, Searcher
 from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
+
+# Type alias for supported search backends
+SearchBackend = Union[VectorIndex, "HybridSearcher", "HierarchicalSearcher", Searcher]
 
 
 # Prompts for self-RAG decision making
@@ -65,23 +69,37 @@ Then briefly explain.
 Verification:"""
 
 
+# ---------------------------------------------------------------------------
+# Per-query state tracker
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _QueryState:
+    """Mutable state for a single query through the three phases."""
+
+    query: Query
+    confidence: float = 0.3
+    needs_retrieval: bool = True
+    docs: list[Document] = field(default_factory=list)
+    docs_info: list[RetrievedDocInfo] = field(default_factory=list)
+    context_text: str = ""
+    prompt: str = ""
+    answer: str = ""
+    verification: str | None = None
+    steps: list[Step] = field(default_factory=list)
+
+
 class SelfRAGAgent(Agent):
     """Self-RAG agent with adaptive retrieval decision.
 
-    This agent dynamically decides whether to use retrieval based on
-    the query and optionally verifies that answers are grounded in context.
+    Processes ALL queries in three batched phases:
+      1. Assess  -- one generator load to decide retrieval need for ALL queries
+      2. Retrieve -- one embedder load for the retrieval group
+      3. Generate -- one generator load for ALL answers, verification, and fallbacks
 
-    Flow per query:
-    1. Load generator → assess retrieval need → unload
-    2. If confidence <= threshold:
-       - Load embedder → retrieve → unload
-       - Load generator → generate with context → unload
-    3. Else:
-       - Load generator → generate directly → unload
-    4. If verify_answer:
-       - Load generator → verify grounding → unload
-
-    Note: Inherently sequential per query due to the decision-making.
+    Model loads per experiment (N queries):
+        - 1 embedder load  (was up to N)
+        - 2 generator loads (was up to 3N)
     """
 
     def __init__(
@@ -89,7 +107,7 @@ class SelfRAGAgent(Agent):
         name: str,
         embedder_provider: EmbedderProvider,
         generator_provider: GeneratorProvider,
-        index: VectorIndex,
+        index: SearchBackend,
         top_k: int = 5,
         retrieval_threshold: float = 0.5,
         verify_answer: bool = False,
@@ -103,7 +121,7 @@ class SelfRAGAgent(Agent):
             name: Agent identifier
             embedder_provider: Provides embedder with lazy loading
             generator_provider: Provides generator with lazy loading
-            index: Vector index (just data)
+            index: Search backend (VectorIndex, HybridSearcher, etc.)
             top_k: Number of documents to retrieve
             retrieval_threshold: Confidence threshold for skipping retrieval
             verify_answer: Whether to verify answer is grounded
@@ -121,6 +139,9 @@ class SelfRAGAgent(Agent):
         self.fallback_to_direct = fallback_to_direct
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
+        # Detect hybrid searcher (needs query text for sparse leg)
+        self._is_hybrid = hasattr(index, "sparse_index")
+
     def run(
         self,
         queries: list[Query],
@@ -129,7 +150,7 @@ class SelfRAGAgent(Agent):
         checkpoint_path: Path | None = None,
         show_progress: bool = True,
     ) -> list[AgentResult]:
-        """Process queries with adaptive retrieval."""
+        """Process queries with batched adaptive retrieval."""
         # Load checkpoint if resuming
         results, completed_idx = [], set()
         if checkpoint_path:
@@ -141,146 +162,287 @@ class SelfRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
-        logger.info("SelfRAG: Processing %d queries (threshold=%.2f)",
-                   len(pending), self.retrieval_threshold)
+        logger.info(
+            "SelfRAG: Processing %d queries (threshold=%.2f, batched)",
+            len(pending),
+            self.retrieval_threshold,
+        )
 
-        iterator = pending
-        if show_progress:
-            iterator = tqdm(pending, desc="Processing queries")
+        # Initialise per-query state
+        states: dict[int, _QueryState] = {
+            q.idx: _QueryState(query=q) for q in pending
+        }
 
-        for query in iterator:
-            result = self._process_single_query(query)
+        # Phase 1: Batch assess  (1 generator load)
+        self._phase_assess(states)
+
+        # Split into retrieval / direct groups
+        retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
+        direct_group = {idx: s for idx, s in states.items() if not s.needs_retrieval}
+
+        logger.info(
+            "SelfRAG split: %d retrieval, %d direct",
+            len(retrieval_group),
+            len(direct_group),
+        )
+
+        # Phase 2: Batch retrieve  (1 embedder load, only for retrieval group)
+        if retrieval_group:
+            self._phase_retrieve(retrieval_group)
+
+        # Build prompts for all queries
+        for state in retrieval_group.values():
+            state.prompt = self.prompt_builder.build_rag(state.query.text, state.context_text)
+        for state in direct_group.values():
+            state.prompt = self.prompt_builder.build_direct(state.query.text)
+
+        # Phase 3: Batch generate + verify + fallback  (1 generator load)
+        self._phase_generate_and_verify(states, retrieval_group, direct_group)
+
+        # Build results in original query order
+        new_results = self._build_results(states, pending)
+
+        for result in new_results:
             results.append(result)
-
             if on_result:
                 on_result(result)
 
-            if checkpoint_path:
-                self._save_checkpoint(results, checkpoint_path)
+        if checkpoint_path:
+            self._save_checkpoint(results, checkpoint_path)
 
-        logger.info("Completed %d queries", len(pending))
+        logger.info("Completed %d queries", len(new_results))
         return results
 
-    def _process_single_query(self, query: Query) -> AgentResult:
-        """Process a single query with adaptive retrieval."""
-        steps: list[Step] = []
+    # ------------------------------------------------------------------
+    # Phase 1: Assess
+    # ------------------------------------------------------------------
 
-        # Step 1: Assess retrieval need
+    def _phase_assess(self, states: dict[int, _QueryState]) -> None:
+        """Batch assess retrieval need for all queries."""
+        idx_order = list(states.keys())
+        prompts = [
+            RETRIEVAL_DECISION_PROMPT.format(query=states[idx].query.text)
+            for idx in idx_order
+        ]
+
         with self.generator_provider.load() as generator:
-            with StepTimer("assess_retrieval", model=self.generator_provider.model_name) as step:
-                confidence = self._assess_retrieval_need(generator, query.text)
-                step.input = {"query": query.text}
-                step.output = {"confidence": confidence}
-            steps.append(step)
+            with StepTimer("batch_assess", model=self.generator_provider.model_name) as step:
+                responses = generator.batch_generate(prompts, max_tokens=150)
+                step.input = {"n_queries": len(prompts)}
+                step.output = {"n_responses": len(responses)}
 
-        used_retrieval = confidence <= self.retrieval_threshold
-        logger.debug("SelfRAG: confidence=%.2f, threshold=%.2f -> %s",
-                    confidence, self.retrieval_threshold,
-                    "retrieve" if used_retrieval else "direct")
+        for idx, response in zip(idx_order, responses):
+            confidence = self._parse_confidence(response)
+            state = states[idx]
+            state.confidence = confidence
+            state.needs_retrieval = confidence <= self.retrieval_threshold
 
-        retrieved_docs: list[Document] = []
-        retrieved_docs_info: list[RetrievedDocInfo] = []  # For logging
-        context_text = ""
-        verification_result = None
+            state.steps.append(Step(
+                type="assess_retrieval",
+                input={"query": state.query.text},
+                output={"confidence": confidence},
+                model=self.generator_provider.model_name,
+            ))
 
-        if used_retrieval:
-            # Step 2a: Retrieve
-            with self.embedder_provider.load() as embedder:
-                with StepTimer("encode", model=self.embedder_provider.model_name) as step:
-                    query_embedding = embedder.batch_encode([query.text])
-                    step.input = {"query": query.text}
-                    step.output = {"embedding_shape": query_embedding.shape}
-                steps.append(step)
+            logger.debug(
+                "SelfRAG: q=%d confidence=%.2f -> %s",
+                idx, confidence, "retrieve" if state.needs_retrieval else "direct",
+            )
 
-            with StepTimer("search") as step:
-                search_results = self.index.batch_search(query_embedding, top_k=self.top_k)[0]
-                retrieved_docs = [r.document for r in search_results]
-                # Build structured doc info for logging
-                retrieved_docs_info = [
-                    RetrievedDocInfo(
-                        rank=i + 1,
-                        doc_id=r.document.id if r.document else None,
-                        content=r.document.text if r.document else None,
-                        score=r.score,
-                        retrieval_score=r.score,
-                        retrieval_rank=i + 1,
-                    )
-                    for i, r in enumerate(search_results)
-                ]
-                step.input = {"top_k": self.top_k}
-                step.output = {"n_docs": len(retrieved_docs)}
-            steps.append(step)
+    # ------------------------------------------------------------------
+    # Phase 2: Retrieve
+    # ------------------------------------------------------------------
 
-            context_text = ContextFormatter.format_numbered_from_docs(retrieved_docs)
-            prompt = self.prompt_builder.build_rag(query.text, context_text)
+    def _phase_retrieve(self, retrieval_group: dict[int, _QueryState]) -> None:
+        """Batch embed + search for the retrieval group."""
+        idx_order = list(retrieval_group.keys())
+        texts = [retrieval_group[idx].query.text for idx in idx_order]
 
-            # Step 3a: Generate with context
-            with self.generator_provider.load() as generator:
-                with StepTimer("generate", model=self.generator_provider.model_name) as step:
-                    answer = generator.generate(prompt)
-                    step.input = {"query": query.text, "with_context": True}
-                    step.output = answer
-                steps.append(step)
+        # Encode
+        with self.embedder_provider.load() as embedder:
+            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
+                embeddings = embedder.batch_encode(texts)
+                if not isinstance(embeddings, np.ndarray):
+                    embeddings = np.asarray(embeddings, dtype=np.float32)
+                step.input = {"n_queries": len(texts)}
+                step.output = {"shape": list(embeddings.shape)}
 
-                # Step 4: Optionally verify
-                if self.verify_answer:
-                    with StepTimer("verify", model=self.generator_provider.model_name) as step:
-                        verification_result = self._verify_grounding(
-                            generator, query.text, answer, context_text
-                        )
-                        step.input = {"answer": answer[:100]}
-                        step.output = {"verification": verification_result}
-                    steps.append(step)
+        for idx in idx_order:
+            retrieval_group[idx].steps.append(step)
 
-                    # Fallback if not supported
-                    if verification_result == "NOT_SUPPORTED" and self.fallback_to_direct:
-                        logger.debug("Answer not supported, falling back to direct")
-                        with StepTimer("fallback_generate", model=self.generator_provider.model_name) as step:
-                            prompt = self.prompt_builder.build_direct(query.text)
-                            answer = generator.generate(prompt)
-                            step.input = {"query": query.text, "fallback": True}
-                            step.output = answer
-                        steps.append(step)
-                        retrieved_docs = []
-                        retrieved_docs_info = []  # Clear on fallback
-                        context_text = ""
-        else:
-            # Step 2b: Generate directly without retrieval
-            prompt = self.prompt_builder.build_direct(query.text)
+        # Search
+        with StepTimer("batch_search") as search_step:
+            if self._is_hybrid:
+                retrievals = self.index.batch_search(embeddings, texts, top_k=self.top_k)
+            else:
+                retrievals = self.index.batch_search(embeddings, top_k=self.top_k)
+            search_step.input = {"n_queries": len(texts), "top_k": self.top_k}
+            search_step.output = {"n_results": sum(len(r) for r in retrievals)}
 
-            with self.generator_provider.load() as generator:
-                with StepTimer("generate", model=self.generator_provider.model_name) as step:
-                    answer = generator.generate(prompt)
-                    step.input = {"query": query.text, "with_context": False}
-                    step.output = answer
-                steps.append(step)
+        for idx, results in zip(idx_order, retrievals):
+            state = retrieval_group[idx]
+            state.docs = [r.document for r in results]
+            state.docs_info = [
+                RetrievedDocInfo(
+                    rank=i + 1,
+                    doc_id=r.document.id if r.document else None,
+                    content=r.document.text if r.document else None,
+                    score=r.score,
+                    retrieval_score=r.score,
+                    retrieval_rank=i + 1,
+                )
+                for i, r in enumerate(results)
+            ]
+            state.context_text = ContextFormatter.format_numbered_from_docs(state.docs)
+            state.steps.append(search_step)
 
-        return AgentResult(
-            query=query,
-            answer=answer,
-            steps=steps,
-            prompt=prompt,
-            retrieved_docs=retrieved_docs_info if retrieved_docs_info else None,
-            metadata={
-                "used_retrieval": used_retrieval,
-                "confidence": confidence,
-                "num_docs": len(retrieved_docs),
-                "verification": verification_result,
-            },
-        )
+    # ------------------------------------------------------------------
+    # Phase 3: Generate + Verify + Fallback
+    # ------------------------------------------------------------------
 
-    def _assess_retrieval_need(self, generator, query: str) -> float:
-        """Assess whether retrieval is needed for this query."""
-        prompt = RETRIEVAL_DECISION_PROMPT.format(query=query)
-        response = generator.generate(prompt, max_tokens=150)
+    def _phase_generate_and_verify(
+        self,
+        all_states: dict[int, _QueryState],
+        retrieval_group: dict[int, _QueryState],
+        direct_group: dict[int, _QueryState],
+    ) -> None:
+        """Batch generate answers, optionally verify and fallback."""
+        idx_order = list(all_states.keys())
+        prompts = [all_states[idx].prompt for idx in idx_order]
 
+        with self.generator_provider.load() as generator:
+            # Batch generate ALL answers
+            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+                answers = generator.batch_generate(prompts)
+                step.input = {"n_queries": len(prompts)}
+                step.output = {"n_answers": len(answers)}
+
+            for idx, answer in zip(idx_order, answers):
+                state = all_states[idx]
+                state.answer = answer
+                state.steps.append(Step(
+                    type="generate",
+                    input={
+                        "query": state.query.text,
+                        "with_context": state.needs_retrieval,
+                    },
+                    output=answer,
+                    model=self.generator_provider.model_name,
+                ))
+
+            # Batch verify RAG answers (only retrieval group, if enabled)
+            if self.verify_answer and retrieval_group:
+                self._batch_verify_and_fallback(generator, retrieval_group)
+
+    def _batch_verify_and_fallback(
+        self,
+        generator,
+        retrieval_group: dict[int, _QueryState],
+    ) -> None:
+        """Batch verify RAG answers and regenerate fallbacks if needed."""
+        idx_order = list(retrieval_group.keys())
+
+        # Build verification prompts
+        verify_prompts = []
+        for idx in idx_order:
+            state = retrieval_group[idx]
+            verify_prompts.append(
+                VERIFICATION_PROMPT.format(
+                    context=state.context_text[:3000],
+                    query=state.query.text,
+                    answer=state.answer,
+                )
+            )
+
+        with StepTimer("batch_verify", model=self.generator_provider.model_name) as step:
+            verify_responses = generator.batch_generate(verify_prompts, max_tokens=100)
+            step.input = {"n_queries": len(verify_prompts)}
+
+        # Parse verification results
+        fallback_ids: list[int] = []
+        for idx, response in zip(idx_order, verify_responses):
+            verdict = self._parse_verification(response)
+            state = retrieval_group[idx]
+            state.verification = verdict
+            state.steps.append(Step(
+                type="verify",
+                input={"answer": state.answer[:100]},
+                output={"verification": verdict},
+                model=self.generator_provider.model_name,
+            ))
+
+            if verdict == "NOT_SUPPORTED" and self.fallback_to_direct:
+                fallback_ids.append(idx)
+
+        # Batch regenerate fallbacks as direct (same generator load)
+        if fallback_ids:
+            logger.debug("SelfRAG: %d answers not supported, falling back to direct", len(fallback_ids))
+            fallback_prompts = [
+                self.prompt_builder.build_direct(retrieval_group[idx].query.text)
+                for idx in fallback_ids
+            ]
+
+            with StepTimer("batch_fallback_generate", model=self.generator_provider.model_name) as step:
+                fallback_answers = generator.batch_generate(fallback_prompts)
+                step.input = {"n_queries": len(fallback_prompts)}
+
+            for idx, answer in zip(fallback_ids, fallback_answers):
+                state = retrieval_group[idx]
+                state.answer = answer
+                state.prompt = fallback_prompts[fallback_ids.index(idx)]
+                state.docs = []
+                state.docs_info = []
+                state.context_text = ""
+                state.steps.append(Step(
+                    type="fallback_generate",
+                    input={"query": state.query.text, "fallback": True},
+                    output=answer,
+                    model=self.generator_provider.model_name,
+                ))
+
+    # ------------------------------------------------------------------
+    # Result builder
+    # ------------------------------------------------------------------
+
+    def _build_results(
+        self,
+        states: dict[int, _QueryState],
+        original_order: list[Query],
+    ) -> list[AgentResult]:
+        """Build AgentResult list in original query order."""
+        result_map: dict[int, AgentResult] = {}
+
+        for idx, state in states.items():
+            result_map[idx] = AgentResult(
+                query=state.query,
+                answer=state.answer,
+                steps=state.steps,
+                prompt=state.prompt,
+                retrieved_docs=state.docs_info if state.docs_info else None,
+                metadata={
+                    "used_retrieval": state.needs_retrieval,
+                    "confidence": state.confidence,
+                    "num_docs": len(state.docs),
+                    "verification": state.verification,
+                },
+            )
+
+        return [result_map[q.idx] for q in original_order if q.idx in result_map]
+
+    # ------------------------------------------------------------------
+    # Parsing helpers (unchanged logic from original)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_confidence(response: str) -> float:
+        """Parse confidence score from generator response."""
         confidence = 0.3  # Default: uncertain, should retrieve
 
         response_upper = response.upper()
         if "CONFIDENCE:" in response_upper:
             try:
                 idx = response_upper.index("CONFIDENCE:")
-                rest = response[idx + 11:idx + 20]
+                rest = response[idx + 11 : idx + 20]
                 num_str = ""
                 for char in rest:
                     if char.isdigit() or char == ".":
@@ -295,17 +457,9 @@ class SelfRAGAgent(Agent):
 
         return confidence
 
-    def _verify_grounding(
-        self, generator, query: str, answer: str, context: str
-    ) -> str:
-        """Verify if the answer is grounded in the context."""
-        prompt = VERIFICATION_PROMPT.format(
-            context=context[:3000],
-            query=query,
-            answer=answer,
-        )
-        response = generator.generate(prompt, max_tokens=100)
-
+    @staticmethod
+    def _parse_verification(response: str) -> str:
+        """Parse verification verdict from generator response."""
         response_upper = response.upper()
         if "NOT_SUPPORTED" in response_upper:
             return "NOT_SUPPORTED"

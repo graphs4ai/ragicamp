@@ -2,9 +2,19 @@
 
 Creates EmbedderProvider and GeneratorProvider for the clean architecture
 where models are loaded/unloaded via context managers.
+
+Embedding cache:
+    When ``RAGICAMP_CACHE`` is set to ``"1"`` (the default), the factory
+    automatically wraps every ``EmbedderProvider`` with a
+    ``CachedEmbedderProvider`` backed by a shared SQLite KV store.  This
+    caches query embeddings across Optuna trials / subprocesses and avoids
+    loading the embedding model when all queries are already cached.
+
+    Disable with ``RAGICAMP_CACHE=0``.
 """
 
-from typing import Any
+import os
+from typing import Any, Union
 
 from ragicamp.core.logging import get_logger
 from ragicamp.models.providers import (
@@ -12,6 +22,7 @@ from ragicamp.models.providers import (
     EmbedderProvider,
     GeneratorConfig,
     GeneratorProvider,
+    ModelProvider,
 )
 
 logger = get_logger(__name__)
@@ -114,16 +125,21 @@ class ProviderFactory:
         spec: str | dict[str, Any],
         backend: str = "vllm",
         **kwargs: Any,
-    ) -> EmbedderProvider:
+    ) -> Union[EmbedderProvider, "CachedEmbedderProvider"]:
         """Create an EmbedderProvider from spec.
-        
+
+        When the embedding cache is enabled (``RAGICAMP_CACHE=1``, the
+        default), the returned provider is automatically wrapped with a
+        :class:`~ragicamp.cache.CachedEmbedderProvider` so that embeddings
+        are looked up in a shared SQLite KV store before loading the model.
+
         Args:
             spec: Model name or config dict
             backend: 'vllm' or 'sentence_transformers'
             **kwargs: Additional params
         
         Returns:
-            EmbedderProvider ready for .load()
+            EmbedderProvider (or CachedEmbedderProvider) ready for .load()
         """
         if isinstance(spec, dict):
             config = EmbedderConfig(
@@ -135,4 +151,20 @@ class ProviderFactory:
             config = ProviderFactory.parse_embedder_spec(spec, backend, **kwargs)
         
         logger.info("Creating embedder provider: %s (%s)", config.model_name, config.backend)
-        return EmbedderProvider(config)
+        provider: ModelProvider = EmbedderProvider(config)
+
+        # Wrap with embedding cache if enabled
+        if os.environ.get("RAGICAMP_CACHE", "1") == "1":
+            try:
+                from ragicamp.cache import CachedEmbedderProvider, EmbeddingStore
+
+                store = EmbeddingStore.default()
+                provider = CachedEmbedderProvider(provider, store)
+                logger.info("Embedding cache enabled (db=%s)", store.db_path)
+            except Exception:
+                logger.warning(
+                    "Failed to enable embedding cache, falling back to uncached",
+                    exc_info=True,
+                )
+
+        return provider

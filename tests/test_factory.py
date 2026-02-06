@@ -59,7 +59,9 @@ class TestProviderFactory:
         
         assert provider.model_name == "BAAI/bge-large-en-v1.5"
         # Provider starts without model loaded (lazy loading)
-        assert provider._embedder is None
+        # When cache is enabled, the provider is wrapped -- check the inner provider
+        inner = getattr(provider, "inner", provider)
+        assert inner._embedder is None
 
 
 class TestAgentFactory:

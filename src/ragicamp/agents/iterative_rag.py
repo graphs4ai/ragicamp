@@ -1,20 +1,23 @@
-"""Iterative RAG Agent - Multi-turn query refinement.
+"""Iterative RAG Agent - Multi-turn query refinement with batched operations.
 
-Uses model providers with proper lifecycle management:
-- Each iteration: load embedder → retrieve → unload → load generator → evaluate → unload
-- Final: load generator → generate answer → unload
+Batched architecture (one model load per phase per iteration):
+- Each iteration: load embedder → batch encode ALL active queries → unload
+                   → batch search → load generator → batch sufficiency check
+                   → batch refine insufficient → unload
+- Final: load generator → batch generate ALL answers → unload
 
-Interleaved pattern with clean resource management.
+Queries that converge ("sufficient") drop out of the active set each iteration.
 """
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
-from tqdm import tqdm
+import numpy as np
 
 from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
 from ragicamp.core.logging import get_logger
-from ragicamp.core.types import Document
+from ragicamp.core.types import Document, Searcher
 from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
@@ -22,6 +25,8 @@ from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
 
+# Type alias for supported search backends (same as FixedRAG)
+SearchBackend = Union[VectorIndex, "HybridSearcher", "HierarchicalSearcher", Searcher]
 
 # Prompts for iterative refinement
 SUFFICIENCY_PROMPT = """Based on the following context, determine if it contains enough information to answer the question.
@@ -52,21 +57,32 @@ Be specific and focus on the missing information, not what was already found.
 Refined Query:"""
 
 
+# ---------------------------------------------------------------------------
+# Per-query state tracker used during the batched iteration loop
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _QueryState:
+    """Mutable state for a single query across iterations."""
+
+    query: Query
+    current_text: str  # evolves as queries are refined
+    docs: list[Document] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
+    iterations_info: list[dict[str, Any]] = field(default_factory=list)
+    stopped_reason: str | None = None
+
+
 class IterativeRAGAgent(Agent):
     """Iterative RAG agent with multi-turn query refinement.
 
-    This agent iteratively refines its search query based on retrieved context,
-    accumulating relevant documents until it has enough information.
+    Processes ALL queries together at each iteration using batched model
+    operations, then splits into "sufficient" (done) and "needs refinement"
+    (continue) groups.
 
-    Flow per query:
-    1. Load embedder → encode query → search → unload
-    2. Load generator → evaluate sufficiency → unload
-    3. If insufficient: load generator → refine query → unload
-    4. Repeat 1-3 until sufficient or max_iterations
-    5. Load generator → generate final answer → unload
-
-    Note: This is inherently sequential per query. For batch processing,
-    queries are processed one at a time.
+    Model loads per experiment (max_iterations=2, N queries):
+        - ~3 embedder loads  (was N * 3)
+        - ~4 generator loads (was N * 5)
     """
 
     def __init__(
@@ -74,7 +90,7 @@ class IterativeRAGAgent(Agent):
         name: str,
         embedder_provider: EmbedderProvider,
         generator_provider: GeneratorProvider,
-        index: VectorIndex,
+        index: SearchBackend,
         top_k: int = 5,
         max_iterations: int = 2,
         stop_on_sufficient: bool = True,
@@ -87,7 +103,7 @@ class IterativeRAGAgent(Agent):
             name: Agent identifier
             embedder_provider: Provides embedder with lazy loading
             generator_provider: Provides generator with lazy loading
-            index: Vector index (just data)
+            index: Search backend (VectorIndex, HybridSearcher, etc.)
             top_k: Documents to retrieve per iteration
             max_iterations: Maximum refinement iterations
             stop_on_sufficient: Stop early if context is sufficient
@@ -103,6 +119,9 @@ class IterativeRAGAgent(Agent):
         self.stop_on_sufficient = stop_on_sufficient
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
+        # Detect hybrid searcher (needs query text for sparse leg)
+        self._is_hybrid = hasattr(index, "sparse_index")
+
     def run(
         self,
         queries: list[Query],
@@ -111,9 +130,10 @@ class IterativeRAGAgent(Agent):
         checkpoint_path: Path | None = None,
         show_progress: bool = True,
     ) -> list[AgentResult]:
-        """Process queries with iterative refinement.
+        """Process queries with batched iterative refinement.
 
-        Each query is processed sequentially due to the iterative nature.
+        Each iteration is fully batched: one embedder load, one generator
+        load.  Queries that converge drop out of the active set.
         """
         # Load checkpoint if resuming
         results, completed_idx = [], set()
@@ -126,166 +146,312 @@ class IterativeRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
-        logger.info("IterativeRAG: Processing %d queries (max %d iterations each)",
-                   len(pending), self.max_iterations)
+        logger.info(
+            "IterativeRAG: Processing %d queries (max %d iterations, batched)",
+            len(pending),
+            self.max_iterations,
+        )
 
-        iterator = pending
-        if show_progress:
-            iterator = tqdm(pending, desc="Processing queries")
+        # --- Initialise per-query state ---
+        active: dict[int, _QueryState] = {
+            q.idx: _QueryState(query=q, current_text=q.text)
+            for q in pending
+        }
+        converged: dict[int, _QueryState] = {}
 
-        for query in iterator:
-            result = self._process_single_query(query)
+        # --- Iteration loop (batched) ---
+        for iteration in range(self.max_iterations + 1):
+            if not active:
+                break
+
+            logger.info(
+                "=== Iteration %d: %d active queries ===", iteration, len(active),
+            )
+
+            # Phase 1: Batch embed + search  (1 embedder load)
+            self._phase_embed_and_search(active, iteration)
+
+            # If this was the last allowed iteration, everyone goes to final gen
+            if iteration >= self.max_iterations:
+                for state in active.values():
+                    state.iterations_info[-1]["stopped"] = "max_iterations"
+                break
+
+            # Phase 2: Batch sufficiency check + refine  (1 generator load)
+            if self.stop_on_sufficient:
+                newly_sufficient = self._phase_evaluate_and_refine(
+                    active, iteration,
+                )
+                # Move converged queries out of the active set
+                for idx in newly_sufficient:
+                    converged[idx] = active.pop(idx)
+            else:
+                # No sufficiency check -- just refine all
+                self._phase_refine_only(active, iteration)
+
+        # Merge remaining active into converged
+        converged.update(active)
+
+        # Phase 3: Batch generate ALL final answers  (1 generator load)
+        logger.info("=== Final generation: %d queries ===", len(converged))
+        new_results = self._phase_generate_answers(converged, pending)
+
+        # Stream results and checkpoint
+        for result in new_results:
             results.append(result)
-
             if on_result:
                 on_result(result)
 
-            if checkpoint_path:
-                self._save_checkpoint(results, checkpoint_path)
+        if checkpoint_path:
+            self._save_checkpoint(results, checkpoint_path)
 
-        logger.info("Completed %d queries", len(pending))
+        logger.info("Completed %d queries", len(new_results))
         return results
 
-    def _process_single_query(self, query: Query) -> AgentResult:
-        """Process a single query with iterative refinement."""
-        steps: list[Step] = []
-        all_docs: list[Document] = []
-        current_query_text = query.text
-        iterations_info: list[dict[str, Any]] = []
+    # ------------------------------------------------------------------
+    # Phase helpers
+    # ------------------------------------------------------------------
 
-        for iteration in range(self.max_iterations + 1):
-            # Step 1: Retrieve with current query
-            with self.embedder_provider.load() as embedder:
-                with StepTimer("encode", model=self.embedder_provider.model_name) as step:
-                    query_embedding = embedder.batch_encode([current_query_text])
-                    step.input = {"query": current_query_text, "iteration": iteration}
-                    step.output = {"embedding_shape": query_embedding.shape}
-                steps.append(step)
+    def _phase_embed_and_search(
+        self,
+        active: dict[int, _QueryState],
+        iteration: int,
+    ) -> None:
+        """Batch encode + search for all active queries.  Updates state in-place."""
+        idx_order = list(active.keys())
+        texts = [active[idx].current_text for idx in idx_order]
 
-            # Search index
-            with StepTimer("search") as step:
-                search_results = self.index.batch_search(query_embedding, top_k=self.top_k)[0]
-                new_docs = [r.document for r in search_results]
-                step.input = {"iteration": iteration, "top_k": self.top_k}
-                step.output = {"n_docs": len(new_docs)}
-            steps.append(step)
+        # Encode
+        with self.embedder_provider.load() as embedder:
+            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
+                embeddings = embedder.batch_encode(texts)
+                if not isinstance(embeddings, np.ndarray):
+                    embeddings = np.asarray(embeddings, dtype=np.float32)
+                step.input = {"n_queries": len(texts), "iteration": iteration}
+                step.output = {"shape": list(embeddings.shape)}
 
-            # Merge documents
-            all_docs = self._merge_documents(all_docs, new_docs)
-            context_text = ContextFormatter.format_numbered_from_docs(all_docs[:self.top_k * 2])
+        # Broadcast the encode step to each query
+        for idx in idx_order:
+            active[idx].steps.append(step)
 
-            iteration_info = {
+        # Search
+        with StepTimer("batch_search") as search_step:
+            if self._is_hybrid:
+                retrievals = self.index.batch_search(embeddings, texts, top_k=self.top_k)
+            else:
+                retrievals = self.index.batch_search(embeddings, top_k=self.top_k)
+            search_step.input = {"n_queries": len(texts), "top_k": self.top_k, "iteration": iteration}
+            search_step.output = {"n_results": sum(len(r) for r in retrievals)}
+
+        # Merge results into per-query state
+        for idx, results in zip(idx_order, retrievals):
+            state = active[idx]
+            new_docs = [r.document for r in results]
+            state.docs = self._merge_documents(state.docs, new_docs)
+            state.steps.append(search_step)
+
+            state.iterations_info.append({
                 "iteration": iteration,
-                "query": current_query_text,
+                "query": state.current_text,
                 "docs_retrieved": len(new_docs),
-                "total_docs": len(all_docs),
-            }
+                "total_docs": len(state.docs),
+            })
 
-            # Check if we should stop
-            if iteration >= self.max_iterations:
-                iteration_info["stopped"] = "max_iterations"
-                iterations_info.append(iteration_info)
-                break
+    def _phase_evaluate_and_refine(
+        self,
+        active: dict[int, _QueryState],
+        iteration: int,
+    ) -> list[int]:
+        """Batch sufficiency check, then batch refine insufficient queries.
 
-            # Step 2: Evaluate sufficiency (requires generator)
-            if self.stop_on_sufficient:
-                with self.generator_provider.load() as generator:
-                    with StepTimer("evaluate_sufficiency", model=self.generator_provider.model_name) as step:
-                        is_sufficient = self._evaluate_sufficiency(
-                            generator, query.text, context_text
-                        )
-                        step.input = {"query": query.text}
-                        step.output = {"sufficient": is_sufficient}
-                    steps.append(step)
+        Returns list of idx that converged (sufficient).
+        """
+        idx_order = list(active.keys())
+        if not idx_order:
+            return []
 
-                iteration_info["sufficient"] = is_sufficient
-
-                if is_sufficient:
-                    iteration_info["stopped"] = "sufficient"
-                    iterations_info.append(iteration_info)
-                    break
-
-            iterations_info.append(iteration_info)
-
-            # Step 3: Generate refined query (requires generator)
-            if iteration < self.max_iterations:
-                with self.generator_provider.load() as generator:
-                    with StepTimer("refine_query", model=self.generator_provider.model_name) as step:
-                        current_query_text = self._generate_refined_query(
-                            generator, query.text, current_query_text, context_text
-                        )
-                        step.input = {"original_query": query.text}
-                        step.output = {"refined_query": current_query_text}
-                    steps.append(step)
-
-        # Final answer generation
-        final_docs = all_docs[:self.top_k * 2]
-        context_text = ContextFormatter.format_numbered_from_docs(final_docs)
-        prompt = self.prompt_builder.build_rag(query.text, context_text)
+        sufficient_ids: list[int] = []
 
         with self.generator_provider.load() as generator:
-            with StepTimer("generate", model=self.generator_provider.model_name) as step:
-                answer = generator.generate(prompt)
-                step.input = {"query": query.text}
-                step.output = answer
-            steps.append(step)
+            # --- Batch sufficiency check ---
+            suff_prompts = []
+            for idx in idx_order:
+                state = active[idx]
+                context = ContextFormatter.format_numbered_from_docs(
+                    state.docs[: self.top_k * 2]
+                )
+                suff_prompts.append(
+                    SUFFICIENCY_PROMPT.format(context=context, query=state.query.text)
+                )
 
-        # Build structured retrieved docs info for final docs used
-        retrieved_docs = [
-            RetrievedDocInfo(
-                rank=i + 1,
-                doc_id=doc.id if hasattr(doc, 'id') else None,
-                content=doc.text if hasattr(doc, 'text') else str(doc),
-                score=None,  # Iterative RAG accumulates docs, no single score
-            )
-            for i, doc in enumerate(final_docs)
-        ]
+            with StepTimer("batch_sufficiency", model=self.generator_provider.model_name) as step:
+                suff_responses = generator.batch_generate(suff_prompts, max_tokens=100)
+                step.input = {"n_queries": len(suff_prompts), "iteration": iteration}
 
-        return AgentResult(
-            query=query,
-            answer=answer,
-            steps=steps,
-            prompt=prompt,
-            retrieved_docs=retrieved_docs,
-            metadata={
-                "iterations": iterations_info,
-                "total_docs": len(all_docs),
-                "final_docs_used": len(final_docs),
-            },
-        )
+            # Parse responses
+            for idx, response in zip(idx_order, suff_responses):
+                resp_upper = response.upper()
+                is_sufficient = "SUFFICIENT" in resp_upper and "INSUFFICIENT" not in resp_upper
+                state = active[idx]
+                state.iterations_info[-1]["sufficient"] = is_sufficient
+                state.steps.append(Step(
+                    type="evaluate_sufficiency",
+                    input={"query": state.query.text, "iteration": iteration},
+                    output={"sufficient": is_sufficient},
+                    model=self.generator_provider.model_name,
+                ))
 
-    def _evaluate_sufficiency(self, generator, query: str, context: str) -> bool:
-        """Evaluate if context is sufficient to answer the question."""
-        prompt = SUFFICIENCY_PROMPT.format(context=context, query=query)
-        response = generator.generate(prompt, max_tokens=100)
+                if is_sufficient:
+                    state.iterations_info[-1]["stopped"] = "sufficient"
+                    sufficient_ids.append(idx)
 
-        response_upper = response.upper()
-        is_sufficient = "SUFFICIENT" in response_upper and "INSUFFICIENT" not in response_upper
+            # --- Batch refine remaining (those NOT sufficient) ---
+            needs_refine = [idx for idx in idx_order if idx not in sufficient_ids]
 
-        logger.debug("Sufficiency: %s", "sufficient" if is_sufficient else "insufficient")
-        return is_sufficient
+            if needs_refine and iteration < self.max_iterations:
+                refine_prompts = []
+                for idx in needs_refine:
+                    state = active[idx]
+                    context = ContextFormatter.format_numbered_from_docs(
+                        state.docs[: self.top_k * 2]
+                    )
+                    refine_prompts.append(
+                        REFINEMENT_PROMPT.format(
+                            query=state.query.text,
+                            previous_query=state.current_text,
+                            context=context[:2000],
+                        )
+                    )
 
-    def _generate_refined_query(
-        self, generator, original_query: str, previous_query: str, context: str
-    ) -> str:
-        """Generate a refined search query."""
-        prompt = REFINEMENT_PROMPT.format(
-            query=original_query,
-            previous_query=previous_query,
-            context=context[:2000],
-        )
-        refined = generator.generate(prompt, max_tokens=100)
+                with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
+                    refined = generator.batch_generate(refine_prompts, max_tokens=100)
+                    step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
 
-        # Clean up
-        refined = refined.strip()
-        if refined.startswith('"') and refined.endswith('"'):
-            refined = refined[1:-1]
+                for idx, new_text in zip(needs_refine, refined):
+                    new_text = new_text.strip()
+                    if new_text.startswith('"') and new_text.endswith('"'):
+                        new_text = new_text[1:-1]
+                    state = active[idx]
+                    state.current_text = new_text
+                    state.steps.append(Step(
+                        type="refine_query",
+                        input={"original_query": state.query.text, "iteration": iteration},
+                        output={"refined_query": new_text},
+                        model=self.generator_provider.model_name,
+                    ))
 
-        logger.debug("Refined query: %s -> %s", previous_query[:30], refined[:30])
-        return refined
+        return sufficient_ids
 
-    def _merge_documents(
+    def _phase_refine_only(
         self,
+        active: dict[int, _QueryState],
+        iteration: int,
+    ) -> None:
+        """Batch refine all active queries (no sufficiency check)."""
+        idx_order = list(active.keys())
+        if not idx_order or iteration >= self.max_iterations:
+            return
+
+        with self.generator_provider.load() as generator:
+            refine_prompts = []
+            for idx in idx_order:
+                state = active[idx]
+                context = ContextFormatter.format_numbered_from_docs(
+                    state.docs[: self.top_k * 2]
+                )
+                refine_prompts.append(
+                    REFINEMENT_PROMPT.format(
+                        query=state.query.text,
+                        previous_query=state.current_text,
+                        context=context[:2000],
+                    )
+                )
+
+            with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
+                refined = generator.batch_generate(refine_prompts, max_tokens=100)
+                step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
+
+            for idx, new_text in zip(idx_order, refined):
+                new_text = new_text.strip()
+                if new_text.startswith('"') and new_text.endswith('"'):
+                    new_text = new_text[1:-1]
+                state = active[idx]
+                state.current_text = new_text
+                state.steps.append(Step(
+                    type="refine_query",
+                    input={"original_query": state.query.text, "iteration": iteration},
+                    output={"refined_query": new_text},
+                    model=self.generator_provider.model_name,
+                ))
+
+    def _phase_generate_answers(
+        self,
+        all_states: dict[int, _QueryState],
+        original_order: list[Query],
+    ) -> list[AgentResult]:
+        """Batch generate final answers for all queries."""
+        idx_order = list(all_states.keys())
+
+        # Build prompts
+        prompts: list[str] = []
+        final_docs_per_query: list[list[Document]] = []
+        for idx in idx_order:
+            state = all_states[idx]
+            final_docs = state.docs[: self.top_k * 2]
+            final_docs_per_query.append(final_docs)
+            context = ContextFormatter.format_numbered_from_docs(final_docs)
+            prompts.append(self.prompt_builder.build_rag(state.query.text, context))
+
+        # Batch generate
+        with self.generator_provider.load() as generator:
+            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+                answers = generator.batch_generate(prompts)
+                step.input = {"n_queries": len(prompts)}
+                step.output = {"n_answers": len(answers)}
+
+        # Build AgentResult list in original query order
+        result_map: dict[int, AgentResult] = {}
+        for idx, answer, prompt, final_docs in zip(idx_order, answers, prompts, final_docs_per_query):
+            state = all_states[idx]
+            state.steps.append(Step(
+                type="generate",
+                input={"query": state.query.text},
+                output=answer,
+                model=self.generator_provider.model_name,
+            ))
+
+            retrieved_docs_info = [
+                RetrievedDocInfo(
+                    rank=i + 1,
+                    doc_id=doc.id if hasattr(doc, "id") else None,
+                    content=doc.text if hasattr(doc, "text") else str(doc),
+                    score=None,
+                )
+                for i, doc in enumerate(final_docs)
+            ]
+
+            result_map[idx] = AgentResult(
+                query=state.query,
+                answer=answer,
+                steps=state.steps,
+                prompt=prompt,
+                retrieved_docs=retrieved_docs_info,
+                metadata={
+                    "iterations": state.iterations_info,
+                    "total_docs": len(state.docs),
+                    "final_docs_used": len(final_docs),
+                },
+            )
+
+        # Return in original query order
+        return [result_map[q.idx] for q in original_order if q.idx in result_map]
+
+    # ------------------------------------------------------------------
+    # Utilities (unchanged from original)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _merge_documents(
         existing: list[Document],
         new_docs: list[Document],
     ) -> list[Document]:
@@ -294,7 +460,6 @@ class IterativeRAGAgent(Agent):
         merged: list[Document] = []
 
         for doc in existing + new_docs:
-            # Use first 200 chars as content key
             content_key = doc.text[:200] if doc.text else ""
             if content_key not in seen_content:
                 seen_content.add(content_key)

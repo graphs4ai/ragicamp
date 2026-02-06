@@ -70,7 +70,7 @@ setup_env.sh
 # Experiment outputs
 outputs/
 results/
-cache/
+/cache/
 
 # Artifacts (trained models, indices, saved agents)
 artifacts/

@@ -562,3 +562,45 @@ def cmd_migrate_indexes(args: argparse.Namespace) -> int:
     print()
     print(f"Migration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
     return 0 if failed == 0 else 1
+
+
+# =============================================================================
+# Cache management
+# =============================================================================
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    """Manage the embedding cache (stats / clear)."""
+    from ragicamp.cache import EmbeddingStore
+
+    store = EmbeddingStore.default()
+    action = args.cache_action
+
+    if action == "stats":
+        info = store.stats()
+        print(f"\nEmbedding cache: {info['db_path']}")
+        print(f"  Total entries : {info['total_entries']:,}")
+        print(f"  Total size    : {info['total_size_mb']:.2f} MB")
+        if info["models"]:
+            print(f"  Models cached : {len(info['models'])}")
+            for model, minfo in sorted(info["models"].items()):
+                print(f"    {model}: {minfo['entries']:,} entries ({minfo['size_mb']:.2f} MB)")
+        else:
+            print("  (empty)")
+        print()
+        return 0
+
+    elif action == "clear":
+        model = getattr(args, "model", None)
+        if model:
+            print(f"Clearing cache for model: {model}")
+        else:
+            print("Clearing entire embedding cache...")
+
+        deleted = store.clear(model=model)
+        print(f"Deleted {deleted:,} entries.")
+        return 0
+
+    else:
+        print(f"Unknown cache action: {action}")
+        return 1

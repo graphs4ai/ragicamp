@@ -33,6 +33,7 @@ from typing import Optional
 
 from ragicamp.cli.commands import (
     cmd_backup,
+    cmd_cache,
     cmd_compare,
     cmd_download,
     cmd_evaluate,
@@ -304,6 +305,21 @@ def create_parser() -> argparse.ArgumentParser:
         help="Don't auto-run index migration after download",
     )
     download_parser.set_defaults(func=cmd_download)
+
+    # Cache management command
+    cache_parser = subparsers.add_parser("cache", help="Manage the embedding cache")
+    cache_sub = cache_parser.add_subparsers(dest="cache_action", help="Cache actions")
+    cache_sub.required = True
+
+    cache_sub.add_parser("stats", help="Show cache statistics")
+
+    cache_clear_parser = cache_sub.add_parser("clear", help="Clear cached embeddings")
+    cache_clear_parser.add_argument(
+        "--model",
+        default=None,
+        help="Only clear cache for this embedding model (default: all)",
+    )
+    cache_parser.set_defaults(func=cmd_cache)
 
     # Migrate indexes command
     migrate_parser = subparsers.add_parser(
