@@ -12,7 +12,7 @@ Batched architecture (three clean phases, minimal model loads):
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from ragicamp.agents.base import (
     Agent,
@@ -132,6 +132,10 @@ class SelfRAGAgent(Agent):
             fallback_to_direct: If verification fails, fall back to direct
             prompt_builder: For building prompts
         """
+        # Pop retrieval cache kwargs before passing to super
+        self.retrieval_store = config.pop("retrieval_store", None)
+        self.retriever_name: Optional[str] = config.pop("retriever_name", None)
+
         super().__init__(name, **config)
 
         self.embedder_provider = embedder_provider
@@ -268,6 +272,8 @@ class SelfRAGAgent(Agent):
             query_texts=texts,
             top_k=self.top_k,
             is_hybrid=self._is_hybrid,
+            retrieval_store=self.retrieval_store,
+            retriever_name=self.retriever_name,
         )
 
         for idx in idx_order:

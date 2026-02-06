@@ -11,7 +11,7 @@ Queries that converge ("sufficient") drop out of the active set each iteration.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from ragicamp.agents.base import (
     Agent,
@@ -112,6 +112,10 @@ class IterativeRAGAgent(Agent):
             stop_on_sufficient: Stop early if context is sufficient
             prompt_builder: For building prompts
         """
+        # Pop retrieval cache kwargs before passing to super
+        self.retrieval_store = config.pop("retrieval_store", None)
+        self.retriever_name: Optional[str] = config.pop("retriever_name", None)
+
         super().__init__(name, **config)
 
         self.embedder_provider = embedder_provider
@@ -224,12 +228,17 @@ class IterativeRAGAgent(Agent):
         idx_order = list(active.keys())
         texts = [active[idx].current_text for idx in idx_order]
 
+        # Only use retrieval cache on iteration 0 (original queries).
+        # Subsequent iterations have LLM-refined queries that aren't cacheable.
+        use_cache = iteration == 0 and self.retrieval_store is not None
         retrievals, encode_step, search_step = batch_embed_and_search(
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=texts,
             top_k=self.top_k,
             is_hybrid=self._is_hybrid,
+            retrieval_store=self.retrieval_store if use_cache else None,
+            retriever_name=self.retriever_name if use_cache else None,
         )
 
         # Broadcast the encode step to each query
