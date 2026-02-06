@@ -127,12 +127,27 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
     if name.startswith('iterative_') or name.startswith('selfrag_') or name.startswith('premium_'):
         config['is_singleton'] = True
         config['exp_type'] = 'rag'
-        if 'llama' in name.lower():
+        
+        # Detect model from singleton name - order matters (most specific first)
+        name_lower = name.lower()
+        if 'gemma9b' in name_lower or 'gemma2_9b' in name_lower:
+            config['model_short'] = 'Gemma2-9B'
+        elif 'gemma2_2b' in name_lower or 'gemma2b' in name_lower:
+            config['model_short'] = 'Gemma2-2B'
+        elif 'mistral7b' in name_lower or 'mistral' in name_lower:
+            config['model_short'] = 'Mistral-7B'
+        elif 'qwen7b' in name_lower:
+            config['model_short'] = 'Qwen2.5-7B'
+        elif 'qwen1.5b' in name_lower or 'qwen1_5b' in name_lower:
+            config['model_short'] = 'Qwen2.5-1.5B'
+        elif 'qwen3b' in name_lower:
+            config['model_short'] = 'Qwen2.5-3B'
+        elif 'qwen' in name_lower:
+            config['model_short'] = 'Qwen2.5-3B'  # fallback for older naming
+        elif 'llama' in name_lower:
             config['model_short'] = 'Llama-3.2-3B'
-        elif 'phi' in name.lower():
+        elif 'phi' in name_lower:
             config['model_short'] = 'Phi-3-mini'
-        elif 'qwen' in name.lower():
-            config['model_short'] = 'Qwen-2.5-3B'
         
         if name.startswith('iterative_'):
             config['retriever_type'] = 'iterative'
@@ -283,6 +298,231 @@ def load_all_results(study_path: Path = None) -> pd.DataFrame:
         df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
     
     return df
+
+
+def load_failed_experiments(study_path: Path = None) -> pd.DataFrame:
+    """
+    Load failed experiments from a study to analyze failure patterns.
+    
+    Returns a DataFrame with:
+    - name: experiment name
+    - phase: experiment phase when it failed
+    - error: error message
+    - model_short: parsed model name
+    - retriever_type: parsed retriever type
+    - top_k: parsed top_k value
+    
+    Useful for identifying:
+    - Context length issues (e.g., hier retrieval + small context models)
+    - OOM errors
+    - Other systematic failures
+    """
+    if study_path is None:
+        study_path = DEFAULT_STUDY_PATH
+    
+    failed = []
+    
+    if not study_path.exists():
+        print(f"Warning: Study path does not exist: {study_path}")
+        return pd.DataFrame()
+    
+    for exp_dir in study_path.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        
+        state_file = exp_dir / "state.json"
+        if not state_file.exists():
+            continue
+        
+        with open(state_file) as f:
+            state = json.load(f)
+        
+        # Check if experiment failed
+        if state.get('phase') == 'failed' or state.get('error'):
+            config = parse_experiment_name(exp_dir.name)
+            
+            failed.append({
+                'name': exp_dir.name,
+                'phase': state.get('phase', 'unknown'),
+                'error': state.get('error', 'unknown'),
+                'model_short': config.get('model_short', 'unknown'),
+                'retriever_type': config.get('retriever_type'),
+                'top_k': config.get('top_k'),
+                'embedding_model': config.get('embedding_model'),
+                'prompt': config.get('prompt'),
+                'dataset': config.get('dataset'),
+                'predictions_complete': state.get('predictions_complete', 0),
+                'total_questions': state.get('total_questions', 0),
+            })
+    
+    df = pd.DataFrame(failed)
+    if not df.empty:
+        df = df.sort_values(['model_short', 'retriever_type']).reset_index(drop=True)
+    
+    return df
+
+
+def analyze_failure_patterns(failed_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Analyze patterns in failed experiments.
+    
+    Returns a dict with:
+    - by_model: failure counts per model
+    - by_retriever: failure counts per retriever type
+    - by_error_type: categorized error patterns
+    - context_length_issues: experiments likely failed due to context length
+    """
+    if failed_df.empty:
+        return {'total_failed': 0}
+    
+    # Categorize errors
+    context_errors = failed_df[
+        failed_df['error'].str.contains('context|length|token|truncat', case=False, na=False)
+    ]
+    oom_errors = failed_df[
+        failed_df['error'].str.contains('OOM|out of memory|CUDA|GPU', case=False, na=False)
+    ]
+    
+    return {
+        'total_failed': len(failed_df),
+        'by_model': failed_df['model_short'].value_counts().to_dict(),
+        'by_retriever': failed_df['retriever_type'].value_counts().to_dict(),
+        'context_length_issues': len(context_errors),
+        'context_length_details': context_errors[['name', 'model_short', 'retriever_type', 'top_k']].to_dict('records') if len(context_errors) > 0 else [],
+        'oom_issues': len(oom_errors),
+        'oom_details': oom_errors[['name', 'model_short', 'error']].to_dict('records') if len(oom_errors) > 0 else [],
+        'partial_completions': failed_df[failed_df['predictions_complete'] > 0][['name', 'predictions_complete', 'total_questions']].to_dict('records'),
+    }
+
+
+def predict_context_length_issues(study_path: Path = None) -> pd.DataFrame:
+    """
+    Predict which experiment configurations are likely to fail due to context length.
+    
+    Context length estimation:
+    - dense_* retriever: ~512 tokens/doc
+    - hier_* retriever: ~2048 tokens/doc (parent chunks)
+    - hybrid_* retriever: ~512 tokens/doc
+    
+    Model context limits (approximate):
+    - Phi-3-mini-4k: 4096 tokens
+    - Others: 8192+ tokens (typically safe)
+    
+    Returns a DataFrame of risky configurations.
+    """
+    # Known context limits
+    MODEL_CONTEXT_LIMITS = {
+        'Phi-3-mini': 4096,
+        'Qwen2.5-1.5B': 32768,
+        'Gemma2-2B': 8192,
+        'Llama-3.2-3B': 8192,
+        'Qwen2.5-3B': 32768,
+        'Mistral-7B': 32768,
+        'Qwen2.5-7B': 131072,
+        'Gemma2-9B': 8192,
+    }
+    
+    # Tokens per doc by retriever type
+    TOKENS_PER_DOC = {
+        'dense': 512,
+        'hybrid': 512,
+        'hierarchical': 2048,  # Parent chunks
+    }
+    
+    # Prompt overhead (approximate)
+    PROMPT_OVERHEAD = 200  # System + instructions + question
+    
+    risky = []
+    
+    if study_path is None:
+        study_path = DEFAULT_STUDY_PATH
+    
+    if not study_path.exists():
+        return pd.DataFrame()
+    
+    for exp_dir in study_path.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        
+        config = parse_experiment_name(exp_dir.name)
+        
+        if config['exp_type'] != 'rag':
+            continue
+        
+        model = config.get('model_short', 'unknown')
+        retriever_type = config.get('retriever_type')
+        top_k = config.get('top_k')
+        
+        if model == 'unknown' or not retriever_type or not top_k:
+            continue
+        
+        context_limit = MODEL_CONTEXT_LIMITS.get(model, 8192)
+        tokens_per_doc = TOKENS_PER_DOC.get(retriever_type, 512)
+        
+        estimated_context = (top_k * tokens_per_doc) + PROMPT_OVERHEAD
+        
+        if estimated_context > context_limit * 0.9:  # 90% threshold
+            risky.append({
+                'name': exp_dir.name,
+                'model': model,
+                'retriever_type': retriever_type,
+                'top_k': top_k,
+                'estimated_tokens': estimated_context,
+                'context_limit': context_limit,
+                'headroom_pct': (context_limit - estimated_context) / context_limit * 100,
+            })
+    
+    return pd.DataFrame(risky)
+
+
+def get_experiment_health_summary(study_path: Path = None) -> Dict[str, Any]:
+    """
+    Get a complete health summary of all experiments in a study.
+    
+    Returns:
+    - total_experiments: total experiment directories
+    - completed: successfully completed experiments
+    - failed: failed experiments
+    - in_progress: experiments still running
+    - no_state: directories without state.json
+    """
+    if study_path is None:
+        study_path = DEFAULT_STUDY_PATH
+    
+    if not study_path.exists():
+        return {'error': f"Study path does not exist: {study_path}"}
+    
+    summary = {
+        'total_experiments': 0,
+        'complete': 0,
+        'failed': 0,
+        'in_progress': 0,
+        'no_state': 0,
+    }
+    
+    for exp_dir in study_path.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        
+        summary['total_experiments'] += 1
+        
+        state_file = exp_dir / "state.json"
+        if not state_file.exists():
+            summary['no_state'] += 1
+            continue
+        
+        with open(state_file) as f:
+            state = json.load(f)
+        
+        phase = state.get('phase', 'unknown')
+        if phase == 'complete':
+            summary['complete'] += 1
+        elif phase == 'failed':
+            summary['failed'] += 1
+        elif phase in ('generating', 'computing_metrics'):
+            summary['in_progress'] += 1
+    
+    return summary
 
 
 # =============================================================================
