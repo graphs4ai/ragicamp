@@ -124,6 +124,13 @@ rag:
     n_experiments: 1000     # Target trials from RAG grid combinations
     optimize_metric: f1     # Metric to maximize
     seed: 42                # Reproducible sampler
+    # Stratified search: these dimensions are explored uniformly via
+    # round-robin instead of being optimized by TPE.  This prevents the
+    # optimizer from biasing towards easy datasets or strong models.
+    # Remove a dimension here if you genuinely want TPE to optimize it.
+    fixed_dims:
+      - dataset
+      - model
     # Agent strategies: Optuna conditionally suggests agent-specific params
     agent_types:
       - fixed_rag           # Standard single-pass RAG (default)

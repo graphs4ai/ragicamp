@@ -16,6 +16,12 @@ Each trial:
 Study state is persisted to ``{output_dir}/optuna_study.db`` (SQLite),
 enabling transparent resume across runs.
 
+By default, **dataset** and **model** are treated as *benchmark axes* and
+explored uniformly via round-robin (``PartialFixedSampler``), while TPE
+optimizes the remaining dimensions (retriever, top_k, prompt, …).  This
+prevents the optimizer from biasing towards easy datasets or strong models.
+Control which dimensions are fixed via ``rag.sampling.fixed_dims``.
+
 Usage (YAML config):
     rag:
       sampling:
@@ -23,17 +29,23 @@ Usage (YAML config):
         n_experiments: 100
         optimize_metric: f1  # only matters for tpe
         seed: 42
+        fixed_dims:          # dims explored uniformly (not optimized)
+          - dataset
+          - model
 
 Usage (CLI override):
     ragicamp run config.yaml --sample 100 --sample-mode tpe
 """
 
 import json
+import random
 from datetime import datetime
+from itertools import product as itertools_product
 from pathlib import Path
 from typing import Any, Optional
 
 import optuna
+from optuna.samplers import PartialFixedSampler
 
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.runner import run_spec
@@ -594,6 +606,20 @@ def run_optuna_study(
     reranker_lookup = _build_reranker_lookup(config)
     metrics = config.get("metrics", ["f1", "exact_match"])
 
+    # --- Stratified search: fixed dimensions get uniform coverage ---
+    # By default, dataset and model are "benchmark axes" that should be
+    # explored uniformly rather than optimized (TPE would bias towards
+    # easy datasets and strong models, skewing the benchmark).
+    sampling_cfg = config.get("rag", {}).get("sampling", {})
+    fixed_dims: list[str] = sampling_cfg.get("fixed_dims", ["dataset", "model"])
+    # Keep only dims that exist in the search space with >1 value
+    fixed_dims = [d for d in fixed_dims if d in search_space and len(search_space[d]) > 1]
+
+    if fixed_dims:
+        fixed_combos = list(itertools_product(*(search_space[d] for d in fixed_dims)))
+    else:
+        fixed_combos = []
+
     # --- Warm-start: seed from existing experiments on disk ---
     seeded = _seed_from_existing(study, search_space, output_dir, optimize_metric, config)
     if seeded > 0:
@@ -625,6 +651,17 @@ def run_optuna_study(
         summary += (
             f"\n  Completed trials: {completed_trials} ({seeded} seeded from disk)"
             f"\n  New trials to run: {remaining}"
+        )
+    if fixed_dims and fixed_combos:
+        n_combos = len(fixed_combos)
+        trials_per = remaining // n_combos if remaining > 0 and n_combos > 0 else 0
+        leftover = remaining % n_combos if remaining > 0 and n_combos > 0 else 0
+        summary += (
+            f"\n  Stratified dims: {', '.join(fixed_dims)}"
+            f"\n  Fixed combos: {n_combos}"
+            f" ({' x '.join(f'{d}({len(search_space[d])})' for d in fixed_dims)})"
+            f"\n  Trials per combo: ~{trials_per}"
+            f"{f' (+1 for {leftover} combos)' if leftover else ''}"
         )
     summary += f"\n{'=' * 70}"
     logger.info(summary)
@@ -686,7 +723,32 @@ def run_optuna_study(
         return 0.0
 
     # --- Run optimization ---
-    study.optimize(objective, n_trials=remaining, show_progress_bar=False)
+    if fixed_dims and fixed_combos:
+        # Stratified search: round-robin over fixed-dimension combos so
+        # every (dataset, model) pair gets equal trial budget.  Pairs are
+        # shuffled each epoch so TPE doesn't see a predictable order
+        # (which would bias its surrogate model towards the first pairs).
+        rng = random.Random(seed)
+        schedule: list[dict[str, Any]] = []
+        while len(schedule) < remaining:
+            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            rng.shuffle(epoch)
+            schedule.extend(epoch)
+        schedule = schedule[:remaining]
+
+        for i, fixed_params in enumerate(schedule):
+            dims_str = ", ".join(f"{k}={v}" for k, v in fixed_params.items())
+            logger.debug(
+                "Stratified trial %d/%d — fixed: %s", i + 1, remaining, dims_str,
+            )
+            study.sampler = PartialFixedSampler(
+                fixed_params=fixed_params,
+                base_sampler=sampler,
+            )
+            study.optimize(objective, n_trials=1, show_progress_bar=False)
+    else:
+        # No fixed dimensions — standard optimization over all dims
+        study.optimize(objective, n_trials=remaining, show_progress_bar=False)
 
     # --- Print summary ---
     _print_study_summary(study, optimize_metric, n_trials)

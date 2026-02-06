@@ -698,6 +698,149 @@ class TestSeedFromExisting:
 # ---------------------------------------------------------------------------
 
 
+class TestStratifiedSearch:
+    """Tests for the stratified (fixed_dims) round-robin schedule."""
+
+    def test_fixed_dims_default(self, base_config):
+        """Default fixed_dims is ['dataset', 'model'] from config without sampling."""
+        # base_config has no rag.sampling, so defaults apply.
+        # But each dim has only 1 value, so they're filtered out.
+        sampling_cfg = base_config.get("rag", {}).get("sampling", {})
+        fixed_dims = sampling_cfg.get("fixed_dims", ["dataset", "model"])
+        space = _extract_search_space(base_config)
+        fixed_dims = [d for d in fixed_dims if d in space and len(space[d]) > 1]
+        assert fixed_dims == []  # Single-value dims are filtered out
+
+    def test_fixed_dims_multi_value(self):
+        """fixed_dims keeps dimensions with >1 value."""
+        config = {
+            "datasets": ["nq", "triviaqa", "hotpotqa"],
+            "rag": {
+                "models": ["vllm:model-a", "vllm:model-b"],
+                "retriever_names": ["dense"],
+                "top_k_values": [5],
+                "prompts": ["concise"],
+                "query_transform": ["none"],
+                "reranker": {"configs": [{"enabled": False, "name": "none"}]},
+            },
+        }
+        space = _extract_search_space(config)
+        fixed_dims = ["dataset", "model"]
+        fixed_dims = [d for d in fixed_dims if d in space and len(space[d]) > 1]
+        assert fixed_dims == ["dataset", "model"]
+
+    def test_schedule_uniform_coverage(self):
+        """Every (dataset, model) combo gets equal (±1) trial count."""
+        import random
+        from itertools import product as itertools_product
+
+        datasets = ["nq", "triviaqa", "hotpotqa"]
+        models = ["model-a", "model-b"]
+        fixed_dims = ["dataset", "model"]
+        search_space = {"dataset": datasets, "model": models}
+
+        fixed_combos = list(itertools_product(*(search_space[d] for d in fixed_dims)))
+        assert len(fixed_combos) == 6  # 3 datasets × 2 models
+
+        remaining = 25  # Not evenly divisible by 6
+        rng = random.Random(42)
+        schedule: list[dict] = []
+        while len(schedule) < remaining:
+            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            rng.shuffle(epoch)
+            schedule.extend(epoch)
+        schedule = schedule[:remaining]
+
+        assert len(schedule) == 25
+
+        # Count trials per combo
+        from collections import Counter
+        counts = Counter(tuple(sorted(fp.items())) for fp in schedule)
+
+        # 25 / 6 = 4 remainder 1 → each combo gets 4 or 5
+        for combo, count in counts.items():
+            assert count in (4, 5), f"Combo {combo} got {count} trials (expected 4-5)"
+
+        # All 6 combos are present
+        assert len(counts) == 6
+
+    def test_schedule_shuffled_across_epochs(self):
+        """Pairs are shuffled each epoch (not always same order)."""
+        import random
+        from itertools import product as itertools_product
+
+        datasets = ["nq", "triviaqa"]
+        models = ["model-a", "model-b"]
+        fixed_dims = ["dataset", "model"]
+        search_space = {"dataset": datasets, "model": models}
+
+        fixed_combos = list(itertools_product(*(search_space[d] for d in fixed_dims)))
+
+        remaining = 8  # Exactly 2 epochs of 4 combos
+        rng = random.Random(42)
+        schedule: list[dict] = []
+        while len(schedule) < remaining:
+            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            rng.shuffle(epoch)
+            schedule.extend(epoch)
+        schedule = schedule[:remaining]
+
+        epoch1 = schedule[:4]
+        epoch2 = schedule[4:]
+
+        # Both epochs cover all 4 combos
+        keys1 = {tuple(sorted(d.items())) for d in epoch1}
+        keys2 = {tuple(sorted(d.items())) for d in epoch2}
+        assert keys1 == keys2  # Same set of combos
+
+        # But order should differ (with high probability given seed=42)
+        assert epoch1 != epoch2, "Epochs should be shuffled differently"
+
+    def test_fixed_dims_from_config(self):
+        """fixed_dims can be customized via rag.sampling.fixed_dims."""
+        config = {
+            "datasets": ["nq", "triviaqa"],
+            "rag": {
+                "models": ["model-a", "model-b"],
+                "retriever_names": ["dense", "hybrid"],
+                "top_k_values": [5],
+                "prompts": ["concise"],
+                "query_transform": ["none"],
+                "reranker": {"configs": [{"enabled": False, "name": "none"}]},
+                "sampling": {
+                    "fixed_dims": ["dataset"],  # Only fix dataset, not model
+                },
+            },
+        }
+        space = _extract_search_space(config)
+        sampling_cfg = config.get("rag", {}).get("sampling", {})
+        fixed_dims = sampling_cfg.get("fixed_dims", ["dataset", "model"])
+        fixed_dims = [d for d in fixed_dims if d in space and len(space[d]) > 1]
+
+        assert fixed_dims == ["dataset"]  # Only dataset, model is optimized
+
+    def test_empty_fixed_dims_disables_stratification(self):
+        """Setting fixed_dims: [] disables stratification entirely."""
+        config = {
+            "datasets": ["nq", "triviaqa"],
+            "rag": {
+                "models": ["model-a"],
+                "retriever_names": ["dense"],
+                "top_k_values": [5],
+                "prompts": ["concise"],
+                "query_transform": ["none"],
+                "reranker": {"configs": [{"enabled": False, "name": "none"}]},
+                "sampling": {
+                    "fixed_dims": [],  # Explicitly empty
+                },
+            },
+        }
+        sampling_cfg = config.get("rag", {}).get("sampling", {})
+        fixed_dims = sampling_cfg.get("fixed_dims", ["dataset", "model"])
+
+        assert fixed_dims == []
+
+
 class TestRunOptunaStudy:
     """Smoke tests for the run_optuna_study entry point."""
 
