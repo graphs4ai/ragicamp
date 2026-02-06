@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from ragicamp.agents.base import AgentResult, Query
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
-from ragicamp.experiment_state import ExperimentPhase, ExperimentState
+from ragicamp.state import ExperimentPhase, ExperimentState
 from ragicamp.utils.experiment_io import ExperimentIO
 
 if TYPE_CHECKING:

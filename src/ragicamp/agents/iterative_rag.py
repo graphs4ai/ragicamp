@@ -11,22 +11,25 @@ Queries that converge ("sufficient") drop out of the active set each iteration.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Union
+from typing import Any, Callable
 
-import numpy as np
-
-from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
+from ragicamp.agents.base import (
+    Agent,
+    AgentResult,
+    Query,
+    RetrievedDocInfo,
+    Step,
+    StepTimer,
+    batch_embed_and_search,
+    is_hybrid_searcher,
+)
 from ragicamp.core.logging import get_logger
-from ragicamp.core.types import Document, Searcher
-from ragicamp.indexes.vector_index import VectorIndex
+from ragicamp.core.types import Document, SearchBackend
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
-
-# Type alias for supported search backends (same as FixedRAG)
-SearchBackend = Union[VectorIndex, "HybridSearcher", "HierarchicalSearcher", Searcher]
 
 # Prompts for iterative refinement
 SUFFICIENCY_PROMPT = """Based on the following context, determine if it contains enough information to answer the question.
@@ -120,7 +123,7 @@ class IterativeRAGAgent(Agent):
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
         # Detect hybrid searcher (needs query text for sparse leg)
-        self._is_hybrid = hasattr(index, "sparse_index")
+        self._is_hybrid = is_hybrid_searcher(index)
 
     def run(
         self,
@@ -221,27 +224,17 @@ class IterativeRAGAgent(Agent):
         idx_order = list(active.keys())
         texts = [active[idx].current_text for idx in idx_order]
 
-        # Encode
-        with self.embedder_provider.load() as embedder:
-            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
-                embeddings = embedder.batch_encode(texts)
-                if not isinstance(embeddings, np.ndarray):
-                    embeddings = np.asarray(embeddings, dtype=np.float32)
-                step.input = {"n_queries": len(texts), "iteration": iteration}
-                step.output = {"shape": list(embeddings.shape)}
+        retrievals, encode_step, search_step = batch_embed_and_search(
+            embedder_provider=self.embedder_provider,
+            index=self.index,
+            query_texts=texts,
+            top_k=self.top_k,
+            is_hybrid=self._is_hybrid,
+        )
 
         # Broadcast the encode step to each query
         for idx in idx_order:
-            active[idx].steps.append(step)
-
-        # Search
-        with StepTimer("batch_search") as search_step:
-            if self._is_hybrid:
-                retrievals = self.index.batch_search(embeddings, texts, top_k=self.top_k)
-            else:
-                retrievals = self.index.batch_search(embeddings, top_k=self.top_k)
-            search_step.input = {"n_queries": len(texts), "top_k": self.top_k, "iteration": iteration}
-            search_step.output = {"n_results": sum(len(r) for r in retrievals)}
+            active[idx].steps.append(encode_step)
 
         # Merge results into per-query state
         for idx, results in zip(idx_order, retrievals):
@@ -256,6 +249,48 @@ class IterativeRAGAgent(Agent):
                 "docs_retrieved": len(new_docs),
                 "total_docs": len(state.docs),
             })
+
+    def _batch_refine(
+        self,
+        generator,
+        idx_list: list[int],
+        active: dict[int, _QueryState],
+        iteration: int,
+    ) -> None:
+        """Batch refine a set of active queries using the generator.
+
+        Shared helper for both _phase_evaluate_and_refine and _phase_refine_only.
+        """
+        refine_prompts = []
+        for idx in idx_list:
+            state = active[idx]
+            context = ContextFormatter.format_numbered_from_docs(
+                state.docs[: self.top_k * 2]
+            )
+            refine_prompts.append(
+                REFINEMENT_PROMPT.format(
+                    query=state.query.text,
+                    previous_query=state.current_text,
+                    context=context[:2000],
+                )
+            )
+
+        with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
+            refined = generator.batch_generate(refine_prompts, max_tokens=100)
+            step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
+
+        for idx, new_text in zip(idx_list, refined):
+            new_text = new_text.strip()
+            if new_text.startswith('"') and new_text.endswith('"'):
+                new_text = new_text[1:-1]
+            state = active[idx]
+            state.current_text = new_text
+            state.steps.append(Step(
+                type="refine_query",
+                input={"original_query": state.query.text, "iteration": iteration},
+                output={"refined_query": new_text},
+                model=self.generator_provider.model_name,
+            ))
 
     def _phase_evaluate_and_refine(
         self,
@@ -309,36 +344,7 @@ class IterativeRAGAgent(Agent):
             needs_refine = [idx for idx in idx_order if idx not in sufficient_ids]
 
             if needs_refine and iteration < self.max_iterations:
-                refine_prompts = []
-                for idx in needs_refine:
-                    state = active[idx]
-                    context = ContextFormatter.format_numbered_from_docs(
-                        state.docs[: self.top_k * 2]
-                    )
-                    refine_prompts.append(
-                        REFINEMENT_PROMPT.format(
-                            query=state.query.text,
-                            previous_query=state.current_text,
-                            context=context[:2000],
-                        )
-                    )
-
-                with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
-                    refined = generator.batch_generate(refine_prompts, max_tokens=100)
-                    step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
-
-                for idx, new_text in zip(needs_refine, refined):
-                    new_text = new_text.strip()
-                    if new_text.startswith('"') and new_text.endswith('"'):
-                        new_text = new_text[1:-1]
-                    state = active[idx]
-                    state.current_text = new_text
-                    state.steps.append(Step(
-                        type="refine_query",
-                        input={"original_query": state.query.text, "iteration": iteration},
-                        output={"refined_query": new_text},
-                        model=self.generator_provider.model_name,
-                    ))
+                self._batch_refine(generator, needs_refine, active, iteration)
 
         return sufficient_ids
 
@@ -353,36 +359,7 @@ class IterativeRAGAgent(Agent):
             return
 
         with self.generator_provider.load() as generator:
-            refine_prompts = []
-            for idx in idx_order:
-                state = active[idx]
-                context = ContextFormatter.format_numbered_from_docs(
-                    state.docs[: self.top_k * 2]
-                )
-                refine_prompts.append(
-                    REFINEMENT_PROMPT.format(
-                        query=state.query.text,
-                        previous_query=state.current_text,
-                        context=context[:2000],
-                    )
-                )
-
-            with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
-                refined = generator.batch_generate(refine_prompts, max_tokens=100)
-                step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
-
-            for idx, new_text in zip(idx_order, refined):
-                new_text = new_text.strip()
-                if new_text.startswith('"') and new_text.endswith('"'):
-                    new_text = new_text[1:-1]
-                state = active[idx]
-                state.current_text = new_text
-                state.steps.append(Step(
-                    type="refine_query",
-                    input={"original_query": state.query.text, "iteration": iteration},
-                    output={"refined_query": new_text},
-                    model=self.generator_provider.model_name,
-                ))
+            self._batch_refine(generator, idx_order, active, iteration)
 
     def _phase_generate_answers(
         self,

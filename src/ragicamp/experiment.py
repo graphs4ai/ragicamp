@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from ragicamp.agents.base import Agent
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets.base import QADataset
 from ragicamp.execution.phases import (
@@ -45,6 +46,7 @@ from ragicamp.state import (
     check_health,
     detect_state,
 )
+from ragicamp.utils.formatting import format_metrics_summary
 from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
 
@@ -376,14 +378,7 @@ class Experiment:
         with open(self.results_path, "w") as f:
             json.dump(result.to_dict(), f, indent=2)
 
-        metrics_parts = []
-        for key, val in result.metrics.items():
-            if isinstance(val, float):
-                if key in ("f1", "exact_match", "bertscore_f1", "bleurt", "llm_judge_qa"):
-                    metrics_parts.append(f"{key}={val * 100:.1f}%")
-                else:
-                    metrics_parts.append(f"{key}={val:.3f}")
-        metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
+        metrics_str = format_metrics_summary(result.metrics)
         logger.info("Done! %s (%.1fs)", metrics_str, duration)
 
         if self._callbacks.on_complete:
@@ -506,8 +501,8 @@ class Experiment:
                 with open(config_path) as f:
                     retriever_config = json.load(f)
                 
-                embedding_model = retriever_config.get("embedding_model", "all-MiniLM-L6-v2")
-                embedding_backend = retriever_config.get("embedding_backend", "sentence_transformers")
+                embedding_model = retriever_config.get("embedding_model", Defaults.EMBEDDING_MODEL)
+                embedding_backend = retriever_config.get("embedding_backend", Defaults.EMBEDDING_BACKEND)
                 
                 embedder_provider = ProviderFactory.create_embedder(
                     embedding_model,

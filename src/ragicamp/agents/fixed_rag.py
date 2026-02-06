@@ -13,23 +13,27 @@ Supports multiple search backends:
 """
 
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable
 
-import numpy as np
 from tqdm import tqdm
 
-from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
+from ragicamp.agents.base import (
+    Agent,
+    AgentResult,
+    Query,
+    RetrievedDocInfo,
+    Step,
+    StepTimer,
+    batch_embed_and_search,
+    is_hybrid_searcher,
+)
 from ragicamp.core.logging import get_logger
-from ragicamp.core.types import Searcher, SearchResult
-from ragicamp.indexes.vector_index import VectorIndex
+from ragicamp.core.types import SearchBackend, SearchResult
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
-
-# Type alias for all supported search backends
-SearchBackend = Union[VectorIndex, "HybridSearcher", "HierarchicalSearcher", Searcher]
 
 
 class FixedRAGAgent(Agent):
@@ -79,7 +83,7 @@ class FixedRAGAgent(Agent):
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
         # Check if this is a hybrid searcher (needs query text too)
-        self._is_hybrid = hasattr(index, "sparse_index")
+        self._is_hybrid = is_hybrid_searcher(index)
 
     def run(
         self,
@@ -136,47 +140,18 @@ class FixedRAGAgent(Agent):
     ) -> tuple[list[list[SearchResult]], list[Step]]:
         """Phase 1: Encode queries and search index.
 
-        Embedder is loaded, used, then unloaded.
-        Supports all search backends:
-        - VectorIndex: batch_search(embeddings, top_k)
-        - HybridSearcher: batch_search(embeddings, query_texts, top_k)
-        - HierarchicalSearcher: batch_search(embeddings, top_k)
+        Uses the shared batch_embed_and_search utility for all backends.
         """
-        steps: list[Step] = []
-
-        # Load embedder, encode, then unload
-        with self.embedder_provider.load() as embedder:
-            # Batch encode all queries
-            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
-                step.input = {"n_queries": len(query_texts)}
-                query_embeddings = embedder.batch_encode(query_texts)
-                if not isinstance(query_embeddings, np.ndarray):
-                    query_embeddings = np.array(query_embeddings)
-                step.output = {"embedding_shape": list(query_embeddings.shape)}
-            steps.append(step)
-
-            logger.info("Encoded %d queries, shape=%s", len(query_texts), query_embeddings.shape)
-
-        # Embedder is now unloaded - GPU is free
-
-        # Batch search (CPU, no GPU needed)
-        with StepTimer("batch_search") as step:
-            step.input = {"n_queries": len(query_texts), "top_k": self.top_k}
-
-            # HybridSearcher needs both embeddings AND query texts
-            if self._is_hybrid:
-                retrievals = self.index.batch_search(
-                    query_embeddings, query_texts, top_k=self.top_k
-                )
-            else:
-                retrievals = self.index.batch_search(query_embeddings, top_k=self.top_k)
-
-            step.output = {"n_results": sum(len(r) for r in retrievals)}
-        steps.append(step)
+        retrievals, encode_step, search_step = batch_embed_and_search(
+            embedder_provider=self.embedder_provider,
+            index=self.index,
+            query_texts=query_texts,
+            top_k=self.top_k,
+            is_hybrid=self._is_hybrid,
+        )
 
         logger.info("Retrieved documents for %d queries", len(query_texts))
-
-        return retrievals, steps
+        return retrievals, [encode_step, search_step]
 
     def _phase_generate(
         self,
@@ -226,17 +201,7 @@ class FixedRAGAgent(Agent):
             )
 
             # Build structured retrieved docs info
-            retrieved_docs = [
-                RetrievedDocInfo(
-                    rank=i + 1,
-                    doc_id=sr.document.id if sr.document else None,
-                    content=sr.document.text if sr.document else None,
-                    score=sr.score,
-                    retrieval_score=sr.score,  # No reranking in fixed RAG
-                    retrieval_rank=i + 1,
-                )
-                for i, sr in enumerate(search_results)
-            ]
+            retrieved_docs = RetrievedDocInfo.from_search_results(search_results)
 
             result = AgentResult(
                 query=query,

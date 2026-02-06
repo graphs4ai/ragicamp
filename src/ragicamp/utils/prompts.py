@@ -247,11 +247,10 @@ Answer:"""
         if cls._fewshot_cache is not None:
             return cls._fewshot_cache
 
+        from ragicamp.utils.paths import get_project_root
+
         paths = [
-            Path(__file__).parent.parent.parent.parent
-            / "conf"
-            / "prompts"
-            / "fewshot_examples.yaml",
+            get_project_root() / "conf" / "prompts" / "fewshot_examples.yaml",
             Path("conf/prompts/fewshot_examples.yaml"),
         ]
 

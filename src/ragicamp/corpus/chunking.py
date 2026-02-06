@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.types import Document
 
 
@@ -28,8 +29,8 @@ class ChunkConfig:
     """
 
     strategy: str = "recursive"
-    chunk_size: int = 512
-    chunk_overlap: int = 50
+    chunk_size: int = Defaults.CHUNK_SIZE
+    chunk_overlap: int = Defaults.CHUNK_OVERLAP
     min_chunk_size: int = 50
     separators: Optional[list[str]] = None
 

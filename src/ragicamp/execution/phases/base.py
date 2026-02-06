@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from ragicamp.agents.base import Agent
     from ragicamp.datasets.base import QADataset
-    from ragicamp.experiment_state import ExperimentPhase, ExperimentState
+    from ragicamp.state import ExperimentPhase, ExperimentState
     from ragicamp.metrics.base import Metric
     from ragicamp.spec import ExperimentSpec
 

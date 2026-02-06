@@ -44,11 +44,15 @@ jobs:
           version: "latest"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-      - run: uv sync
+      - run: uv sync --extra dev
       - name: Check formatting and linting
         run: |
           uv run ruff format --check src/ tests/ scripts/
           uv run ruff check src/ tests/ scripts/
+      - name: Type checking (mypy)
+        run: |
+          uv run mypy src/ragicamp --ignore-missing-imports --no-error-summary || true
+        continue-on-error: true  # Advisory for now; will be enforced once type coverage improves
 
   # ============================================================================
   # TESTS
@@ -79,7 +83,7 @@ jobs:
           "
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ -v --tb=short --cov=src/ragicamp --cov-report=term-missing --cov-report=xml
+          uv run pytest tests/ -v --tb=short --cov=src/ragicamp --cov-report=term-missing --cov-report=xml --cov-fail-under=20
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

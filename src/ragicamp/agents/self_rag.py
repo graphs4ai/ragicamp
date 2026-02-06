@@ -9,24 +9,28 @@ Batched architecture (three clean phases, minimal model loads):
                        → batch regenerate fallbacks → unload
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Union
+from typing import Callable
 
-import numpy as np
-
-from ragicamp.agents.base import Agent, AgentResult, Query, RetrievedDocInfo, Step, StepTimer
+from ragicamp.agents.base import (
+    Agent,
+    AgentResult,
+    Query,
+    RetrievedDocInfo,
+    Step,
+    StepTimer,
+    batch_embed_and_search,
+    is_hybrid_searcher,
+)
 from ragicamp.core.logging import get_logger
-from ragicamp.core.types import Document, Searcher
-from ragicamp.indexes.vector_index import VectorIndex
+from ragicamp.core.types import Document, SearchBackend
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
 logger = get_logger(__name__)
-
-# Type alias for supported search backends
-SearchBackend = Union[VectorIndex, "HybridSearcher", "HierarchicalSearcher", Searcher]
 
 
 # Prompts for self-RAG decision making
@@ -140,7 +144,7 @@ class SelfRAGAgent(Agent):
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
 
         # Detect hybrid searcher (needs query text for sparse leg)
-        self._is_hybrid = hasattr(index, "sparse_index")
+        self._is_hybrid = is_hybrid_searcher(index)
 
     def run(
         self,
@@ -258,41 +262,21 @@ class SelfRAGAgent(Agent):
         idx_order = list(retrieval_group.keys())
         texts = [retrieval_group[idx].query.text for idx in idx_order]
 
-        # Encode
-        with self.embedder_provider.load() as embedder:
-            with StepTimer("batch_encode", model=self.embedder_provider.model_name) as step:
-                embeddings = embedder.batch_encode(texts)
-                if not isinstance(embeddings, np.ndarray):
-                    embeddings = np.asarray(embeddings, dtype=np.float32)
-                step.input = {"n_queries": len(texts)}
-                step.output = {"shape": list(embeddings.shape)}
+        retrievals, encode_step, search_step = batch_embed_and_search(
+            embedder_provider=self.embedder_provider,
+            index=self.index,
+            query_texts=texts,
+            top_k=self.top_k,
+            is_hybrid=self._is_hybrid,
+        )
 
         for idx in idx_order:
-            retrieval_group[idx].steps.append(step)
-
-        # Search
-        with StepTimer("batch_search") as search_step:
-            if self._is_hybrid:
-                retrievals = self.index.batch_search(embeddings, texts, top_k=self.top_k)
-            else:
-                retrievals = self.index.batch_search(embeddings, top_k=self.top_k)
-            search_step.input = {"n_queries": len(texts), "top_k": self.top_k}
-            search_step.output = {"n_results": sum(len(r) for r in retrievals)}
+            retrieval_group[idx].steps.append(encode_step)
 
         for idx, results in zip(idx_order, retrievals):
             state = retrieval_group[idx]
             state.docs = [r.document for r in results]
-            state.docs_info = [
-                RetrievedDocInfo(
-                    rank=i + 1,
-                    doc_id=r.document.id if r.document else None,
-                    content=r.document.text if r.document else None,
-                    score=r.score,
-                    retrieval_score=r.score,
-                    retrieval_rank=i + 1,
-                )
-                for i, r in enumerate(results)
-            ]
+            state.docs_info = RetrievedDocInfo.from_search_results(results)
             state.context_text = ContextFormatter.format_numbered_from_docs(state.docs)
             state.steps.append(search_step)
 
@@ -433,29 +417,15 @@ class SelfRAGAgent(Agent):
     # Parsing helpers (unchanged logic from original)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _parse_confidence(response: str) -> float:
+    _CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([0-9]*\.?[0-9]+)", re.IGNORECASE)
+
+    @classmethod
+    def _parse_confidence(cls, response: str) -> float:
         """Parse confidence score from generator response."""
-        confidence = 0.3  # Default: uncertain, should retrieve
-
-        response_upper = response.upper()
-        if "CONFIDENCE:" in response_upper:
-            try:
-                idx = response_upper.index("CONFIDENCE:")
-                rest = response[idx + 11 : idx + 20]
-                num_str = ""
-                for char in rest:
-                    if char.isdigit() or char == ".":
-                        num_str += char
-                    elif num_str:
-                        break
-                if num_str:
-                    confidence = float(num_str)
-                    confidence = max(0.0, min(1.0, confidence))
-            except (ValueError, IndexError):
-                pass
-
-        return confidence
+        match = cls._CONFIDENCE_RE.search(response)
+        if match:
+            return max(0.0, min(1.0, float(match.group(1))))
+        return 0.3  # Default: uncertain, should retrieve
 
     @staticmethod
     def _parse_verification(response: str) -> str:

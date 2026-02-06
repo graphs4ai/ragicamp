@@ -597,7 +597,7 @@ def run_optuna_study(
     # --- Warm-start: seed from existing experiments on disk ---
     seeded = _seed_from_existing(study, search_space, output_dir, optimize_metric, config)
     if seeded > 0:
-        print(f"📊 Seeded {seeded} existing experiments into Optuna study")
+        logger.info("Seeded %d existing experiments into Optuna study", seeded)
 
     # --- Log search space summary ---
     total_combos = 1
@@ -610,24 +610,27 @@ def run_optuna_study(
     remaining = max(0, n_trials - completed_trials)
 
     mode_label = "TPE Optimization" if sampler_mode != "random" else "Random Search"
-    print(f"\n{'=' * 70}")
-    print(f"{mode_label}: {study_name}")
-    print(f"  Sampler: {type(sampler).__name__}")
-    print(f"  Metric: {optimize_metric} (maximize)")
-    print(f"  Trials: {n_trials} (target)")
-    print(f"  Storage: {storage_path}")
-    print(f"  Search space:")
-    for dim, values in search_space.items():
-        print(f"    {dim}: {len(values)} values")
-    print(f"  Total possible combinations: {total_combos:,}")
-
+    space_lines = "".join(f"\n    {dim}: {len(values)} values" for dim, values in search_space.items())
+    summary = (
+        f"\n{'=' * 70}\n"
+        f"{mode_label}: {study_name}\n"
+        f"  Sampler: {type(sampler).__name__}\n"
+        f"  Metric: {optimize_metric} (maximize)\n"
+        f"  Trials: {n_trials} (target)\n"
+        f"  Storage: {storage_path}\n"
+        f"  Search space:{space_lines}\n"
+        f"  Total possible combinations: {total_combos:,}"
+    )
     if completed_trials > 0:
-        print(f"  Completed trials: {completed_trials} ({seeded} seeded from disk)")
-        print(f"  New trials to run: {remaining}")
-    print(f"{'=' * 70}\n")
+        summary += (
+            f"\n  Completed trials: {completed_trials} ({seeded} seeded from disk)"
+            f"\n  New trials to run: {remaining}"
+        )
+    summary += f"\n{'=' * 70}"
+    logger.info(summary)
 
     if remaining == 0:
-        print("All trials already completed. Use a higher --sample value to run more.")
+        logger.info("All trials already completed. Use a higher --sample value to run more.")
         _print_study_summary(study, optimize_metric, n_trials)
         return study
 
@@ -646,12 +649,17 @@ def run_optuna_study(
             agent_info = f", agent={spec.agent_type}"
             if ap:
                 agent_info += f"({', '.join(f'{k}={v}' for k, v in ap.items())})"
-        print(
-            f"\n[Trial {trial_num}/{n_trials}] {spec.name}\n"
-            f"  model={model_short}, retriever={spec.retriever}, "
-            f"top_k={spec.top_k}, prompt={spec.prompt}, "
-            f"qt={spec.query_transform or 'none'}, rr={spec.reranker or 'none'}, "
-            f"dataset={spec.dataset}{agent_info}"
+        logger.info(
+            "\n[Trial %d/%d] %s\n"
+            "  model=%s, retriever=%s, "
+            "top_k=%s, prompt=%s, "
+            "qt=%s, rr=%s, "
+            "dataset=%s%s",
+            trial_num, n_trials, spec.name,
+            model_short, spec.retriever,
+            spec.top_k, spec.prompt,
+            spec.query_transform or "none", spec.reranker or "none",
+            spec.dataset, agent_info,
         )
 
         # Run the experiment (handles already-complete via health check)
@@ -670,11 +678,11 @@ def run_optuna_study(
         if status in ("complete", "ran", "resumed"):
             value = _get_experiment_metric(spec.name, output_dir, optimize_metric)
             if value is not None:
-                print(f"  -> {optimize_metric} = {value:.4f}")
+                logger.info("  -> %s = %.4f", optimize_metric, value)
                 return value
 
         # Failed/timeout experiments get 0 so Optuna avoids this region
-        print(f"  -> experiment {status}, reporting {optimize_metric}=0.0")
+        logger.info("  -> experiment %s, reporting %s=0.0", status, optimize_metric)
         return 0.0
 
     # --- Run optimization ---
@@ -696,31 +704,34 @@ def _print_study_summary(
         t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE
     ]
 
-    print(f"\n{'=' * 70}")
-    print(f"Optuna Study Complete: {study.study_name}")
-    print(f"  Total trials: {len(study.trials)}")
+    lines = [
+        f"\n{'=' * 70}",
+        f"Optuna Study Complete: {study.study_name}",
+        f"  Total trials: {len(study.trials)}",
+    ]
 
     if not completed:
-        print("  No completed trials.")
-        print(f"{'=' * 70}")
+        lines.append("  No completed trials.")
+        lines.append(f"{'=' * 70}")
+        logger.info("\n".join(lines))
         return
 
-    print(f"  Best {optimize_metric}: {study.best_value:.4f}")
-    print(f"  Best params:")
+    lines.append(f"  Best {optimize_metric}: {study.best_value:.4f}")
+    lines.append("  Best params:")
     for key, value in study.best_params.items():
         display = value
         if key == "model" and isinstance(value, str) and "/" in value:
             display = value.split("/")[-1]
-        print(f"    {key}: {display}")
+        lines.append(f"    {key}: {display}")
 
     # Top 5 trials
     trials_sorted = sorted(completed, key=lambda t: t.value or 0.0, reverse=True)
-    print(f"\n  Top 5 trials:")
+    lines.append("\n  Top 5 trials:")
     for t in trials_sorted[:5]:
         model_short = t.params.get("model", "?").split("/")[-1]
         agent = t.params.get("agent_type", "fixed_rag")
         agent_str = f", agent={agent}" if agent != "fixed_rag" else ""
-        print(
+        lines.append(
             f"    #{t.number}: {optimize_metric}={t.value:.4f} "
             f"({model_short}, {t.params.get('retriever', '?')}, "
             f"top_k={t.params.get('top_k', '?')}, "
@@ -728,4 +739,5 @@ def _print_study_summary(
             f"{t.params.get('dataset', '?')}{agent_str})"
         )
 
-    print(f"{'=' * 70}")
+    lines.append(f"{'=' * 70}")
+    logger.info("\n".join(lines))

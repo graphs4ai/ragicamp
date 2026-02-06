@@ -10,6 +10,7 @@ Design principles:
 
 import json
 import pickle
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 import faiss
 import numpy as np
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document, SearchResult
 
@@ -24,29 +26,57 @@ logger = get_logger(__name__)
 
 
 # =============================================================================
-# FAISS Configuration
+# FAISS GPU Resources (thread-safe singleton)
 # =============================================================================
 
+_faiss_gpu_lock = threading.Lock()
 _faiss_gpu_resources = None
 
 
 def get_faiss_gpu_resources():
-    """Get shared FAISS GPU resources."""
+    """Get shared FAISS GPU resources (thread-safe).
+
+    Returns the singleton ``StandardGpuResources`` instance, creating it on
+    first call.  Access is protected by a lock so concurrent threads won't
+    race to initialise the resource.
+    """
     global _faiss_gpu_resources
-    
+
     if not hasattr(faiss, "StandardGpuResources"):
         return None
-    
-    if _faiss_gpu_resources is None:
+
+    # Fast path – already initialised
+    if _faiss_gpu_resources is not None:
+        return _faiss_gpu_resources
+
+    with _faiss_gpu_lock:
+        # Double-check after acquiring the lock
+        if _faiss_gpu_resources is not None:
+            return _faiss_gpu_resources
         try:
-            _faiss_gpu_resources = faiss.StandardGpuResources()
-            _faiss_gpu_resources.setTempMemory(512 * 1024 * 1024)  # 512MB
+            res = faiss.StandardGpuResources()
+            res.setTempMemory(Defaults.FAISS_GPU_TEMP_MEMORY_MB * 1024 * 1024)
+            _faiss_gpu_resources = res
             logger.info("Initialized FAISS GPU resources")
         except Exception as e:
             logger.warning("Failed to init FAISS GPU: %s", e)
             return None
-    
+
     return _faiss_gpu_resources
+
+
+def release_faiss_gpu_resources() -> None:
+    """Release FAISS GPU resources to free memory.
+
+    Called by ``ResourceManager.clear_faiss_gpu_resources()`` when
+    transitioning from retrieval to generation phase.
+    """
+    global _faiss_gpu_resources
+
+    with _faiss_gpu_lock:
+        if _faiss_gpu_resources is not None:
+            _faiss_gpu_resources = None
+            logger.info("Released FAISS GPU resources")
 
 
 # =============================================================================
@@ -165,15 +195,15 @@ class VectorIndex:
         
         # Create FAISS index
         if config.index_type == "hnsw":
-            faiss_index = faiss.IndexHNSWFlat(dim, 32)
-            faiss_index.hnsw.efConstruction = 200
-            faiss_index.hnsw.efSearch = 128
+            faiss_index = faiss.IndexHNSWFlat(dim, Defaults.FAISS_HNSW_M)
+            faiss_index.hnsw.efConstruction = Defaults.FAISS_HNSW_EF_CONSTRUCTION
+            faiss_index.hnsw.efSearch = Defaults.FAISS_HNSW_EF_SEARCH
         elif config.index_type == "ivf":
-            nlist = min(4096, max(64, int(np.sqrt(n_docs) * 2)))
+            nlist = min(Defaults.FAISS_IVF_NLIST, max(64, int(np.sqrt(n_docs) * 2)))
             quantizer = faiss.IndexFlatIP(dim)
             faiss_index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
             faiss_index.train(embeddings)
-            faiss_index.nprobe = min(128, nlist // 4)
+            faiss_index.nprobe = min(Defaults.FAISS_IVF_NPROBE, nlist // 4)
         else:  # flat
             faiss_index = faiss.IndexFlatIP(dim)
         

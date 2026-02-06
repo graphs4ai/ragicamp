@@ -159,6 +159,10 @@ class Defaults:
     # Retrieval
     TOP_K = 5
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    EMBEDDING_BACKEND = "sentence_transformers"
+    CHUNK_SIZE = 512
+    CHUNK_OVERLAP = 50
+    HYBRID_ALPHA = 0.7
 
     # Evaluation & Execution
     BATCH_SIZE = 8
@@ -179,6 +183,7 @@ class Defaults:
     # - Interleaved RAG: both models loaded with reduced fractions
     #
     # These are defaults - agents can override based on their strategy.
+    VLLM_GPU_MEMORY_FRACTION = 0.9  # General default for vLLM GPU memory
     VLLM_GPU_MEMORY_FRACTION_FULL = 0.95  # When model has exclusive GPU access
     VLLM_GPU_MEMORY_FRACTION_SHARED = 0.45  # When sharing GPU with another model
     VLLM_EMBEDDER_GPU_MEMORY_FRACTION_SHARED = 0.25  # Embedder when sharing
@@ -187,14 +192,14 @@ class Defaults:
     # NOTE: GPU FAISS disabled by default - B200 (Blackwell) not yet supported by faiss-gpu-cu12.
     # Enable once faiss adds Blackwell kernels, or build from source.
     FAISS_USE_GPU = False  # Disable GPU FAISS until Blackwell support added
-    FAISS_GPU_TEMP_MEMORY_MB = (
-        65536  # Temporary memory for FAISS operations (64GB for large index transfers)
-    )
-    FAISS_INDEX_TYPE = (
-        "hnsw"  # Default index type: flat, ivf, ivfpq, hnsw (hnsw is fastest for CPU)
-    )
+    FAISS_GPU_MEMORY_FRACTION = 0.35  # Fraction of GPU memory for FAISS when sharing
+    FAISS_GPU_TEMP_MEMORY_MB = 512  # Temporary memory for FAISS GPU operations (MB)
+    FAISS_INDEX_TYPE = "hnsw"  # Default: flat, ivf, hnsw (hnsw is fastest for CPU)
     FAISS_IVF_NLIST = 4096  # Number of clusters for IVF indexes
     FAISS_IVF_NPROBE = 128  # Number of clusters to search (higher = better recall)
+    FAISS_HNSW_M = 32  # HNSW connectivity parameter
+    FAISS_HNSW_EF_CONSTRUCTION = 200  # HNSW build-time search depth
+    FAISS_HNSW_EF_SEARCH = 128  # HNSW query-time search depth
     FAISS_CPU_THREADS = 0  # 0 = auto-detect (use all available cores)
 
     # Embedding Model Optimization

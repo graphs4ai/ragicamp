@@ -62,7 +62,7 @@ class ResourceManager:
         Call this before loading a large LLM if FAISS was using GPU.
         """
         try:
-            from ragicamp.indexes.embedding import release_faiss_gpu_resources
+            from ragicamp.indexes.vector_index import release_faiss_gpu_resources
 
             release_faiss_gpu_resources()
         except ImportError:

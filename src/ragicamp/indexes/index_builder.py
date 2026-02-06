@@ -25,6 +25,7 @@ import faiss
 import numpy as np
 from tqdm import tqdm
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
 from ragicamp.indexes.vector_index import IndexConfig, VectorIndex
@@ -332,10 +333,10 @@ def build_index(
     embedding_model: str,
     documents: Iterator[Document] | list[Document],
     output_path: str | Path,
-    chunk_size: int = 512,
-    chunk_overlap: int = 50,
+    chunk_size: int = Defaults.CHUNK_SIZE,
+    chunk_overlap: int = Defaults.CHUNK_OVERLAP,
     chunking_strategy: str = "recursive",
-    index_type: str = "hnsw",
+    index_type: str = Defaults.FAISS_INDEX_TYPE,
     embedding_backend: str = "vllm",
     doc_batch_size: int = 5000,
     embedding_batch_size: int = 4096,

@@ -12,14 +12,51 @@ Note: With vLLM as the backend, batch size just controls how many prompts
 are queued at once. vLLM handles its own GPU memory management internally.
 """
 
-from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol
 
 from tqdm import tqdm
 
 from ragicamp.core.logging import get_logger
+from ragicamp.utils.resource_manager import ResourceManager
 
 logger = get_logger(__name__)
+
+
+def _build_result_item(
+    resp: Any, orig_idx: int, query: str, expected: list[str],
+) -> dict[str, Any]:
+    """Build a result dict from a successful agent response."""
+    result_item: dict[str, Any] = {
+        "idx": orig_idx,
+        "query": query,
+        "prediction": resp.answer,
+        "expected": expected,
+        "prompt": getattr(resp, "prompt", None),
+        "error": None,
+    }
+    metadata = (
+        getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
+    )
+    if metadata:
+        result_item["metadata"] = metadata
+    context = getattr(resp, "context", None)
+    if context and hasattr(context, "intermediate_steps") and context.intermediate_steps:
+        result_item["intermediate_steps"] = context.intermediate_steps
+    return result_item
+
+
+def _build_error_item(
+    orig_idx: int, query: str, expected: list[str], error: str,
+) -> dict[str, Any]:
+    """Build a result dict for a failed query."""
+    return {
+        "idx": orig_idx,
+        "query": query,
+        "prediction": f"[ERROR: {error[:50]}]",
+        "expected": expected,
+        "prompt": None,
+        "error": error,
+    }
 
 
 class Answerable(Protocol):
@@ -36,36 +73,6 @@ class BatchAnswerable(Answerable, Protocol):
     def batch_answer(self, queries: list[str], **kwargs: Any) -> list[Any]:
         """Answer multiple queries in a batch."""
         ...
-
-
-@dataclass
-class ExecutionConfig:
-    """Configuration for execution."""
-
-    batch_size: int = 32
-    checkpoint_callback: Optional[Callable[[int], None]] = None
-    progress_bar: bool = True
-
-    def __post_init__(self):
-        if self.batch_size < 1:
-            raise ValueError("batch_size must be at least 1")
-
-
-@dataclass
-class BatchResult:
-    """Result of processing a batch."""
-
-    items: list[dict[str, Any]]
-    batch_size_used: int
-    errors: list[str] = field(default_factory=list)
-
-    @property
-    def success_count(self) -> int:
-        return sum(1 for item in self.items if not item.get("error"))
-
-    @property
-    def error_count(self) -> int:
-        return len(self.items) - self.success_count
 
 
 class ResilientExecutor:
@@ -143,13 +150,11 @@ class ResilientExecutor:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Execute with batch processing."""
-        import torch
-
         results: list[dict[str, Any]] = []
         idx = 0
         pbar = tqdm(total=len(queries), desc="Generating", disable=not progress)
         consecutive_failures = 0
-        max_consecutive_failures = 5  # Fail entire execution after this many consecutive errors
+        max_consecutive_failures = 5
 
         while idx < len(queries):
             batch = queries[idx : idx + self.batch_size]
@@ -159,61 +164,34 @@ class ResilientExecutor:
                 responses = self.agent.batch_answer(batch_queries, **kwargs)
 
                 for (orig_idx, query, expected), resp in zip(batch, responses):
-                    result_item = {
-                        "idx": orig_idx,
-                        "query": query,
-                        "prediction": resp.answer,
-                        "expected": expected,
-                        "prompt": getattr(resp, "prompt", None),
-                        "error": None,
-                    }
-                    # Include metadata for analysis (RAG steps, iterations, decisions)
-                    metadata = (
-                        getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
-                    )
-                    if metadata:
-                        result_item["metadata"] = metadata
-                    # Include intermediate steps (iterations, query refinements, etc.)
-                    context = getattr(resp, "context", None)
-                    if (
-                        context
-                        and hasattr(context, "intermediate_steps")
-                        and context.intermediate_steps
-                    ):
-                        result_item["intermediate_steps"] = context.intermediate_steps
-                    results.append(result_item)
+                    results.append(_build_result_item(resp, orig_idx, query, expected))
 
                 pbar.update(len(batch))
                 idx += self.batch_size
-                consecutive_failures = 0  # Reset on success
+                consecutive_failures = 0
 
             except Exception as e:
                 error_str = str(e)
                 consecutive_failures += 1
 
-                # Check if we've hit too many consecutive failures (model may be broken)
                 if consecutive_failures >= max_consecutive_failures:
                     logger.error(
                         "Hit %d consecutive failures - model may be broken. Aborting execution.",
                         consecutive_failures,
                     )
-                    # Record remaining items as failed
                     for i in range(idx, len(queries)):
                         orig_idx, query, expected = queries[i]
-                        results.append(
-                            {
-                                "idx": orig_idx,
-                                "query": query,
-                                "prediction": f"[ABORTED: {consecutive_failures} consecutive failures]",
-                                "expected": expected,
-                                "prompt": None,
-                                "error": f"Aborted after {consecutive_failures} failures: {error_str}",
-                            }
-                        )
+                        results.append({
+                            "idx": orig_idx,
+                            "query": query,
+                            "prediction": f"[ABORTED: {consecutive_failures} consecutive failures]",
+                            "expected": expected,
+                            "prompt": None,
+                            "error": f"Aborted after {consecutive_failures} failures: {error_str}",
+                        })
                     pbar.update(len(queries) - idx)
-                    break  # Exit the while loop
+                    break
 
-                # Log error and record failed items
                 logger.warning(
                     "Batch failed (attempt %d/%d): %s",
                     consecutive_failures,
@@ -221,27 +199,15 @@ class ResilientExecutor:
                     error_str[:100],
                 )
                 for orig_idx, query, expected in batch:
-                    results.append(
-                        {
-                            "idx": orig_idx,
-                            "query": query,
-                            "prediction": f"[ERROR: {error_str[:50]}]",
-                            "expected": expected,
-                            "prompt": None,
-                            "error": error_str,
-                        }
-                    )
+                    results.append(_build_error_item(orig_idx, query, expected, error_str))
                 pbar.update(len(batch))
                 idx += len(batch)
 
-            # Checkpoint
             if checkpoint_every and len(results) % checkpoint_every == 0:
                 if checkpoint_callback:
                     checkpoint_callback(results)
 
-            # Clear GPU between batches
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            ResourceManager.clear_gpu_memory()
 
         pbar.close()
         return results
@@ -255,55 +221,20 @@ class ResilientExecutor:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Execute queries one at a time."""
-        import torch
-
         results: list[dict[str, Any]] = []
 
         for orig_idx, query, expected in tqdm(queries, desc="Generating", disable=not progress):
             try:
                 resp = self.agent.answer(query, **kwargs)
-                result_item = {
-                    "idx": orig_idx,
-                    "query": query,
-                    "prediction": resp.answer,
-                    "expected": expected,
-                    "prompt": getattr(resp, "prompt", None),
-                    "error": None,
-                }
-                # Include metadata for analysis (RAG steps, iterations, decisions)
-                metadata = (
-                    getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
-                )
-                if metadata:
-                    result_item["metadata"] = metadata
-                # Include intermediate steps (iterations, query refinements, etc.)
-                context = getattr(resp, "context", None)
-                if (
-                    context
-                    and hasattr(context, "intermediate_steps")
-                    and context.intermediate_steps
-                ):
-                    result_item["intermediate_steps"] = context.intermediate_steps
-                results.append(result_item)
+                results.append(_build_result_item(resp, orig_idx, query, expected))
             except Exception as e:
-                results.append(
-                    {
-                        "idx": orig_idx,
-                        "query": query,
-                        "prediction": f"[ERROR: {str(e)[:50]}]",
-                        "expected": expected,
-                        "prompt": None,
-                        "error": str(e),
-                    }
-                )
+                results.append(_build_error_item(orig_idx, query, expected, str(e)))
 
-            # Checkpoint
             if checkpoint_every and len(results) % checkpoint_every == 0:
                 if checkpoint_callback:
                     checkpoint_callback(results)
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            ResourceManager.clear_gpu_memory()
 
         return results
 

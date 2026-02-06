@@ -2,10 +2,13 @@
 
 import argparse
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -78,10 +81,12 @@ def cmd_index(args: argparse.Namespace) -> int:
     print(f"Loaded {len(docs)} documents")
 
     # Chunk config
+    from ragicamp.core.constants import Defaults
+
     chunk_config = ChunkConfig(
         strategy="recursive",
         chunk_size=args.chunk_size,
-        chunk_overlap=50,
+        chunk_overlap=Defaults.CHUNK_OVERLAP,
     )
     chunker = DocumentChunker(chunk_config)
 
@@ -159,42 +164,24 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     import os
 
     from ragicamp.evaluation import compute_metrics_from_file
-    from ragicamp.metrics import ExactMatchMetric, F1Metric
+    from ragicamp.factory import MetricFactory
 
-    metrics = []
-    for name in args.metrics:
-        if name == "f1":
-            metrics.append(F1Metric())
-        elif name == "exact_match":
-            metrics.append(ExactMatchMetric())
-        elif name in ("llm_judge", "llm_judge_qa"):
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
-                print("Set it with: export OPENAI_API_KEY='your-key'")
-                return 1
+    metric_names = list(args.metrics)
 
-            from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
-            from ragicamp.models.openai import OpenAIModel
+    # Build judge model if needed for LLM metrics
+    judge_model = None
+    if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            logger.error("OPENAI_API_KEY not set. Required for llm_judge_qa. Set it with: export OPENAI_API_KEY='your-key'")
+            return 1
+        from ragicamp.models.openai import OpenAIModel
 
-            judge_model_name = args.judge_model
-            print(f"Using judge model: {judge_model_name} (max_concurrent={args.max_concurrent})")
-            judge_model = OpenAIModel(judge_model_name, temperature=0.0)
-            metrics.append(
-                LLMJudgeQAMetric(
-                    judge_model=judge_model,
-                    judgment_type=args.judgment_type,
-                    max_concurrent=args.max_concurrent,
-                )
-            )
-        elif name == "bertscore":
-            from ragicamp.metrics import BertScoreMetric
+        judge_model_name = args.judge_model
+        print(f"Using judge model: {judge_model_name} (max_concurrent={args.max_concurrent})")
+        judge_model = OpenAIModel(judge_model_name, temperature=0.0)
 
-            metrics.append(BertScoreMetric())
-        elif name == "bleurt":
-            from ragicamp.metrics import BLEURTMetric
-
-            metrics.append(BLEURTMetric())
+    metrics = MetricFactory.create(metric_names, judge_model=judge_model)
 
     if not metrics:
         print(
@@ -221,7 +208,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
 def cmd_health(args: argparse.Namespace) -> int:
     """Check health of experiments in a directory."""
-    from ragicamp.experiment_state import check_health
+    from ragicamp.state import check_health
 
     output_dir = args.output_dir
     if not output_dir.exists():
@@ -233,9 +220,11 @@ def cmd_health(args: argparse.Namespace) -> int:
         d
         for d in output_dir.iterdir()
         if d.is_dir()
-        and (d / "state.json").exists()
-        or (d / "predictions.json").exists()
-        or (d / "results.json").exists()
+        and (
+            (d / "state.json").exists()
+            or (d / "predictions.json").exists()
+            or (d / "results.json").exists()
+        )
     ]
 
     if not exp_dirs:
@@ -266,7 +255,7 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume incomplete experiments."""
-    from ragicamp.experiment_state import check_health
+    from ragicamp.state import check_health
 
     output_dir = args.output_dir
     if not output_dir.exists():
@@ -326,7 +315,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
+            logger.error("OPENAI_API_KEY not set. Required for llm_judge_qa.")
             return 1
         from ragicamp.models.openai import OpenAIModel
 
@@ -385,8 +374,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
         # Use the most recent backup as target
         backups = list_backups(args.bucket, limit=1)
         if not backups:
-            print("Error: No existing backups found. Cannot use --latest.")
-            print("Run a full backup first without --latest flag.")
+            logger.error("No existing backups found. Cannot use --latest. Run a full backup first without --latest flag.")
             return 1
         latest_backup = backups[0]
         print(f"Using latest backup: {latest_backup}")
@@ -450,115 +438,126 @@ def _pickle_needs_migration(pkl_path: Path) -> bool:
         return False
 
 
-def cmd_migrate_indexes(args: argparse.Namespace) -> int:
-    """Migrate old index format to new format.
-    
-    Migrates:
-    - retriever_config.json → config.json
-    - documents.pkl with old class path → new class path
+def _find_indexes_to_migrate(
+    args: argparse.Namespace,
+) -> tuple[list[Path], bool]:
+    """Find all index paths that should be considered for migration.
+
+    Returns:
+        Tuple of (index_paths, force_flag).
     """
-    import pickle
-    from ragicamp.indexes.vector_index import VectorIndex
     from ragicamp.utils.artifacts import get_artifact_manager
-    
+
     manager = get_artifact_manager()
     indexes_dir = manager.indexes_dir
-    
     force = getattr(args, "force", False)
-    
+
     if args.index_name:
-        index_paths = [manager.get_embedding_index_path(args.index_name)]
+        return [manager.get_embedding_index_path(args.index_name)], force
+
+    return [p for p in indexes_dir.iterdir() if p.is_dir()], force
+
+
+def _migrate_single_index(
+    index_path: Path, *, dry_run: bool, force: bool,
+) -> str:
+    """Migrate a single index directory.
+
+    Returns:
+        One of "migrated", "skipped", "failed".
+    """
+    import pickle
+
+    from ragicamp.indexes.vector_index import VectorIndex
+
+    name = index_path.name
+
+    has_faiss = (index_path / "index.faiss").exists()
+    has_shards = any((index_path / f"shard_{i}" / "index.faiss").exists() for i in range(10))
+
+    if not has_faiss and not has_shards:
+        print(f"  [SKIP] {name}: not a valid index")
+        return "skipped"
+
+    needs_config = not (index_path / "config.json").exists()
+    docs_path = index_path / "documents.pkl"
+    shard_dirs = sorted(index_path.glob("shard_*"))
+
+    needs_pickle = False
+    if docs_path.exists():
+        needs_pickle = _pickle_needs_migration(docs_path)
     else:
-        # Find all indexes
-        index_paths = [p for p in indexes_dir.iterdir() if p.is_dir()]
-    
+        for shard_dir in shard_dirs:
+            if _pickle_needs_migration(shard_dir / "documents.pkl"):
+                needs_pickle = True
+                break
+
+    if not needs_config and not needs_pickle and not force:
+        print(f"  [SKIP] {name}: already migrated")
+        return "skipped"
+
+    what_to_do = []
+    if needs_config:
+        what_to_do.append("config")
+    if needs_pickle:
+        what_to_do.append("pickle")
+
+    try:
+        if dry_run:
+            print(f"  [DRY RUN] {name}: would migrate {', '.join(what_to_do)}")
+            return "migrated"
+
+        print(f"  Migrating {name} ({', '.join(what_to_do)})...")
+        index = VectorIndex.load(index_path, use_mmap=False)
+
+        if needs_config or force:
+            config_path = index_path / "config.json"
+            with open(config_path, "w") as f:
+                json.dump(index.config.to_dict(), f, indent=2)
+
+        if needs_pickle or force:
+            if docs_path.exists():
+                with open(docs_path, "wb") as f:
+                    pickle.dump(index.documents, f)
+                print(f"  [OK] {name}: migrated ({len(index.documents)} docs)")
+            else:
+                for shard_dir in shard_dirs:
+                    shard_docs = shard_dir / "documents.pkl"
+                    if shard_docs.exists():
+                        with open(shard_docs, "rb") as f:
+                            shard_documents = pickle.load(f)
+                        shard_documents = VectorIndex._ensure_document_type(shard_documents)
+                        with open(shard_docs, "wb") as f:
+                            pickle.dump(shard_documents, f)
+                print(f"  [OK] {name}: migrated {len(shard_dirs)} shards")
+        else:
+            print(f"  [OK] {name}: config updated")
+
+        return "migrated"
+
+    except Exception as e:
+        print(f"  [FAIL] {name}: {e}")
+        return "failed"
+
+
+def cmd_migrate_indexes(args: argparse.Namespace) -> int:
+    """Migrate old index format to new format."""
+    index_paths, force = _find_indexes_to_migrate(args)
+
     if not index_paths:
         print("No indexes found to migrate.")
         return 0
-    
-    migrated = 0
-    skipped = 0
-    failed = 0
-    
+
+    migrated = skipped = failed = 0
     for index_path in index_paths:
-        name = index_path.name
-        
-        # Check if it's a valid index
-        has_faiss = (index_path / "index.faiss").exists()
-        has_shards = any((index_path / f"shard_{i}" / "index.faiss").exists() for i in range(10))
-        
-        if not has_faiss and not has_shards:
-            print(f"  [SKIP] {name}: not a valid index")
+        status = _migrate_single_index(index_path, dry_run=args.dry_run, force=force)
+        if status == "migrated":
+            migrated += 1
+        elif status == "skipped":
             skipped += 1
-            continue
-        
-        # Check what needs migration
-        needs_config = not (index_path / "config.json").exists()
-        
-        # Check if any pickle files need migration
-        docs_path = index_path / "documents.pkl"
-        shard_dirs = sorted(index_path.glob("shard_*"))
-        
-        needs_pickle = False
-        if docs_path.exists():
-            needs_pickle = _pickle_needs_migration(docs_path)
         else:
-            for shard_dir in shard_dirs:
-                if _pickle_needs_migration(shard_dir / "documents.pkl"):
-                    needs_pickle = True
-                    break
-        
-        if not needs_config and not needs_pickle and not force:
-            print(f"  [SKIP] {name}: already migrated")
-            skipped += 1
-            continue
-        
-        what_to_do = []
-        if needs_config:
-            what_to_do.append("config")
-        if needs_pickle:
-            what_to_do.append("pickle")
-        
-        try:
-            if args.dry_run:
-                print(f"  [DRY RUN] {name}: would migrate {', '.join(what_to_do)}")
-                migrated += 1
-            else:
-                print(f"  Migrating {name} ({', '.join(what_to_do)})...")
-                index = VectorIndex.load(index_path, use_mmap=False)
-                
-                # Save config.json if needed
-                if needs_config or force:
-                    config_path = index_path / "config.json"
-                    with open(config_path, "w") as f:
-                        json.dump(index.config.to_dict(), f, indent=2)
-                
-                # Re-save documents.pkl with new class path
-                if needs_pickle or force:
-                    if docs_path.exists():
-                        with open(docs_path, "wb") as f:
-                            pickle.dump(index.documents, f)
-                        print(f"  [OK] {name}: migrated ({len(index.documents)} docs)")
-                    else:
-                        # Handle sharded indexes
-                        for shard_dir in shard_dirs:
-                            shard_docs = shard_dir / "documents.pkl"
-                            if shard_docs.exists():
-                                with open(shard_docs, "rb") as f:
-                                    shard_documents = pickle.load(f)
-                                shard_documents = VectorIndex._ensure_document_type(shard_documents)
-                                with open(shard_docs, "wb") as f:
-                                    pickle.dump(shard_documents, f)
-                        print(f"  [OK] {name}: migrated {len(shard_dirs)} shards")
-                else:
-                    print(f"  [OK] {name}: config updated")
-                
-                migrated += 1
-                
-        except Exception as e:
-            print(f"  [FAIL] {name}: {e}")
             failed += 1
-    
+
     print()
     print(f"Migration complete: {migrated} migrated, {skipped} skipped, {failed} failed")
     return 0 if failed == 0 else 1

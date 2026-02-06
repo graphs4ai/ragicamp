@@ -4,6 +4,38 @@ from typing import Optional
 
 from ragicamp.core.types import Document
 
+# Metrics that should be formatted as percentages (0-1 range → 0-100%)
+PERCENTAGE_METRICS = frozenset({
+    "f1",
+    "exact_match",
+    "bertscore_f1",
+    "bleurt",
+    "llm_judge_qa",
+})
+
+
+def format_metrics_summary(metrics: dict[str, float]) -> str:
+    """Format a metrics dict into a human-readable summary string.
+
+    Metrics in PERCENTAGE_METRICS are displayed as percentages (e.g. 85.3%),
+    all others as raw floats (e.g. 0.123).
+
+    Args:
+        metrics: Dict of metric_name -> float value.
+
+    Returns:
+        Space-separated summary string, or "no metrics" if empty.
+    """
+    parts: list[str] = []
+    for key, val in metrics.items():
+        if not isinstance(val, (int, float)):
+            continue
+        if key in PERCENTAGE_METRICS:
+            parts.append(f"{key}={val * 100:.1f}%")
+        else:
+            parts.append(f"{key}={val:.3f}")
+    return " ".join(parts) if parts else "no metrics"
+
 
 class ContextFormatter:
     """Utility class for formatting retrieved documents into context strings.
@@ -72,7 +104,7 @@ class ContextFormatter:
 
     @staticmethod
     def format_with_scores(
-        docs: list[Document], show_score: bool = True, score_format: str = "{:.3f}"
+        docs: list[Document], show_score: bool = True, score_format: str = "{score:.3f}"
     ) -> str:
         """Format documents with retrieval scores.
 

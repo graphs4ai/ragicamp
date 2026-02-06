@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ class Embedder(Protocol):
 def create_embedder(
     model_name: str,
     backend: str = "vllm",
-    gpu_memory_fraction: float = 0.95,  # Max VRAM for throughput
+    gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL,  # Max VRAM for throughput
     enforce_eager: bool = False,  # CUDA graphs improve throughput
     max_num_seqs: int | None = None,  # None = auto-detect from GPU memory
     max_num_batched_tokens: int | None = None,  # None = auto-detect

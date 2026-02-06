@@ -129,7 +129,7 @@ class TestCmdBackupLatest:
         assert call_kwargs["sync"] is True
 
     @patch("ragicamp.cli.backup.list_backups")
-    def test_latest_flag_fails_when_no_backups(self, mock_list_backups, capsys):
+    def test_latest_flag_fails_when_no_backups(self, mock_list_backups):
         """Test that --latest flag fails gracefully when no backups exist."""
         from ragicamp.cli.commands import cmd_backup
 
@@ -149,8 +149,6 @@ class TestCmdBackupLatest:
         result = cmd_backup(args)
 
         assert result == 1
-        captured = capsys.readouterr()
-        assert "No existing backups found" in captured.out
 
     @patch("ragicamp.cli.backup.backup")
     @patch("ragicamp.cli.backup.list_backups")

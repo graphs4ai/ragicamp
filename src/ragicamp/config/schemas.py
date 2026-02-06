@@ -9,6 +9,8 @@ from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
+from ragicamp.core.constants import Defaults
+
 
 class ModelConfig(BaseModel):
     """Model configuration.
@@ -86,8 +88,8 @@ class ChunkingConfig(BaseModel):
         default="recursive",
         description="Chunking strategy: 'fixed', 'sentence', 'paragraph', 'recursive'",
     )
-    chunk_size: int = Field(default=512, description="Target chunk size in characters")
-    chunk_overlap: int = Field(default=50, description="Overlap between chunks")
+    chunk_size: int = Field(default=Defaults.CHUNK_SIZE, description="Target chunk size in characters")
+    chunk_overlap: int = Field(default=Defaults.CHUNK_OVERLAP, description="Overlap between chunks")
     min_chunk_size: int = Field(default=50, description="Minimum chunk size (discard smaller)")
 
     @validator("strategy")
@@ -104,7 +106,7 @@ class RetrieverConfig(BaseModel):
 
     type: str = Field(default="dense", description="Retriever type")
     name: str = Field(default="retriever", description="Retriever name")
-    embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model")
+    embedding_model: str = Field(default=Defaults.EMBEDDING_MODEL, description="Embedding model")
     index_type: str = Field(default="flat", description="Index type")
     artifact_path: Optional[str] = Field(default=None, description="Path to saved artifact")
     chunking: Optional[ChunkingConfig] = Field(

@@ -42,6 +42,24 @@ def _check_matplotlib():
         raise ImportError("matplotlib required. Install with: pip install matplotlib")
 
 
+def _get_group_key(result: "ExperimentResult", group_by: str) -> str:
+    """Extract a grouping key from an experiment result.
+
+    Centralizes the repeated if/elif chain used by plot_scatter
+    and plot_distribution.
+    """
+    if group_by == "model":
+        return result.model_short
+    elif group_by == "embedding_model":
+        return result.embedding_model if result.embedding_model != "unknown" else "none"
+    elif group_by == "chunk_size":
+        return str(result.chunk_size) if result.chunk_size > 0 else "none"
+    elif group_by == "top_k":
+        return str(result.top_k) if result.top_k else "none"
+    else:
+        return str(getattr(result, group_by, "unknown"))
+
+
 def _pivot_to_matrix(pivot):
     """Convert pivot result (DataFrame or dict) to matrix for plotting."""
     import pandas as pd
@@ -286,16 +304,7 @@ def plot_scatter(
     # Group by color dimension
     groups = {}
     for r in results:
-        if color_by == "model":
-            key = r.model_short
-        elif color_by == "embedding_model":
-            key = r.embedding_model if r.embedding_model != "unknown" else "none"
-        elif color_by == "chunk_size":
-            key = str(r.chunk_size) if r.chunk_size > 0 else "none"
-        elif color_by == "top_k":
-            key = str(r.top_k) if r.top_k else "none"
-        else:
-            key = str(getattr(r, color_by, "unknown"))
+        key = _get_group_key(r, color_by)
         if key not in groups:
             groups[key] = {"x": [], "y": [], "names": []}
         groups[key]["x"].append(getattr(r, x_metric, 0))
@@ -342,16 +351,7 @@ def plot_distribution(
         # Group data
         groups = {}
         for r in results:
-            if group_by == "model":
-                key = r.model_short
-            elif group_by == "embedding_model":
-                key = r.embedding_model if r.embedding_model != "unknown" else "none"
-            elif group_by == "chunk_size":
-                key = str(r.chunk_size) if r.chunk_size > 0 else "none"
-            elif group_by == "top_k":
-                key = str(r.top_k) if r.top_k else "none"
-            else:
-                key = str(getattr(r, group_by, "unknown"))
+            key = _get_group_key(r, group_by)
             if key not in groups:
                 groups[key] = []
             val = getattr(r, metric, None)

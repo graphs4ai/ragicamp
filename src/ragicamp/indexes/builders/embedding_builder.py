@@ -53,7 +53,7 @@ def build_embedding_index(
     nlist: int = None,
     nprobe: int = None,
     embedding_backend: str = "vllm",
-    vllm_gpu_memory_fraction: float = 0.7,
+    vllm_gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION,
 ) -> str:
     """Build a shared embedding index with batched processing.
 

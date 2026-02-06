@@ -41,7 +41,7 @@ class HierarchicalIndex:
         parent_overlap: int = 100,
         child_overlap: int = 50,
         embedding_backend: str = "vllm",
-        vllm_gpu_memory_fraction: float = 0.7,
+        vllm_gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION,
     ):
         """Initialize hierarchical index.
 

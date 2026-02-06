@@ -14,8 +14,6 @@ Example:
 """
 
 from ragicamp.execution.executor import (
-    BatchResult,
-    ExecutionConfig,
     ResilientExecutor,
 )
 from ragicamp.execution.phases import (
@@ -35,14 +33,9 @@ from ragicamp.execution.runner import (
 # Re-export spec types for convenience (canonical location is ragicamp.spec)
 from ragicamp.spec import ExperimentSpec, build_specs, name_direct, name_rag
 
-# Backward compatibility alias
-ExpSpec = ExperimentSpec
-
 __all__ = [
     # Executor
     "ResilientExecutor",
-    "ExecutionConfig",
-    "BatchResult",
     # Phase handlers
     "PhaseHandler",
     "ExecutionContext",
@@ -51,7 +44,6 @@ __all__ = [
     "MetricsHandler",
     # Spec (canonical location: ragicamp.spec)
     "ExperimentSpec",
-    "ExpSpec",  # Backward compatibility
     "build_specs",
     "name_direct",
     "name_rag",

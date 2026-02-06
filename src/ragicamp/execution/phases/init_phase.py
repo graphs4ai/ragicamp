@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
-from ragicamp.experiment_state import ExperimentPhase, ExperimentState
+from ragicamp.state import ExperimentPhase, ExperimentState
 
 if TYPE_CHECKING:
     from ragicamp.spec import ExperimentSpec

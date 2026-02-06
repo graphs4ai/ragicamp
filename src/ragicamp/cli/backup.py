@@ -1,14 +1,99 @@
 """Backblaze B2 backup and download operations."""
 
+import logging
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 # Default number of parallel workers for upload/download
 DEFAULT_MAX_WORKERS = 12
+
+
+@dataclass
+class TransferProgress:
+    """Thread-safe progress counters for parallel file transfers."""
+
+    total_bytes: int = 0
+    total_files: int = 0
+    errors: list[tuple[Path, str]] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _early_exit: bool = False
+
+    def record_success(self, file_size: int) -> None:
+        with self._lock:
+            self.total_files += 1
+            self.total_bytes += file_size
+
+    def record_error(self, path: Path, error: str) -> None:
+        with self._lock:
+            self.errors.append((path, error))
+
+    def request_early_exit(self) -> None:
+        with self._lock:
+            self._early_exit = True
+
+    @property
+    def should_exit(self) -> bool:
+        return self._early_exit
+
+
+def _parallel_transfer(
+    files: list[tuple],
+    transfer_fn: Callable,
+    total_bytes: int,
+    desc: str,
+    max_workers: int,
+    continue_on_error: bool,
+) -> TransferProgress:
+    """Run a parallel file transfer with progress bar and error handling.
+
+    Args:
+        files: List of tuples to pass to transfer_fn.
+        transfer_fn: Callable(*file_tuple) -> (success: bool, error: str | None).
+        total_bytes: Total bytes for the progress bar.
+        desc: Progress bar description (e.g. "Uploading", "Downloading").
+        max_workers: Thread pool size.
+        continue_on_error: If False, abort on first error.
+
+    Returns:
+        TransferProgress with final counters and any errors.
+    """
+    from tqdm import tqdm
+
+    progress = TransferProgress()
+
+    with tqdm(total=total_bytes, unit="B", unit_scale=True, desc=desc) as pbar:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {
+                executor.submit(transfer_fn, *item): item for item in files
+            }
+
+            for future in as_completed(future_to_file):
+                item = future_to_file[future]
+                file_size = item[-1]  # last element is always size
+                success, error = future.result()
+
+                if success:
+                    progress.record_success(file_size)
+                else:
+                    progress.record_error(Path(str(item[0])), error or "Unknown error")
+                    if not continue_on_error:
+                        progress.request_early_exit()
+                        print(f"\nError: {error}")
+                pbar.update(file_size)
+
+                if progress.should_exit and not continue_on_error:
+                    for f in future_to_file:
+                        f.cancel()
+                    break
+
+    return progress
 
 # Files/patterns to skip during backup
 SKIP_PATTERNS = {
@@ -42,7 +127,7 @@ def get_b2_client():
         import boto3
         from botocore.config import Config
     except ImportError:
-        print("Error: boto3 not installed. Install with: uv pip install boto3")
+        logger.error("boto3 not installed. Install with: uv pip install boto3")
         return None, None, None, None
 
     key_id = os.environ.get("B2_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
@@ -50,11 +135,12 @@ def get_b2_client():
     endpoint = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
 
     if not key_id or not app_key:
-        print("Error: Backblaze credentials not set.")
-        print("Set environment variables:")
-        print("  export B2_KEY_ID='your-key-id'")
-        print("  export B2_APP_KEY='your-application-key'")
-        print("  export B2_ENDPOINT='https://s3.us-east-005.backblazeb2.com'  # optional")
+        logger.error(
+            "Backblaze credentials not set. Set environment variables:\n"
+            "  export B2_KEY_ID='your-key-id'\n"
+            "  export B2_APP_KEY='your-application-key'\n"
+            "  export B2_ENDPOINT='https://s3.us-east-005.backblazeb2.com'  # optional"
+        )
         return None, None, None, None
 
     s3 = boto3.client(
@@ -86,8 +172,8 @@ def list_backups(bucket: str, limit: int = 20) -> list[str]:
 
         backup_names = sorted([p["Prefix"].split("/")[1] for p in prefixes], reverse=True)
         return backup_names[:limit]
-    except Exception as e:
-        print(f"Error listing backups: {e}")
+    except Exception:
+        logger.exception("Failed to list backups")
         return []
 
 
@@ -196,17 +282,8 @@ def backup(
             print(f"  ... and {len(files_to_upload) - 10} more files")
         return 0
 
-    # Thread-safe counters
-    lock = threading.Lock()
-    uploaded_bytes = [0]
-    uploaded_files = [0]
-    errors: list[tuple[Path, str]] = []
-    early_exit = [False]
-
     def upload_file(local_path: Path, s3_key: str, file_size: int) -> tuple[bool, str | None]:
         """Upload a single file. Returns (success, error_message)."""
-        if early_exit[0]:
-            return False, "Cancelled due to earlier error"
         try:
             s3.upload_file(str(local_path), bucket, s3_key)
             return True, None
@@ -215,46 +292,24 @@ def backup(
 
     start_time = time.time()
 
-    with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Uploading") as pbar:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(upload_file, local_path, s3_key, file_size): (
-                    local_path,
-                    s3_key,
-                    file_size,
-                )
-                for local_path, s3_key, file_size in files_to_upload
-            }
-
-            for future in as_completed(future_to_file):
-                local_path, s3_key, file_size = future_to_file[future]
-                success, error = future.result()
-
-                with lock:
-                    if success:
-                        uploaded_files[0] += 1
-                        uploaded_bytes[0] += file_size
-                    else:
-                        errors.append((local_path, error or "Unknown error"))
-                        if not continue_on_error:
-                            early_exit[0] = True
-                            print(f"\nError uploading {local_path}: {error}")
-                    pbar.update(file_size)
-
-                if early_exit[0] and not continue_on_error:
-                    for f in future_to_file:
-                        f.cancel()
-                    break
+    progress = _parallel_transfer(
+        files=files_to_upload,
+        transfer_fn=upload_file,
+        total_bytes=total_bytes,
+        desc="Uploading",
+        max_workers=max_workers,
+        continue_on_error=continue_on_error,
+    )
 
     elapsed = time.time() - start_time
-    speed_mbps = (uploaded_bytes[0] / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    speed_mbps = (progress.total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
-    print(f"\n✓ Uploaded {uploaded_files[0]}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
-    print(f"  Total: {uploaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(f"\n✓ Uploaded {progress.total_files}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
+    print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
-    if errors:
-        print(f"\n⚠️  {len(errors)} errors:")
-        for path, err in errors[:5]:
+    if progress.errors:
+        print(f"\n⚠️  {len(progress.errors)} errors:")
+        for path, err in progress.errors[:5]:
             print(f"  {path}: {err}")
         if not continue_on_error:
             return 1
@@ -373,17 +428,8 @@ def download(
     for d in dirs_to_create:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Thread-safe counters
-    lock = threading.Lock()
-    downloaded_bytes = [0]
-    downloaded_files = [0]
-    errors: list[tuple[Path, str]] = []
-    early_exit = [False]
-
     def download_file(s3_key: str, local_path: Path, size: int) -> tuple[bool, str | None]:
         """Download a single file. Returns (success, error_message)."""
-        if early_exit[0]:
-            return False, "Cancelled due to earlier error"
         try:
             s3.download_file(bucket, s3_key, str(local_path))
             return True, None
@@ -392,46 +438,24 @@ def download(
 
     start_time = time.time()
 
-    with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Downloading") as pbar:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(download_file, s3_key, local_path, size): (
-                    s3_key,
-                    local_path,
-                    size,
-                )
-                for s3_key, local_path, size in files_to_download
-            }
-
-            for future in as_completed(future_to_file):
-                s3_key, local_path, size = future_to_file[future]
-                success, error = future.result()
-
-                with lock:
-                    if success:
-                        downloaded_files[0] += 1
-                        downloaded_bytes[0] += size
-                    else:
-                        errors.append((local_path, error or "Unknown error"))
-                        if not continue_on_error:
-                            early_exit[0] = True
-                            print(f"\nError downloading {s3_key}: {error}")
-                    pbar.update(size)
-
-                if early_exit[0] and not continue_on_error:
-                    for f in future_to_file:
-                        f.cancel()
-                    break
+    progress = _parallel_transfer(
+        files=files_to_download,
+        transfer_fn=download_file,
+        total_bytes=total_bytes,
+        desc="Downloading",
+        max_workers=max_workers,
+        continue_on_error=continue_on_error,
+    )
 
     elapsed = time.time() - start_time
-    speed_mbps = (downloaded_bytes[0] / (1024 * 1024)) / elapsed if elapsed > 0 else 0
+    speed_mbps = (progress.total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
-    print(f"\n✓ Downloaded {downloaded_files[0]}/{len(files_to_download)} files")
-    print(f"  Total: {downloaded_bytes[0] / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(f"\n✓ Downloaded {progress.total_files}/{len(files_to_download)} files")
+    print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
-    if errors:
-        print(f"\n⚠️  {len(errors)} errors:")
-        for path, err in errors[:5]:
+    if progress.errors:
+        print(f"\n⚠️  {len(progress.errors)} errors:")
+        for path, err in progress.errors[:5]:
             print(f"  {path}: {err}")
         if not continue_on_error:
             return 1

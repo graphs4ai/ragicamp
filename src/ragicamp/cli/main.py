@@ -46,6 +46,133 @@ from ragicamp.cli.commands import (
 )
 
 
+def _add_run_parser(subparsers) -> None:
+    """Add 'run' subcommand."""
+    p = subparsers.add_parser("run", help="Run a study from config")
+    p.add_argument("config", type=Path, help="Study config YAML")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.add_argument("--skip-existing", action="store_true", help="Skip completed")
+    p.add_argument("--validate", action="store_true", help="Validate config only")
+    p.add_argument("--sample", "-s", type=int, metavar="N", help="Sample N experiments (enables search)")
+    p.add_argument("--sample-mode", choices=["random", "tpe"], default="random", help="Sampling mode")
+    p.add_argument("--sample-seed", type=int, default=None, help="Random seed for sampling")
+    p.add_argument("--optimize-metric", type=str, default="f1", help="Metric to optimize (default: f1)")
+    p.set_defaults(func=cmd_run)
+
+
+def _add_index_parser(subparsers) -> None:
+    """Add 'index' subcommand."""
+    p = subparsers.add_parser("index", help="Build retrieval index")
+    p.add_argument("--corpus", default="simple", help="Corpus: simple, en, or full version string")
+    p.add_argument("--embedding", default="minilm", help="Embedding: minilm, e5, mpnet, or full model name")
+    p.add_argument("--chunk-size", type=int, default=512, help="Chunk size in chars")
+    p.add_argument("--max-docs", type=int, default=None, help="Max documents to index")
+    p.set_defaults(func=cmd_index)
+
+
+def _add_compare_parser(subparsers) -> None:
+    """Add 'compare' subcommand."""
+    p = subparsers.add_parser("compare", help="Compare results")
+    p.add_argument("output_dir", type=Path, help="Output directory")
+    p.add_argument("--top", type=int, default=10, help="Show top N results")
+    p.add_argument("--metric", "-m", default="f1", help="Metric to compare")
+    p.add_argument(
+        "--group-by", "-g", default="model",
+        choices=["model", "dataset", "prompt", "retriever", "quantization", "type"],
+        help="Dimension to group by",
+    )
+    p.add_argument("--pivot", nargs=2, metavar=("ROWS", "COLS"), help="Create pivot table")
+    p.set_defaults(func=cmd_compare)
+
+
+def _add_evaluate_parser(subparsers) -> None:
+    """Add 'evaluate' subcommand."""
+    p = subparsers.add_parser("evaluate", help="Compute metrics")
+    p.add_argument("predictions", type=Path, help="Predictions JSON")
+    p.add_argument("--metrics", nargs="+", default=["f1", "exact_match"], help="Metrics to compute")
+    p.add_argument("--output", type=Path, help="Output file")
+    p.add_argument("--judge-model", default="gpt-4o-mini", help="Model for LLM judge")
+    p.add_argument("--judgment-type", choices=["binary", "ternary"], default="binary")
+    p.add_argument("--max-concurrent", type=int, default=20, help="Max concurrent LLM judge calls")
+    p.set_defaults(func=cmd_evaluate)
+
+
+def _add_health_parser(subparsers) -> None:
+    """Add 'health' subcommand."""
+    p = subparsers.add_parser("health", help="Check experiment health")
+    p.add_argument("output_dir", type=Path, help="Output directory")
+    p.add_argument("--metrics", default=None, help="Comma-separated metrics to check")
+    p.set_defaults(func=cmd_health)
+
+
+def _add_resume_parser(subparsers) -> None:
+    """Add 'resume' subcommand."""
+    p = subparsers.add_parser("resume", help="Resume incomplete experiments")
+    p.add_argument("output_dir", type=Path, help="Output directory")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.set_defaults(func=cmd_resume)
+
+
+def _add_metrics_parser(subparsers) -> None:
+    """Add 'metrics' subcommand."""
+    p = subparsers.add_parser("metrics", help="Recompute metrics for an experiment")
+    p.add_argument("exp_dir", type=Path, help="Experiment directory")
+    p.add_argument("--metrics", "-m", required=True, help="Comma-separated metrics")
+    p.add_argument("--judge-model", default="gpt-4o-mini", help="Model for LLM judge")
+    p.set_defaults(func=cmd_metrics)
+
+
+def _add_backup_parser(subparsers) -> None:
+    """Add 'backup' subcommand."""
+    p = subparsers.add_parser("backup", help="Backup artifacts and outputs to Backblaze B2")
+    p.add_argument("path", type=Path, nargs="?", default=None, help="Directory to backup")
+    p.add_argument("--bucket", "-b", default="masters-bucket", help="B2 bucket name")
+    p.add_argument("--prefix", "-p", default=None, help="S3 key prefix")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.add_argument("--continue-on-error", action="store_true", help="Continue on upload errors")
+    p.add_argument("--workers", "-w", type=int, default=12, help="Parallel upload threads")
+    p.add_argument("--sync", "-s", action="store_true", help="Only upload new/modified files")
+    p.add_argument("--latest", "-l", action="store_true", help="Use latest backup as target prefix")
+    p.set_defaults(func=cmd_backup)
+
+
+def _add_download_parser(subparsers) -> None:
+    """Add 'download' subcommand."""
+    p = subparsers.add_parser("download", help="Download artifacts from Backblaze B2")
+    p.add_argument("--list", "-l", action="store_true", help="List available backups")
+    p.add_argument("--backup", "-b", default=None, help="Backup name to download")
+    p.add_argument("--bucket", default="masters-bucket", help="B2 bucket name")
+    p.add_argument("--artifacts-only", action="store_true", help="Only download artifacts/")
+    p.add_argument("--outputs-only", action="store_true", help="Only download outputs/")
+    p.add_argument("--indexes-only", action="store_true", help="Only download artifacts/indexes/")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.add_argument("--continue-on-error", action="store_true", help="Continue on download errors")
+    p.add_argument("--workers", "-w", type=int, default=12, help="Parallel download threads")
+    p.add_argument("--skip-existing", action="store_true", help="Skip files already on disk")
+    p.add_argument("--no-migrate", action="store_true", help="Skip index migration after download")
+    p.set_defaults(func=cmd_download)
+
+
+def _add_cache_parser(subparsers) -> None:
+    """Add 'cache' subcommand."""
+    p = subparsers.add_parser("cache", help="Manage the embedding cache")
+    sub = p.add_subparsers(dest="cache_action", help="Cache actions")
+    sub.required = True
+    sub.add_parser("stats", help="Show cache statistics")
+    clear = sub.add_parser("clear", help="Clear cached embeddings")
+    clear.add_argument("--model", default=None, help="Only clear for this model")
+    p.set_defaults(func=cmd_cache)
+
+
+def _add_migrate_parser(subparsers) -> None:
+    """Add 'migrate-indexes' subcommand."""
+    p = subparsers.add_parser("migrate-indexes", help="Migrate old index format to new format")
+    p.add_argument("--index-name", "-n", default=None, help="Specific index to migrate")
+    p.add_argument("--dry-run", action="store_true", help="Preview only")
+    p.add_argument("--force", "-f", action="store_true", help="Re-migrate even if already migrated")
+    p.set_defaults(func=cmd_migrate_indexes)
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser with subcommands."""
     parser = argparse.ArgumentParser(
@@ -58,291 +185,17 @@ def create_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # Run command
-    run_parser = subparsers.add_parser("run", help="Run a study from config")
-    run_parser.add_argument("config", type=Path, help="Study config YAML")
-    run_parser.add_argument("--dry-run", action="store_true", help="Preview only")
-    run_parser.add_argument("--skip-existing", action="store_true", help="Skip completed")
-    run_parser.add_argument("--validate", action="store_true", help="Validate config only")
-    # Random search options (override config)
-    run_parser.add_argument(
-        "--sample",
-        "-s",
-        type=int,
-        metavar="N",
-        help="Random sample N experiments from grid (enables random search)",
-    )
-    run_parser.add_argument(
-        "--sample-mode",
-        choices=["random", "tpe"],
-        default="random",
-        help="Sampling mode: random (uniform) or tpe (Bayesian optimization)",
-    )
-    run_parser.add_argument(
-        "--sample-seed",
-        type=int,
-        default=None,
-        help="Random seed for reproducible sampling",
-    )
-    run_parser.add_argument(
-        "--optimize-metric",
-        type=str,
-        default="f1",
-        help="Metric to optimize when using --sample-mode tpe (default: f1)",
-    )
-    run_parser.set_defaults(func=cmd_run)
-
-    # Index command
-    index_parser = subparsers.add_parser("index", help="Build retrieval index")
-    index_parser.add_argument(
-        "--corpus", default="simple", help="Corpus: simple, en, or full version string"
-    )
-    index_parser.add_argument(
-        "--embedding",
-        default="minilm",
-        help="Embedding: minilm, e5, mpnet, or full model name",
-    )
-    index_parser.add_argument("--chunk-size", type=int, default=512, help="Chunk size in chars")
-    index_parser.add_argument("--max-docs", type=int, default=None, help="Max documents to index")
-    index_parser.set_defaults(func=cmd_index)
-
-    # Compare command
-    compare_parser = subparsers.add_parser("compare", help="Compare results")
-    compare_parser.add_argument("output_dir", type=Path, help="Output directory")
-    compare_parser.add_argument("--top", type=int, default=10, help="Show top N results")
-    compare_parser.add_argument("--metric", "-m", default="f1", help="Metric to compare")
-    compare_parser.add_argument(
-        "--group-by",
-        "-g",
-        default="model",
-        choices=["model", "dataset", "prompt", "retriever", "quantization", "type"],
-        help="Dimension to group by",
-    )
-    compare_parser.add_argument(
-        "--pivot",
-        nargs=2,
-        metavar=("ROWS", "COLS"),
-        help="Create pivot table",
-    )
-    compare_parser.set_defaults(func=cmd_compare)
-
-    # Evaluate command
-    eval_parser = subparsers.add_parser("evaluate", help="Compute metrics")
-    eval_parser.add_argument("predictions", type=Path, help="Predictions JSON")
-    eval_parser.add_argument(
-        "--metrics",
-        nargs="+",
-        default=["f1", "exact_match"],
-        help="Metrics: f1, exact_match, llm_judge_qa, bertscore, bleurt",
-    )
-    eval_parser.add_argument("--output", type=Path, help="Output file")
-    eval_parser.add_argument(
-        "--judge-model",
-        default="gpt-4o-mini",
-        help="Model for LLM judge (default: gpt-4o-mini)",
-    )
-    eval_parser.add_argument(
-        "--judgment-type",
-        choices=["binary", "ternary"],
-        default="binary",
-        help="LLM judge type: binary or ternary",
-    )
-    eval_parser.add_argument(
-        "--max-concurrent",
-        type=int,
-        default=20,
-        help="Max concurrent API calls for LLM judge (default: 20)",
-    )
-    eval_parser.set_defaults(func=cmd_evaluate)
-
-    # Health command
-    health_parser = subparsers.add_parser("health", help="Check experiment health")
-    health_parser.add_argument("output_dir", type=Path, help="Output directory")
-    health_parser.add_argument(
-        "--metrics",
-        default=None,
-        help="Comma-separated metrics to check (e.g., f1,exact_match,llm_judge)",
-    )
-    health_parser.set_defaults(func=cmd_health)
-
-    # Resume command
-    resume_parser = subparsers.add_parser("resume", help="Resume incomplete experiments")
-    resume_parser.add_argument("output_dir", type=Path, help="Output directory")
-    resume_parser.add_argument("--dry-run", action="store_true", help="Preview only")
-    resume_parser.set_defaults(func=cmd_resume)
-
-    # Metrics command
-    metrics_parser = subparsers.add_parser("metrics", help="Recompute metrics for an experiment")
-    metrics_parser.add_argument("exp_dir", type=Path, help="Experiment directory")
-    metrics_parser.add_argument(
-        "--metrics",
-        "-m",
-        required=True,
-        help="Comma-separated metrics (e.g., f1,exact_match,llm_judge)",
-    )
-    metrics_parser.add_argument(
-        "--judge-model",
-        default="gpt-4o-mini",
-        help="Model for LLM judge (default: gpt-4o-mini)",
-    )
-    metrics_parser.set_defaults(func=cmd_metrics)
-
-    # Backup command
-    backup_parser = subparsers.add_parser(
-        "backup", help="Backup artifacts and outputs to Backblaze B2"
-    )
-    backup_parser.add_argument(
-        "path",
-        type=Path,
-        nargs="?",
-        default=None,
-        help="Directory to backup (default: artifacts/ and outputs/)",
-    )
-    backup_parser.add_argument(
-        "--bucket",
-        "-b",
-        default="masters-bucket",
-        help="B2 bucket name (default: masters-bucket)",
-    )
-    backup_parser.add_argument(
-        "--prefix",
-        "-p",
-        default=None,
-        help="S3 key prefix (default: ragicamp-backup/YYYYMMDD-HHMMSS)",
-    )
-    backup_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview files without uploading",
-    )
-    backup_parser.add_argument(
-        "--continue-on-error",
-        action="store_true",
-        help="Continue uploading if some files fail",
-    )
-    backup_parser.add_argument(
-        "--workers",
-        "-w",
-        type=int,
-        default=12,
-        help="Number of parallel upload threads (default: 12)",
-    )
-    backup_parser.add_argument(
-        "--sync",
-        "-s",
-        action="store_true",
-        help="Only upload new/modified files (compare by size)",
-    )
-    backup_parser.add_argument(
-        "--latest",
-        "-l",
-        action="store_true",
-        help="Use the most recent backup as target prefix (for sync)",
-    )
-    backup_parser.set_defaults(func=cmd_backup)
-
-    # Download command
-    download_parser = subparsers.add_parser(
-        "download", help="Download artifacts and outputs from Backblaze B2 backup"
-    )
-    download_parser.add_argument(
-        "--list",
-        "-l",
-        action="store_true",
-        help="List available backups",
-    )
-    download_parser.add_argument(
-        "--backup",
-        "-b",
-        default=None,
-        help="Backup name to download (default: most recent)",
-    )
-    download_parser.add_argument(
-        "--bucket",
-        default="masters-bucket",
-        help="B2 bucket name (default: masters-bucket)",
-    )
-    download_parser.add_argument(
-        "--artifacts-only",
-        action="store_true",
-        help="Only download artifacts/ (indexes, retrievers)",
-    )
-    download_parser.add_argument(
-        "--outputs-only",
-        action="store_true",
-        help="Only download outputs/ (experiment results)",
-    )
-    download_parser.add_argument(
-        "--indexes-only",
-        action="store_true",
-        help="Only download artifacts/indexes/",
-    )
-    download_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview files without downloading",
-    )
-    download_parser.add_argument(
-        "--continue-on-error",
-        action="store_true",
-        help="Continue downloading if some files fail",
-    )
-    download_parser.add_argument(
-        "--workers",
-        "-w",
-        type=int,
-        default=12,
-        help="Number of parallel download threads (default: 12)",
-    )
-    download_parser.add_argument(
-        "--skip-existing",
-        action="store_true",
-        help="Skip files that already exist locally with same size",
-    )
-    download_parser.add_argument(
-        "--no-migrate",
-        action="store_true",
-        help="Don't auto-run index migration after download",
-    )
-    download_parser.set_defaults(func=cmd_download)
-
-    # Cache management command
-    cache_parser = subparsers.add_parser("cache", help="Manage the embedding cache")
-    cache_sub = cache_parser.add_subparsers(dest="cache_action", help="Cache actions")
-    cache_sub.required = True
-
-    cache_sub.add_parser("stats", help="Show cache statistics")
-
-    cache_clear_parser = cache_sub.add_parser("clear", help="Clear cached embeddings")
-    cache_clear_parser.add_argument(
-        "--model",
-        default=None,
-        help="Only clear cache for this embedding model (default: all)",
-    )
-    cache_parser.set_defaults(func=cmd_cache)
-
-    # Migrate indexes command
-    migrate_parser = subparsers.add_parser(
-        "migrate-indexes", help="Migrate old index format to new format"
-    )
-    migrate_parser.add_argument(
-        "--index-name",
-        "-n",
-        default=None,
-        help="Specific index to migrate (default: all)",
-    )
-    migrate_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview changes without writing",
-    )
-    migrate_parser.add_argument(
-        "--force",
-        "-f",
-        action="store_true",
-        help="Re-migrate even if already migrated",
-    )
-    migrate_parser.set_defaults(func=cmd_migrate_indexes)
+    _add_run_parser(subparsers)
+    _add_index_parser(subparsers)
+    _add_compare_parser(subparsers)
+    _add_evaluate_parser(subparsers)
+    _add_health_parser(subparsers)
+    _add_resume_parser(subparsers)
+    _add_metrics_parser(subparsers)
+    _add_backup_parser(subparsers)
+    _add_download_parser(subparsers)
+    _add_cache_parser(subparsers)
+    _add_migrate_parser(subparsers)
 
     return parser
 

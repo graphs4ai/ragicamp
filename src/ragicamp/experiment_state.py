@@ -1,8 +1,19 @@
 """Backward compatibility shim for experiment state.
 
+DEPRECATED: Import from ``ragicamp.state`` instead.
+
 This module re-exports all state-related types from the new location.
-Canonical imports should use: from ragicamp.state import ...
+All internal code has been migrated.  This shim exists only for
+external callers and will be removed in a future release.
 """
+
+import warnings
+
+warnings.warn(
+    "ragicamp.experiment_state is deprecated. Use ragicamp.state instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Re-export everything from new location for backward compatibility
 from ragicamp.state import (

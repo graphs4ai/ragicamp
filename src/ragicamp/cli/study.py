@@ -18,6 +18,7 @@ from ragicamp.config.validation import (
     validate_config,
     validate_model_spec,
 )
+from ragicamp.core.constants import Defaults
 from ragicamp.execution.runner import run_spec
 from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
 from ragicamp.models import OpenAIModel
@@ -117,16 +118,16 @@ def _save_retriever_config(
         "name": retriever_name,
         "type": retriever_type,
         "embedding_index": index_name,
-        "embedding_model": config.get("embedding_model", "all-MiniLM-L6-v2"),
-        "embedding_backend": config.get("embedding_backend", "sentence_transformers"),
-        "chunk_size": config.get("chunk_size", 512),
-        "chunk_overlap": config.get("chunk_overlap", 50),
+        "embedding_model": config.get("embedding_model", Defaults.EMBEDDING_MODEL),
+        "embedding_backend": config.get("embedding_backend", Defaults.EMBEDDING_BACKEND),
+        "chunk_size": config.get("chunk_size", Defaults.CHUNK_SIZE),
+        "chunk_overlap": config.get("chunk_overlap", Defaults.CHUNK_OVERLAP),
     }
     
     if retriever_type == "hybrid" and sparse_name:
         retriever_cfg["sparse_index"] = sparse_name
         retriever_cfg["sparse_method"] = config.get("sparse_method", "bm25")
-        retriever_cfg["alpha"] = config.get("alpha", 0.7)
+        retriever_cfg["alpha"] = config.get("alpha", Defaults.HYBRID_ALPHA)
     
     if retriever_type == "hierarchical":
         retriever_cfg["parent_chunk_size"] = config.get("parent_chunk_size", 2048)
@@ -156,13 +157,9 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
         # ===================================================================
         # Step 1: Check/Build dense embedding index
         # ===================================================================
-        if retriever_type == "hierarchical":
-            index_name = config.get("embedding_index", name)
-            index_path = manager.get_embedding_index_path(index_name)
-        else:
-            # Dense or hybrid - use embedding index name
-            index_name = config.get("embedding_index", name)
-            index_path = manager.get_embedding_index_path(index_name)
+        # All retriever types use the same index name resolution
+        index_name = config.get("embedding_index", name)
+        index_path = manager.get_embedding_index_path(index_name)
         
         if _index_exists(index_path):
             _study_logger.info("Dense index exists: %s (at %s)", name, index_path)
@@ -177,14 +174,14 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                     doc_batch_size=corpus_config.get("doc_batch_size", 5000),
                     embedding_batch_size=corpus_config.get("embedding_batch_size", 4096),
                     embedding_backend=corpus_config.get("embedding", {}).get("backend", "vllm"),
-                    vllm_gpu_memory_fraction=corpus_config.get("embedding", {}).get("vllm_gpu_memory_fraction", 0.9),
+                    vllm_gpu_memory_fraction=corpus_config.get("embedding", {}).get("vllm_gpu_memory_fraction", Defaults.VLLM_GPU_MEMORY_FRACTION),
                 )
             else:
                 build_embedding_index(
                     index_name=index_name,
-                    embedding_model=config.get("embedding_model", "all-MiniLM-L6-v2"),
-                    chunk_size=config.get("chunk_size", 512),
-                    chunk_overlap=config.get("chunk_overlap", 50),
+                    embedding_model=config.get("embedding_model", Defaults.EMBEDDING_MODEL),
+                    chunk_size=config.get("chunk_size", Defaults.CHUNK_SIZE),
+                    chunk_overlap=config.get("chunk_overlap", Defaults.CHUNK_OVERLAP),
                     corpus_config=corpus_config,
                     embedding_backend=config.get("embedding_backend", "vllm"),
                 )

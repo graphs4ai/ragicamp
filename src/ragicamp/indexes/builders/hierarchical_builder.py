@@ -16,6 +16,7 @@ import pickle
 import time
 from typing import Any
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
 
@@ -34,7 +35,7 @@ def build_hierarchical_index(
     doc_batch_size: int = 1000,
     embedding_batch_size: int = 64,
     embedding_backend: str = "vllm",
-    vllm_gpu_memory_fraction: float = 0.7,
+    vllm_gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION,
 ) -> str:
     """Build a hierarchical index with batched processing.
 
@@ -72,7 +73,7 @@ def build_hierarchical_index(
     # Fall back to name if embedding_index not specified
     index_name = retriever_config.get("embedding_index", retriever_config["name"])
     retriever_name = retriever_config["name"]
-    embedding_model = retriever_config.get("embedding_model", "all-MiniLM-L6-v2")
+    embedding_model = retriever_config.get("embedding_model", Defaults.EMBEDDING_MODEL)
 
     # Get embedding backend from retriever config, fall back to parameter
     backend = retriever_config.get("embedding_backend", embedding_backend)

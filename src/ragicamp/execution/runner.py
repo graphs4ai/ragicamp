@@ -26,10 +26,6 @@ from ragicamp.spec import ExperimentSpec
 logger = get_logger(__name__)
 
 
-# Backward compatibility alias
-ExpSpec = ExperimentSpec
-
-
 # =============================================================================
 # Phase-Aware Runners
 # =============================================================================
@@ -68,7 +64,7 @@ def run_metrics_only(
     Returns:
         Status string
     """
-    from ragicamp.experiment_state import ExperimentPhase, detect_state
+    from ragicamp.state import ExperimentPhase, detect_state
     from ragicamp.factory import MetricFactory
     from ragicamp.metrics import compute_metrics_batched
     from ragicamp.utils.experiment_io import ExperimentIO
@@ -147,20 +143,15 @@ def run_metrics_only(
     )
 
     # Print metric summary
-    metrics_parts = []
-    for key, val in existing_metrics.items():
-        if isinstance(val, float):
-            if key in ("f1", "exact_match", "bertscore_f1", "bleurt"):
-                metrics_parts.append(f"{key}={val * 100:.1f}%")
-            else:
-                metrics_parts.append(f"{key}={val:.3f}")
-    metrics_str = " ".join(metrics_parts) if metrics_parts else "no metrics"
+    from ragicamp.utils.formatting import format_metrics_summary
+
+    metrics_str = format_metrics_summary(existing_metrics)
     print(f"  ✓ All metrics computed: {metrics_str}")
     return "ran"
 
 
 def run_generation(
-    spec: ExpSpec,
+    spec: ExperimentSpec,
     limit: Optional[int],
     metrics: list[str],
     out: Path,
@@ -233,8 +224,6 @@ def run_generation(
     # Check if there were aborted predictions (model failures)
     predictions_path = exp_out / "predictions.json"
     if predictions_path.exists():
-        import json
-
         with open(predictions_path) as f:
             preds_data = json.load(f)
         predictions = preds_data.get("predictions", [])
@@ -257,7 +246,7 @@ def run_generation(
 
 
 def run_spec_subprocess(
-    spec: ExpSpec,
+    spec: ExperimentSpec,
     limit: Optional[int],
     metrics: list[str],
     out: Path,
@@ -291,7 +280,7 @@ def run_spec_subprocess(
 
     ResourceManager.clear_gpu_memory()
 
-    from ragicamp.experiment_state import ExperimentPhase, check_health
+    from ragicamp.state import ExperimentPhase, check_health
 
     exp_out = out / spec.name
     exp_out.mkdir(parents=True, exist_ok=True)
@@ -312,8 +301,10 @@ def run_spec_subprocess(
     # Note: Don't print header here - the subprocess will print it
     # This avoids duplicate output
 
+    from ragicamp.utils.paths import get_project_root
+
     script_path = (
-        Path(__file__).parent.parent.parent.parent
+        get_project_root()
         / "scripts"
         / "experiments"
         / "run_single_experiment.py"
@@ -371,7 +362,7 @@ def run_spec_subprocess(
 
 
 def run_spec(
-    spec: ExpSpec,
+    spec: ExperimentSpec,
     limit: Optional[int],
     metrics: list[str],
     out: Path,
@@ -403,7 +394,7 @@ def run_spec(
         return run_spec_subprocess(spec, limit, metrics, out, llm_judge_config=llm_judge_config)
 
     # In-process execution with phase-aware dispatching
-    from ragicamp.experiment_state import ExperimentPhase, check_health
+    from ragicamp.state import ExperimentPhase, check_health
 
     exp_out = out / spec.name
     exp_out.mkdir(parents=True, exist_ok=True)

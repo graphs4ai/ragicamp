@@ -7,6 +7,7 @@ Supports loading from:
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -57,31 +58,47 @@ class ExperimentResult:
     chunk_size: int = 0
     chunk_strategy: str = "unknown"
 
+    # Regex for retriever name: {corpus}_{embedding}_{strategy}_{chunk_size}
+    # e.g., simple_minilm_recursive_1024, en_e5_fixed_512
+    _RETRIEVER_RE = re.compile(
+        r"^(?P<corpus>[a-zA-Z]+)_(?P<embedding>[a-zA-Z0-9]+)_(?P<strategy>[a-zA-Z]+)_(?P<chunk_size>\d+)"
+    )
+
+    @staticmethod
+    def _parse_retriever_name(retriever: Optional[str]) -> dict[str, Any]:
+        """Parse structured retriever name into components.
+
+        Args:
+            retriever: Retriever name like ``"simple_minilm_recursive_1024"``.
+
+        Returns:
+            Dict with keys: corpus, embedding_model, chunk_strategy, chunk_size.
+        """
+        result = {
+            "corpus": "unknown",
+            "embedding_model": "unknown",
+            "chunk_strategy": "unknown",
+            "chunk_size": 0,
+        }
+        if not retriever:
+            return result
+
+        match = ExperimentResult._RETRIEVER_RE.match(retriever)
+        if match:
+            result["corpus"] = match.group("corpus")
+            result["embedding_model"] = match.group("embedding")
+            result["chunk_strategy"] = match.group("strategy")
+            result["chunk_size"] = int(match.group("chunk_size"))
+
+        return result
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExperimentResult":
         """Create from dictionary (comparison.json format)."""
         # Support both "results" (old format) and "metrics" (new format)
         results = data.get("results", {}) or data.get("metrics", {})
         retriever = data.get("retriever")
-
-        # Parse RAG details from retriever name
-        # Format: {corpus}_{embedding}_{strategy}_{chunk_size}
-        # e.g., simple_minilm_recursive_1024
-        corpus = "unknown"
-        embedding_model = "unknown"
-        chunk_strategy = "unknown"
-        chunk_size = 0
-
-        if retriever:
-            parts = retriever.split("_")
-            if len(parts) >= 4:
-                corpus = parts[0]  # simple, en
-                embedding_model = parts[1]  # minilm, e5, mpnet
-                chunk_strategy = parts[2]  # recursive, fixed
-                try:
-                    chunk_size = int(parts[3])  # 512, 1024
-                except (ValueError, IndexError):
-                    pass
+        parsed = cls._parse_retriever_name(retriever)
 
         return cls(
             name=data.get("name", "unknown"),
@@ -105,10 +122,10 @@ class ExperimentResult:
             throughput_qps=data.get("throughput_qps", 0.0),
             timestamp=data.get("timestamp", ""),
             raw=data,
-            corpus=corpus,
-            embedding_model=embedding_model,
-            chunk_size=chunk_size,
-            chunk_strategy=chunk_strategy,
+            corpus=parsed["corpus"],
+            embedding_model=parsed["embedding_model"],
+            chunk_size=parsed["chunk_size"],
+            chunk_strategy=parsed["chunk_strategy"],
         )
 
     @classmethod
@@ -116,23 +133,7 @@ class ExperimentResult:
         """Create from metadata.json + summary.json format."""
         metrics = summary.get("overall_metrics", summary)
         retriever = metadata.get("retriever")
-
-        # Parse RAG details from retriever name
-        corpus = "unknown"
-        embedding_model = "unknown"
-        chunk_strategy = "unknown"
-        chunk_size = 0
-
-        if retriever:
-            parts = retriever.split("_")
-            if len(parts) >= 4:
-                corpus = parts[0]
-                embedding_model = parts[1]
-                chunk_strategy = parts[2]
-                try:
-                    chunk_size = int(parts[3])
-                except (ValueError, IndexError):
-                    pass
+        parsed = cls._parse_retriever_name(retriever)
 
         return cls(
             name=metadata.get("name", summary.get("agent_name", "unknown")),
@@ -156,10 +157,10 @@ class ExperimentResult:
             throughput_qps=metadata.get("throughput_qps", 0.0),
             timestamp=metadata.get("timestamp", summary.get("timestamp", "")),
             raw={**metadata, "summary": summary},
-            corpus=corpus,
-            embedding_model=embedding_model,
-            chunk_size=chunk_size,
-            chunk_strategy=chunk_strategy,
+            corpus=parsed["corpus"],
+            embedding_model=parsed["embedding_model"],
+            chunk_size=parsed["chunk_size"],
+            chunk_strategy=parsed["chunk_strategy"],
         )
 
     def to_dict(self) -> dict[str, Any]:

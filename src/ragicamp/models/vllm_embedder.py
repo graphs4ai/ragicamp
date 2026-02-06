@@ -31,6 +31,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import numpy as np
 
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ class VLLMEmbedder:
     def __init__(
         self,
         model_name: str,
-        gpu_memory_fraction: float = 0.95,  # Use almost all VRAM
+        gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL,  # Use almost all VRAM
         enforce_eager: bool = False,  # CUDA graphs improve throughput
         trust_remote_code: bool = True,
         max_num_seqs: Optional[int] = None,  # Auto-detect based on GPU memory

@@ -103,6 +103,31 @@ class RetrievedDocInfo:
             d["rerank_score"] = self.rerank_score
         return d
 
+    @classmethod
+    def from_search_results(cls, search_results: list) -> list["RetrievedDocInfo"]:
+        """Build a list of RetrievedDocInfo from SearchResult objects.
+
+        This is the shared factory for all RAG agents, eliminating the
+        previously duplicated construction logic.
+
+        Args:
+            search_results: List of SearchResult objects.
+
+        Returns:
+            List of RetrievedDocInfo in rank order.
+        """
+        return [
+            cls(
+                rank=i + 1,
+                doc_id=sr.document.id if sr.document else None,
+                content=sr.document.text if sr.document else None,
+                score=sr.score,
+                retrieval_score=sr.score,
+                retrieval_rank=i + 1,
+            )
+            for i, sr in enumerate(search_results)
+        ]
+
 
 @dataclass
 class AgentResult:
@@ -168,8 +193,66 @@ class AgentResult:
 
 
 # =============================================================================
+# Shared Utilities
+# =============================================================================
+
+
+def is_hybrid_searcher(index: Any) -> bool:
+    """Check if a search backend is a HybridSearcher.
+
+    Used by all RAG agents to decide whether to pass query texts
+    alongside embeddings during search.
+    """
+    return hasattr(index, "sparse_index")
+
+
+def batch_embed_and_search(
+    embedder_provider: Any,
+    index: Any,
+    query_texts: list[str],
+    top_k: int,
+    is_hybrid: bool,
+) -> tuple[list[list], "Step", "Step"]:
+    """Shared embed + search logic for all RAG agents.
+
+    Loads the embedder, encodes queries, then searches the index.
+    Supports dense, hybrid, and hierarchical search backends.
+
+    Args:
+        embedder_provider: EmbedderProvider instance.
+        index: Search backend (VectorIndex, HybridSearcher, etc.).
+        query_texts: List of query strings to encode and search.
+        top_k: Number of results per query.
+        is_hybrid: Whether the index is a HybridSearcher (needs query_texts).
+
+    Returns:
+        Tuple of (search_results, encode_step, search_step).
+    """
+    import numpy as np
+
+    with embedder_provider.load() as embedder:
+        with StepTimer("batch_encode", model=embedder_provider.model_name) as encode_step:
+            encode_step.input = {"n_queries": len(query_texts)}
+            embeddings = embedder.batch_encode(query_texts)
+            if not isinstance(embeddings, np.ndarray):
+                embeddings = np.asarray(embeddings, dtype=np.float32)
+            encode_step.output = {"embedding_shape": list(embeddings.shape)}
+
+    with StepTimer("batch_search") as search_step:
+        search_step.input = {"n_queries": len(query_texts), "top_k": top_k}
+        if is_hybrid:
+            retrievals = index.batch_search(embeddings, query_texts, top_k=top_k)
+        else:
+            retrievals = index.batch_search(embeddings, top_k=top_k)
+        search_step.output = {"n_results": sum(len(r) for r in retrievals)}
+
+    return retrievals, encode_step, search_step
+
+
+# =============================================================================
 # Agent Base Class
 # =============================================================================
+
 
 class Agent(ABC):
     """Base class for all agents.
