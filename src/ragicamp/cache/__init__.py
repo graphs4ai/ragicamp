@@ -11,6 +11,7 @@ Architecture:
 
 Currently implemented layers:
     - EmbeddingStore + CachedEmbedderProvider: caches query embeddings by (model, text)
+    - RetrievalStore: caches retrieval results by (retriever, query, top_k)
 
 Usage:
     # Wrap any EmbedderProvider (automatic via ProviderFactory when RAGICAMP_CACHE=1)
@@ -26,9 +27,11 @@ Usage:
 
 from ragicamp.cache.cached_embedder import CachedEmbedder, CachedEmbedderProvider
 from ragicamp.cache.embedding_store import EmbeddingStore
+from ragicamp.cache.retrieval_store import RetrievalStore
 
 __all__ = [
     "CachedEmbedder",
     "CachedEmbedderProvider",
     "EmbeddingStore",
+    "RetrievalStore",
 ]

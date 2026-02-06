@@ -198,7 +198,13 @@ class AgentFactory:
         else:
             if index is None:
                 raise ValueError(f"RAG agent '{agent_type}' requires an index")
-            
+
+            # Enable retrieval cache when query_transform is none
+            # (retrieval results are independent of LLM model/prompt)
+            qt = spec.query_transform
+            if not qt or qt == "none":
+                kwargs.update(cls._get_retrieval_cache_kwargs(spec))
+
             return cls.create_rag(
                 agent_type=agent_type,
                 name=spec.name,
@@ -209,6 +215,38 @@ class AgentFactory:
                 **kwargs,
             )
     
+    @staticmethod
+    def _get_retrieval_cache_kwargs(spec: "ExperimentSpec") -> dict[str, Any]:
+        """Build retrieval cache kwargs if caching is enabled.
+
+        Returns ``retrieval_store`` and ``retriever_name`` kwargs for the
+        agent constructor, or an empty dict if caching is disabled.
+        """
+        import os
+
+        if os.environ.get("RAGICAMP_CACHE", "1") != "1":
+            return {}
+
+        try:
+            from ragicamp.cache.retrieval_store import RetrievalStore
+
+            store = RetrievalStore.default()
+            retriever_name = spec.retriever or "unknown"
+            logger.info(
+                "Retrieval cache enabled (retriever=%s, db=%s)",
+                retriever_name, store.db_path,
+            )
+            return {
+                "retrieval_store": store,
+                "retriever_name": retriever_name,
+            }
+        except Exception:
+            logger.warning(
+                "Failed to enable retrieval cache, falling back to uncached",
+                exc_info=True,
+            )
+            return {}
+
     @classmethod
     def get_available_agents(cls) -> list[str]:
         """Get list of all available agent types."""

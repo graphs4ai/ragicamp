@@ -13,7 +13,7 @@ Supports multiple search backends:
 """
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from tqdm import tqdm
 
@@ -62,6 +62,8 @@ class FixedRAGAgent(Agent):
         index: SearchBackend,
         top_k: int = 5,
         prompt_builder: PromptBuilder | None = None,
+        retrieval_store: Any | None = None,
+        retriever_name: str | None = None,
         **config,
     ):
         """Initialize agent with providers (not loaded models).
@@ -73,6 +75,8 @@ class FixedRAGAgent(Agent):
             index: Search backend (VectorIndex, HybridSearcher, or HierarchicalSearcher)
             top_k: Number of documents to retrieve
             prompt_builder: For building prompts
+            retrieval_store: Optional RetrievalStore for caching retrieval results
+            retriever_name: Retriever identifier for cache keys
         """
         super().__init__(name, **config)
 
@@ -81,6 +85,8 @@ class FixedRAGAgent(Agent):
         self.index = index
         self.top_k = top_k
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
+        self.retrieval_store = retrieval_store
+        self.retriever_name = retriever_name
 
         # Check if this is a hybrid searcher (needs query text too)
         self._is_hybrid = is_hybrid_searcher(index)
@@ -148,6 +154,8 @@ class FixedRAGAgent(Agent):
             query_texts=query_texts,
             top_k=self.top_k,
             is_hybrid=self._is_hybrid,
+            retrieval_store=self.retrieval_store,
+            retriever_name=self.retriever_name,
         )
 
         logger.info("Retrieved documents for %d queries", len(query_texts))

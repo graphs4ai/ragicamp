@@ -212,11 +212,19 @@ def batch_embed_and_search(
     query_texts: list[str],
     top_k: int,
     is_hybrid: bool,
+    retrieval_store: Any = None,
+    retriever_name: str | None = None,
 ) -> tuple[list[list], "Step", "Step"]:
     """Shared embed + search logic for all RAG agents.
 
     Loads the embedder, encodes queries, then searches the index.
     Supports dense, hybrid, and hierarchical search backends.
+
+    When ``retrieval_store`` and ``retriever_name`` are provided, results
+    are checked in the SQLite cache first.  Only cache misses trigger
+    embedding + search.  This avoids redundant retrieval when multiple
+    experiments share the same (retriever, queries, top_k) but differ
+    only in LLM model or prompt template.
 
     Args:
         embedder_provider: EmbedderProvider instance.
@@ -224,27 +232,138 @@ def batch_embed_and_search(
         query_texts: List of query strings to encode and search.
         top_k: Number of results per query.
         is_hybrid: Whether the index is a HybridSearcher (needs query_texts).
+        retrieval_store: Optional :class:`RetrievalStore` for caching results.
+        retriever_name: Retriever identifier for cache keys (required if store is set).
 
     Returns:
         Tuple of (search_results, encode_step, search_step).
     """
     import numpy as np
 
+    from ragicamp.core.types import Document, SearchResult
+
+    # --- Check retrieval cache -------------------------------------------
+    cached_results: list | None = None
+    miss_indices: list[int] | None = None
+
+    if retrieval_store is not None and retriever_name:
+        cached_batch, hit_mask = retrieval_store.get_batch(
+            retriever_name, query_texts, top_k,
+        )
+        n_hits = sum(hit_mask)
+
+        if n_hits == len(query_texts):
+            # 100% cache hit — skip embedding and search entirely
+            logger.info(
+                "Retrieval cache: 100%% hit (%d queries, retriever=%s, k=%d)",
+                len(query_texts), retriever_name, top_k,
+            )
+            retrievals = [
+                [
+                    SearchResult(
+                        document=Document.from_dict(sr["document"]),
+                        score=sr["score"],
+                        rank=sr.get("rank", 0),
+                    )
+                    for sr in result_dicts
+                ]
+                for result_dicts in cached_batch
+            ]
+            # Return synthetic steps (no actual work done)
+            encode_step = Step(
+                name="batch_encode",
+                model=embedder_provider.model_name,
+                input={"n_queries": len(query_texts)},
+                output={"cache_hit": True},
+                duration_s=0.0,
+            )
+            search_step = Step(
+                name="batch_search",
+                input={"n_queries": len(query_texts), "top_k": top_k},
+                output={"n_results": sum(len(r) for r in retrievals), "cache_hit": True},
+                duration_s=0.0,
+            )
+            return retrievals, encode_step, search_step
+
+        if n_hits > 0:
+            # Partial hit — only embed+search the misses
+            cached_results = cached_batch
+            miss_indices = [i for i, hit in enumerate(hit_mask) if not hit]
+            logger.info(
+                "Retrieval cache: %d/%d hits, searching %d misses (retriever=%s, k=%d)",
+                n_hits, len(query_texts), len(miss_indices), retriever_name, top_k,
+            )
+        else:
+            miss_indices = None  # Treat as full miss (simpler code path)
+            logger.info(
+                "Retrieval cache: 0/%d hits, searching all (retriever=%s, k=%d)",
+                len(query_texts), retriever_name, top_k,
+            )
+
+    # --- Determine which queries need embedding+search -------------------
+    if miss_indices is not None:
+        texts_to_search = [query_texts[i] for i in miss_indices]
+    else:
+        texts_to_search = query_texts
+
+    # --- Embed -----------------------------------------------------------
     with embedder_provider.load() as embedder:
         with StepTimer("batch_encode", model=embedder_provider.model_name) as encode_step:
-            encode_step.input = {"n_queries": len(query_texts)}
-            embeddings = embedder.batch_encode(query_texts)
+            encode_step.input = {"n_queries": len(texts_to_search)}
+            embeddings = embedder.batch_encode(texts_to_search)
             if not isinstance(embeddings, np.ndarray):
                 embeddings = np.asarray(embeddings, dtype=np.float32)
             encode_step.output = {"embedding_shape": list(embeddings.shape)}
 
+    # --- Search ----------------------------------------------------------
     with StepTimer("batch_search") as search_step:
-        search_step.input = {"n_queries": len(query_texts), "top_k": top_k}
+        search_step.input = {"n_queries": len(texts_to_search), "top_k": top_k}
         if is_hybrid:
-            retrievals = index.batch_search(embeddings, query_texts, top_k=top_k)
+            search_results = index.batch_search(embeddings, texts_to_search, top_k=top_k)
         else:
-            retrievals = index.batch_search(embeddings, top_k=top_k)
-        search_step.output = {"n_results": sum(len(r) for r in retrievals)}
+            search_results = index.batch_search(embeddings, top_k=top_k)
+        search_step.output = {"n_results": sum(len(r) for r in search_results)}
+
+    # --- Merge cached + fresh results ------------------------------------
+    if miss_indices is not None and cached_results is not None:
+        # Reconstruct full results list in original order
+        retrievals: list[list] = []
+        miss_iter = iter(search_results)
+        for i in range(len(query_texts)):
+            if cached_results[i] is not None:
+                # Deserialize cached result
+                retrievals.append([
+                    SearchResult(
+                        document=Document.from_dict(sr["document"]),
+                        score=sr["score"],
+                        rank=sr.get("rank", 0),
+                    )
+                    for sr in cached_results[i]
+                ])
+            else:
+                retrievals.append(next(miss_iter))
+    else:
+        retrievals = search_results
+
+    # --- Store fresh results in cache ------------------------------------
+    if retrieval_store is not None and retriever_name:
+        if miss_indices is not None:
+            # Only store the misses
+            miss_queries = [query_texts[i] for i in miss_indices]
+            miss_results_dicts = [
+                [sr.to_dict() for sr in results]
+                for results in search_results
+            ]
+        else:
+            # Store everything
+            miss_queries = query_texts
+            miss_results_dicts = [
+                [sr.to_dict() for sr in results]
+                for results in retrievals
+            ]
+        retrieval_store.put_batch(
+            retriever_name, miss_queries, miss_results_dicts, top_k,
+        )
 
     return retrievals, encode_step, search_step
 
