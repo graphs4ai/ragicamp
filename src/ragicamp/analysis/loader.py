@@ -329,11 +329,14 @@ class ResultsLoader:
         logger.info("Loaded %d experiments from directories", len(results))
         return results
 
-    def load_predictions(self, experiment_name: str) -> Optional[list[dict[str, Any]]]:
+    def load_predictions(
+        self, experiment_name: str, normalize: bool = True
+    ) -> Optional[list[dict[str, Any]]]:
         """Load predictions for a specific experiment.
 
         Args:
             experiment_name: Name of the experiment
+            normalize: If True, normalize old format predictions to new format
 
         Returns:
             List of prediction dicts or None if not found
@@ -345,14 +348,58 @@ class ResultsLoader:
         if pred_file.exists():
             with open(pred_file) as f:
                 data = json.load(f)
-            return data.get("predictions", [])
+            predictions = data.get("predictions", [])
+        else:
+            # Fall back to legacy: *_predictions.json
+            pred_files = list(exp_dir.glob("*_predictions.json"))
+            if not pred_files:
+                return None
 
-        # Fall back to legacy: *_predictions.json
-        pred_files = list(exp_dir.glob("*_predictions.json"))
-        if not pred_files:
-            return None
+            with open(pred_files[0]) as f:
+                data = json.load(f)
+            predictions = data.get("predictions", [])
 
-        with open(pred_files[0]) as f:
-            data = json.load(f)
+        if normalize:
+            predictions = [self._normalize_prediction(p) for p in predictions]
 
-        return data.get("predictions", [])
+        return predictions
+
+    @staticmethod
+    def _normalize_prediction(prediction: dict[str, Any]) -> dict[str, Any]:
+        """Normalize prediction to new format for backward compatibility.
+
+        Converts old format (metadata.doc_scores) to new format (retrieved_docs).
+        """
+        # Check if already new format
+        if "retrieved_docs" in prediction and prediction["retrieved_docs"]:
+            return prediction
+
+        # Check for old format with doc_scores
+        metadata = prediction.get("metadata", {})
+        doc_scores = metadata.get("doc_scores", [])
+
+        if doc_scores:
+            # Convert doc_scores to retrieved_docs format
+            retrieved_docs = []
+            for i, score in enumerate(doc_scores):
+                retrieved_docs.append({
+                    "rank": i + 1,
+                    "doc_id": f"doc_{i}",
+                    "content": "",  # Not available in old format
+                    "score": score,
+                    "retrieval_score": score,
+                    "retrieval_rank": i + 1,
+                })
+            prediction["retrieved_docs"] = retrieved_docs
+
+            # Clean up metadata
+            if "num_docs" not in metadata:
+                metadata["num_docs"] = len(doc_scores)
+            if "top_k" not in metadata:
+                metadata["top_k"] = len(doc_scores)
+
+        # Ensure retrieved_docs exists (even if empty)
+        if "retrieved_docs" not in prediction:
+            prediction["retrieved_docs"] = []
+
+        return prediction
