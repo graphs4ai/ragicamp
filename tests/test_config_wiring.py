@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -578,7 +579,6 @@ class TestMigrationNameStripping:
 
     @pytest.fixture(autouse=True)
     def _add_scripts_to_path(self):
-        import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
         yield
 
@@ -623,6 +623,39 @@ class TestMigrationNameStripping:
         name = "rag_vllm_google_gemma29bit_dense_bge_large_512_k5_msmarco_concise_nq"
         result = _strip_reranker_from_name(name)
         assert result == "rag_vllm_google_gemma29bit_dense_bge_large_512_k5_concise_nq"
+
+    def test_two_rerankers_same_corrected_name(self):
+        """When _bge_ and _bgev2_ both map to the same name, scan must not
+        produce two 'rename' actions — one should be archived."""
+        from migrate_fake_reranked import _save_json, scan_study
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            study = Path(tmpdir)
+
+            # Create two fake-reranked dirs that map to the same corrected name
+            base = "rag_vllm_google_gemma29bit_hier_bge_large_2048p_448c_k5_multiquery"
+            bge_dir = study / f"{base}_bge_fewshot_3_triviaqa"
+            bgev2_dir = study / f"{base}_bgev2_fewshot_3_triviaqa"
+            bge_dir.mkdir()
+            bgev2_dir.mkdir()
+
+            # Give bgev2 a better F1
+            _save_json(bge_dir / "results.json", {"name": bge_dir.name, "metrics": {"f1": 0.3}})
+            _save_json(bgev2_dir / "results.json", {"name": bgev2_dir.name, "metrics": {"f1": 0.5}})
+
+            actions = scan_study(study)
+
+            # Both should be in the action list
+            assert len(actions) == 2
+
+            # Only one should be 'rename', the other should be 'merge_keep_new' (archived)
+            action_types = [a['action'] for a in actions]
+            assert action_types.count('rename') == 1
+            assert action_types.count('merge_keep_new') == 1
+
+            # The rename winner should be the one with higher F1 (bgev2)
+            rename_action = [a for a in actions if a['action'] == 'rename'][0]
+            assert 'bgev2' in rename_action['old_name']
 
 
 if __name__ == "__main__":

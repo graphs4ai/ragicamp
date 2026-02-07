@@ -133,12 +133,22 @@ def scan_study(study_path: Path) -> list[dict]:
         - new_name, new_dir
         - action: 'rename', 'merge_keep_old', 'merge_keep_new', 'skip'
         - detail: human-readable explanation
+
+    Handles the case where multiple fake-reranked experiments (e.g. one
+    with ``_bge_`` and another with ``_bge-v2_``) map to the same
+    corrected name by comparing their F1 scores and keeping the best.
     """
     actions = []
 
     if not study_path.is_dir():
         print(f"Error: {study_path} is not a directory", file=sys.stderr)
         return actions
+
+    # Track names that have been claimed by earlier actions so we can
+    # detect collisions between multiple fake-reranked experiments that
+    # map to the same corrected name.
+    # Maps new_name -> (action_index, f1_of_winner)
+    claimed: dict[str, tuple[int, float]] = {}
 
     for exp_dir in sorted(study_path.iterdir()):
         if not exp_dir.is_dir():
@@ -154,13 +164,20 @@ def scan_study(study_path: Path) -> list[dict]:
             continue
 
         new_dir = study_path / new_name
+        old_f1 = _get_f1(exp_dir)
 
-        if new_dir.exists():
-            # Conflict: both the fake-reranked and the plain version exist
-            old_f1 = _get_f1(exp_dir)
+        # Check 1: Does the corrected name already exist on disk?
+        target_exists_on_disk = new_dir.exists()
+
+        # Check 2: Was the corrected name already claimed by a prior action?
+        already_claimed = new_name in claimed
+
+        if target_exists_on_disk and not already_claimed:
+            # Conflict with a real (non-fake-reranked) experiment on disk
             new_f1 = _get_f1(new_dir)
 
             if old_f1 >= new_f1:
+                idx = len(actions)
                 actions.append({
                     'old_name': old_name,
                     'old_dir': exp_dir,
@@ -168,11 +185,12 @@ def scan_study(study_path: Path) -> list[dict]:
                     'new_dir': new_dir,
                     'action': 'merge_keep_old',
                     'detail': (
-                        f"Conflict: '{new_name}' already exists. "
+                        f"Conflict: '{new_name}' already exists on disk. "
                         f"Old F1={old_f1:.4f} >= existing F1={new_f1:.4f}. "
                         f"Will archive existing and rename old."
                     ),
                 })
+                claimed[new_name] = (idx, old_f1)
             else:
                 actions.append({
                     'old_name': old_name,
@@ -181,12 +199,58 @@ def scan_study(study_path: Path) -> list[dict]:
                     'new_dir': new_dir,
                     'action': 'merge_keep_new',
                     'detail': (
-                        f"Conflict: '{new_name}' already exists. "
+                        f"Conflict: '{new_name}' already exists on disk. "
                         f"Existing F1={new_f1:.4f} > old F1={old_f1:.4f}. "
                         f"Will archive fake-reranked."
                     ),
                 })
+                # Don't update claimed — the on-disk version stays
+
+        elif already_claimed:
+            # Another fake-reranked experiment already claimed this name.
+            # Compare F1 to decide which one wins.
+            prev_idx, prev_f1 = claimed[new_name]
+
+            if old_f1 > prev_f1:
+                # This experiment is better — demote the previous winner
+                prev_action = actions[prev_idx]
+                prev_action['action'] = 'merge_keep_new'
+                prev_action['detail'] = (
+                    f"Collision: '{prev_action['old_name']}' also maps to "
+                    f"'{new_name}' but F1={prev_f1:.4f} < {old_f1:.4f}. "
+                    f"Will archive this one."
+                )
+
+                idx = len(actions)
+                actions.append({
+                    'old_name': old_name,
+                    'old_dir': exp_dir,
+                    'new_name': new_name,
+                    'new_dir': new_dir,
+                    'action': 'rename',
+                    'detail': (
+                        f"Collision winner: '{old_name}' -> '{new_name}' "
+                        f"(F1={old_f1:.4f} > {prev_f1:.4f})"
+                    ),
+                })
+                claimed[new_name] = (idx, old_f1)
+            else:
+                # Previous winner is still better — archive this one
+                actions.append({
+                    'old_name': old_name,
+                    'old_dir': exp_dir,
+                    'new_name': new_name,
+                    'new_dir': new_dir,
+                    'action': 'merge_keep_new',
+                    'detail': (
+                        f"Collision: '{old_name}' also maps to '{new_name}' "
+                        f"but F1={old_f1:.4f} <= {prev_f1:.4f}. "
+                        f"Will archive this one."
+                    ),
+                })
         else:
+            # No conflict — simple rename
+            idx = len(actions)
             actions.append({
                 'old_name': old_name,
                 'old_dir': exp_dir,
@@ -195,6 +259,7 @@ def scan_study(study_path: Path) -> list[dict]:
                 'action': 'rename',
                 'detail': f"Rename: '{old_name}' -> '{new_name}'",
             })
+            claimed[new_name] = (idx, old_f1)
 
     return actions
 
@@ -222,16 +287,35 @@ def execute_migration(study_path: Path, actions: list[dict]) -> None:
         new_dir = action['new_dir']
         new_name = action['new_name']
 
+        if not old_dir.exists():
+            print(f"  SKIP (already moved): {action['old_name']}")
+            continue
+
         if action['action'] == 'rename':
-            old_dir.rename(new_dir)
+            if new_dir.exists():
+                # Safety: target appeared (e.g. from a prior action in this
+                # batch).  Archive the target first, then rename.
+                archive_dir.mkdir(exist_ok=True)
+                dest = archive_dir / new_name
+                if dest.exists():
+                    # Unique suffix to avoid archive collisions
+                    dest = archive_dir / f"{new_name}__dup"
+                shutil.move(str(new_dir), str(dest))
+                print(f"  (pre-archived existing '{new_name}')")
+
+            shutil.move(str(old_dir), str(new_dir))
             _update_json_fields(new_dir, new_name)
             print(f"  RENAMED: {action['old_name']} -> {new_name}")
 
         elif action['action'] == 'merge_keep_old':
             # Archive existing, rename old
             archive_dir.mkdir(exist_ok=True)
-            shutil.move(str(new_dir), str(archive_dir / new_name))
-            old_dir.rename(new_dir)
+            if new_dir.exists():
+                dest = archive_dir / new_name
+                if dest.exists():
+                    dest = archive_dir / f"{new_name}__dup"
+                shutil.move(str(new_dir), str(dest))
+            shutil.move(str(old_dir), str(new_dir))
             _update_json_fields(new_dir, new_name)
             print(f"  MERGED (kept old): {action['old_name']} -> {new_name} "
                   f"(archived existing to _archived_fake_reranked/)")
