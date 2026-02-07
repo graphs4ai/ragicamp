@@ -135,6 +135,8 @@ class SelfRAGAgent(Agent):
         # Pop retrieval cache kwargs before passing to super
         self.retrieval_store = config.pop("retrieval_store", None)
         self.retriever_name: Optional[str] = config.pop("retriever_name", None)
+        self.reranker_provider = config.pop("reranker_provider", None)
+        self.fetch_k: int = config.pop("fetch_k", top_k)
 
         super().__init__(name, **config)
 
@@ -275,15 +277,22 @@ class SelfRAGAgent(Agent):
         idx_order = list(retrieval_group.keys())
         texts = [retrieval_group[idx].query.text for idx in idx_order]
 
+        # When reranking, retrieve more docs (fetch_k) then trim after rerank
+        retrieve_k = self.fetch_k if self.reranker_provider else self.top_k
+
         retrievals, encode_step, search_step = batch_embed_and_search(
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=texts,
-            top_k=self.top_k,
+            top_k=retrieve_k,
             is_hybrid=self._is_hybrid,
             retrieval_store=self.retrieval_store,
             retriever_name=self.retriever_name,
         )
+
+        # Apply cross-encoder reranking if configured
+        if self.reranker_provider is not None:
+            retrievals = self._apply_reranking(texts, retrievals)
 
         for idx in idx_order:
             retrieval_group[idx].steps.append(encode_step)
@@ -398,6 +407,47 @@ class SelfRAGAgent(Agent):
                     output=answer,
                     model=self.generator_provider.model_name,
                 ))
+
+    # ------------------------------------------------------------------
+    # Reranking
+    # ------------------------------------------------------------------
+
+    def _apply_reranking(
+        self,
+        query_texts: list[str],
+        retrievals: list[list],
+    ) -> list[list]:
+        """Load reranker, rerank documents, and rebuild SearchResult lists."""
+        from time import perf_counter as _pc
+
+        from ragicamp.core.types import Document, SearchResult
+
+        _t0 = _pc()
+        with self.reranker_provider.load() as reranker:
+            docs_lists: list[list[Document]] = [
+                [sr.document for sr in srs] for srs in retrievals
+            ]
+            reranked_docs = reranker.batch_rerank(
+                query_texts, docs_lists, top_k=self.top_k,
+            )
+
+        reranked_retrievals: list[list[SearchResult]] = []
+        for docs in reranked_docs:
+            reranked_retrievals.append([
+                SearchResult(
+                    document=doc,
+                    score=getattr(doc, "score", 0.0),
+                    rank=rank,
+                )
+                for rank, doc in enumerate(docs)
+            ])
+
+        elapsed = _pc() - _t0
+        logger.info(
+            "Reranked %d queries (%d -> %d docs each) in %.1fs",
+            len(query_texts), self.fetch_k, self.top_k, elapsed,
+        )
+        return reranked_retrievals
 
     # ------------------------------------------------------------------
     # Result builder

@@ -157,6 +157,7 @@ class AgentFactory:
         embedder_provider: EmbedderProvider,
         generator_provider: GeneratorProvider,
         index: VectorIndex | None = None,
+        reranker_provider: Any | None = None,
     ) -> Agent:
         """Create an agent from an ExperimentSpec.
         
@@ -165,6 +166,7 @@ class AgentFactory:
             embedder_provider: Embedder provider
             generator_provider: Generator provider
             index: Vector index (required for RAG agents)
+            reranker_provider: Optional RerankerProvider for cross-encoder reranking
         
         Returns:
             Configured Agent
@@ -204,6 +206,14 @@ class AgentFactory:
             qt = spec.query_transform
             if not qt or qt == "none":
                 kwargs.update(cls._get_retrieval_cache_kwargs(spec))
+
+            # Pass reranker if configured
+            if reranker_provider is not None:
+                kwargs["reranker_provider"] = reranker_provider
+                # When reranking, retrieve fetch_k docs and rerank down to top_k
+                fetch_k = spec.fetch_k
+                if fetch_k and fetch_k > spec.top_k:
+                    kwargs["fetch_k"] = fetch_k
 
             return cls.create_rag(
                 agent_type=agent_type,

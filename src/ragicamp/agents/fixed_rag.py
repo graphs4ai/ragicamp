@@ -64,6 +64,8 @@ class FixedRAGAgent(Agent):
         prompt_builder: PromptBuilder | None = None,
         retrieval_store: Any | None = None,
         retriever_name: str | None = None,
+        reranker_provider: Any | None = None,
+        fetch_k: int | None = None,
         **config,
     ):
         """Initialize agent with providers (not loaded models).
@@ -73,10 +75,12 @@ class FixedRAGAgent(Agent):
             embedder_provider: Provides embedder with lazy loading
             generator_provider: Provides generator with lazy loading
             index: Search backend (VectorIndex, HybridSearcher, or HierarchicalSearcher)
-            top_k: Number of documents to retrieve
+            top_k: Number of documents to retrieve (final count after reranking)
             prompt_builder: For building prompts
             retrieval_store: Optional RetrievalStore for caching retrieval results
             retriever_name: Retriever identifier for cache keys
+            reranker_provider: Optional RerankerProvider for cross-encoder reranking
+            fetch_k: Documents to retrieve before reranking (None = same as top_k)
         """
         super().__init__(name, **config)
 
@@ -87,6 +91,8 @@ class FixedRAGAgent(Agent):
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
         self.retrieval_store = retrieval_store
         self.retriever_name = retriever_name
+        self.reranker_provider = reranker_provider
+        self.fetch_k = fetch_k or top_k
 
         # Check if this is a hybrid searcher (needs query text too)
         self._is_hybrid = is_hybrid_searcher(index)
@@ -151,22 +157,85 @@ class FixedRAGAgent(Agent):
         query_texts: list[str],
         show_progress: bool,
     ) -> tuple[list[list[SearchResult]], list[Step]]:
-        """Phase 1: Encode queries and search index.
+        """Phase 1: Encode queries and search index, optionally rerank.
 
         Uses the shared batch_embed_and_search utility for all backends.
+        When a reranker_provider is set, retrieves ``fetch_k`` documents
+        and reranks down to ``top_k``.
         """
+        # When reranking, retrieve more docs (fetch_k) then trim after rerank
+        retrieve_k = self.fetch_k if self.reranker_provider else self.top_k
+
         retrievals, encode_step, search_step = batch_embed_and_search(
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=query_texts,
-            top_k=self.top_k,
+            top_k=retrieve_k,
             is_hybrid=self._is_hybrid,
             retrieval_store=self.retrieval_store,
             retriever_name=self.retriever_name,
         )
 
+        steps = [encode_step, search_step]
+
+        # Apply cross-encoder reranking if configured
+        if self.reranker_provider is not None:
+            retrievals, rerank_step = self._apply_reranking(
+                query_texts, retrievals,
+            )
+            steps.append(rerank_step)
+
         logger.info("Retrieved documents for %d queries", len(query_texts))
-        return retrievals, [encode_step, search_step]
+        return retrievals, steps
+
+    def _apply_reranking(
+        self,
+        query_texts: list[str],
+        retrievals: list[list[SearchResult]],
+    ) -> tuple[list[list[SearchResult]], Step]:
+        """Load reranker, rerank documents, and rebuild SearchResult lists."""
+        from time import perf_counter as _pc
+
+        from ragicamp.core.types import Document, SearchResult
+
+        _t0 = _pc()
+        with self.reranker_provider.load() as reranker:
+            # Extract Document lists from SearchResult lists
+            docs_lists: list[list[Document]] = [
+                [sr.document for sr in srs] for srs in retrievals
+            ]
+
+            reranked_docs = reranker.batch_rerank(
+                query_texts, docs_lists, top_k=self.top_k,
+            )
+
+        # Rebuild SearchResult wrappers with reranker scores
+        reranked_retrievals: list[list[SearchResult]] = []
+        for docs in reranked_docs:
+            reranked_retrievals.append([
+                SearchResult(
+                    document=doc,
+                    score=getattr(doc, "score", 0.0),
+                    rank=rank,
+                )
+                for rank, doc in enumerate(docs)
+            ])
+
+        elapsed = _pc() - _t0
+        logger.info(
+            "Reranked %d queries (%d -> %d docs each) in %.1fs",
+            len(query_texts), self.fetch_k, self.top_k, elapsed,
+        )
+
+        rerank_step = Step(
+            type="rerank",
+            input={"n_queries": len(query_texts), "fetch_k": self.fetch_k},
+            output={"top_k": self.top_k},
+            model=self.reranker_provider.model_name,
+            timing_ms=elapsed * 1000,
+        )
+
+        return reranked_retrievals, rerank_step
 
     def _phase_generate(
         self,

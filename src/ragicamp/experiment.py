@@ -463,7 +463,10 @@ class Experiment:
 
     @staticmethod
     def _build_index_loader(
-        retriever_type: str, index_name: str, index_path: Path,
+        retriever_type: str,
+        index_name: str,
+        index_path: Path,
+        retriever_config: dict | None = None,
     ) -> "Callable[[], Any]":
         """Return a zero-arg callable that loads the search backend from disk.
 
@@ -481,6 +484,36 @@ class Experiment:
 
                 backend = HierarchicalSearcher(
                     HierarchicalIndex.load(name=index_name, path=index_path),
+                )
+            elif retriever_type == "hybrid":
+                from ragicamp.indexes.sparse import SparseIndex
+                from ragicamp.indexes.vector_index import VectorIndex
+                from ragicamp.retrievers.hybrid import HybridSearcher
+                from ragicamp.utils.artifacts import get_artifact_manager
+
+                vector_index = VectorIndex.load(index_path)
+
+                cfg = retriever_config or {}
+                sparse_name = cfg.get("sparse_index", f"{index_name}_sparse_bm25")
+                alpha = cfg.get("alpha", 0.5)
+
+                mgr = get_artifact_manager()
+                sparse_path = mgr.get_sparse_index_path(sparse_name)
+
+                logger.info(
+                    "Loading sparse index: %s (alpha=%.2f, path=%s)",
+                    sparse_name, alpha, sparse_path,
+                )
+                sparse_index = SparseIndex.load(
+                    name=sparse_name,
+                    path=sparse_path,
+                    documents=vector_index.documents,
+                )
+
+                backend = HybridSearcher(
+                    vector_index=vector_index,
+                    sparse_index=sparse_index,
+                    alpha=alpha,
                 )
             else:
                 from ragicamp.indexes.vector_index import VectorIndex
@@ -559,7 +592,10 @@ class Experiment:
                 from ragicamp.retrievers.lazy import LazySearchBackend
 
                 index = LazySearchBackend(
-                    loader=cls._build_index_loader(retriever_type, index_name, index_path),
+                    loader=cls._build_index_loader(
+                        retriever_type, index_name, index_path,
+                        retriever_config=retriever_config,
+                    ),
                     is_hybrid=(retriever_type == "hybrid"),
                 )
                 logger.info(
@@ -571,6 +607,15 @@ class Experiment:
         dataset_config = DatasetFactory.parse_spec(spec.dataset, limit=limit)
         dataset = DatasetFactory.create(dataset_config)
 
+        # Create reranker provider if configured
+        reranker_provider = None
+        if spec.exp_type == "rag" and spec.reranker and spec.reranker != "none":
+            reranker_provider = ProviderFactory.create_reranker(spec.reranker)
+            logger.info(
+                "Reranker enabled: %s (fetch_k=%s, top_k=%d)",
+                spec.reranker, spec.fetch_k, spec.top_k,
+            )
+
         # Create agent
         if spec.exp_type == "rag":
             if embedder_provider is None or index is None:
@@ -581,6 +626,7 @@ class Experiment:
                 embedder_provider=embedder_provider,
                 generator_provider=generator_provider,
                 index=index,
+                reranker_provider=reranker_provider,
             )
         else:
             agent = AgentFactory.from_spec(

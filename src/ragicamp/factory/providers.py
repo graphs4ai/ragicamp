@@ -1,7 +1,7 @@
 """Provider factory for creating model providers from configuration.
 
-Creates EmbedderProvider and GeneratorProvider for the clean architecture
-where models are loaded/unloaded via context managers.
+Creates EmbedderProvider, GeneratorProvider, and RerankerProvider for the
+clean architecture where models are loaded/unloaded via context managers.
 
 Embedding cache:
     When ``RAGICAMP_CACHE`` is set to ``"1"`` (the default), the factory
@@ -24,6 +24,7 @@ from ragicamp.models.providers import (
     GeneratorProvider,
     ModelProvider,
 )
+from ragicamp.models.providers.reranker import RerankerConfig, RerankerProvider
 
 logger = get_logger(__name__)
 
@@ -168,3 +169,25 @@ class ProviderFactory:
                 )
 
         return provider
+
+    @staticmethod
+    def create_reranker(
+        spec: str,
+        **kwargs: Any,
+    ) -> RerankerProvider:
+        """Create a RerankerProvider from spec.
+
+        Args:
+            spec: Reranker name (e.g. ``'bge'``, ``'bge-v2'``, ``'ms-marco'``)
+                  or a full HuggingFace model path.
+            **kwargs: Additional config params (e.g. ``batch_size``).
+
+        Returns:
+            RerankerProvider ready for ``.load()``
+        """
+        config = RerankerConfig(
+            model_name=spec,
+            batch_size=kwargs.get("batch_size", 32),
+        )
+        logger.info("Creating reranker provider: %s (%s)", spec, config.model_name)
+        return RerankerProvider(config)

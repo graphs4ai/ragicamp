@@ -85,13 +85,82 @@ def setup_plotting():
 # DATA LOADING
 # =============================================================================
 
+def _model_short_from_spec(model_spec: str) -> str:
+    """Derive short model name from a full model spec string.
+
+    Args:
+        model_spec: Full model specification (e.g. 'vllm:google/gemma-2-9b-it')
+
+    Returns:
+        Human-readable short name (e.g. 'Gemma2-9B').
+    """
+    # Normalize: strip provider prefix and collapse separators
+    normalized = model_spec.replace(":", "_").replace("/", "_").replace("-", "").lower()
+    for key, display in MODEL_MAP.items():
+        if key.lower() in normalized:
+            return display
+    return model_spec  # Fallback: return raw spec
+
+
+def _retriever_type_from_name(retriever_name: str) -> Optional[str]:
+    """Detect retriever type from its name."""
+    if not retriever_name:
+        return None
+    name_lower = retriever_name.lower()
+    for rtype, patterns in RETRIEVER_TYPES.items():
+        for pattern in patterns:
+            if pattern in name_lower:
+                return rtype
+    return 'dense'  # default
+
+
+def _embedding_model_from_name(retriever_name: str) -> Optional[str]:
+    """Detect embedding model from retriever name."""
+    if not retriever_name:
+        return None
+    name_lower = retriever_name.lower()
+    for key, display in EMBEDDING_MAP.items():
+        if key in name_lower:
+            return display
+    return None
+
+
+def _chunk_size_from_name(retriever_name: str) -> Optional[str]:
+    """Extract chunk size info from retriever name."""
+    if not retriever_name:
+        return None
+    # Hierarchical: 2048p_448c
+    m = re.search(r'(\d+)p_(\d+)c', retriever_name)
+    if m:
+        return f"{m.group(1)}p/{m.group(2)}c"
+    # Dense: _512_, _1024_
+    m = re.search(r'_(\d{3,4})(?:_|$)', retriever_name)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _agent_type_from_name(name: str) -> str:
+    """Detect agent type from experiment name."""
+    if name.startswith('iterative_rag') or name.startswith('iterative_'):
+        return 'iterative_rag'
+    elif name.startswith('self_rag') or name.startswith('selfrag_'):
+        return 'self_rag'
+    elif name.startswith('direct_'):
+        return 'direct_llm'
+    else:
+        return 'fixed_rag'
+
+
 def parse_experiment_name(name: str) -> Dict[str, Any]:
     """
     Parse experiment name into structured components.
-    
+
     Handles formats:
     - direct_vllm_metallamaLlama3.23BInstruct_concise_nq
     - rag_vllm_metallamaLlama3.23BInstruct_dense_bge_large_512_k5_hyde_bge_concise_nq
+    - iterative_rag_iter1_stopok_vllm_*_*_k5_*_nq
+    - self_rag_vllm_*_*_k5_*_nq
     - Singleton experiments (iterative_*, selfrag_*, premium_*)
     """
     config = {
@@ -107,27 +176,29 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
         'top_k': None,
         'query_transform': 'none',
         'reranker': 'none',
+        'agent_type': _agent_type_from_name(name),
+        'chunk_size': None,
         'is_singleton': False,
     }
-    
+
     # Detect dataset (at end of name)
     for ds in ['nq', 'triviaqa', 'hotpotqa']:
         if name.endswith(f'_{ds}'):
             config['dataset'] = ds
             break
-    
+
     # Fallback: look for dataset anywhere in the name
     if config['dataset'] == 'unknown':
         for ds in ['triviaqa', 'hotpotqa', 'nq']:
             if f'_{ds}_' in name or f'_{ds}' in name:
                 config['dataset'] = ds
                 break
-    
+
     # Handle singleton experiments
     if name.startswith('iterative_') or name.startswith('selfrag_') or name.startswith('premium_'):
         config['is_singleton'] = True
         config['exp_type'] = 'rag'
-        
+
         # Detect model from singleton name - order matters (most specific first)
         name_lower = name.lower()
         if 'gemma9b' in name_lower or 'gemma2_9b' in name_lower:
@@ -148,7 +219,7 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
             config['model_short'] = 'Llama-3.2-3B'
         elif 'phi' in name_lower:
             config['model_short'] = 'Phi-3-mini'
-        
+
         if name.startswith('iterative_'):
             config['retriever_type'] = 'iterative'
             iter_match = re.search(r'(\d+)iter', name)
@@ -161,7 +232,7 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
             config['query_transform'] = 'hyde'
             config['reranker'] = 'bge-v2'
         return config
-    
+
     # Direct experiments
     if name.startswith('direct_'):
         config['exp_type'] = 'direct'
@@ -170,48 +241,48 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
                 config['model_short'] = display
                 break
         # Order matters: more specific patterns first
-        for prompt in ['concise_strict', 'concise_json', 'extractive_quoted', 'cot_final', 
-                       'fewshot_3', 'fewshot_1', 'fewshot', 'concise', 'structured', 
+        for prompt in ['concise_strict', 'concise_json', 'extractive_quoted', 'cot_final',
+                       'fewshot_3', 'fewshot_1', 'fewshot', 'concise', 'structured',
                        'cot', 'extractive', 'cited']:
             if f'_{prompt}_' in name or name.endswith(f'_{prompt}_{config["dataset"]}'):
                 config['prompt'] = prompt
                 break
         return config
-    
-    # RAG experiments
-    if name.startswith('rag_'):
+
+    # RAG experiments (rag_*, iterative_rag_*, self_rag_*)
+    if name.startswith('rag_') or name.startswith('self_rag_') or name.startswith('iterative_rag_'):
         config['exp_type'] = 'rag'
-        
+
         for key, display in MODEL_MAP.items():
             if key.lower() in name.lower():
                 config['model_short'] = display
                 break
-        
+
         k_match = re.search(r'_k(\d+)_', name)
         if k_match:
             config['top_k'] = int(k_match.group(1))
-        
+
         for rtype, patterns in RETRIEVER_TYPES.items():
             for pattern in patterns:
                 if pattern in name.lower():
                     config['retriever_type'] = rtype
                     break
-        
+
         for key, display in EMBEDDING_MAP.items():
             if key in name.lower():
                 config['embedding_model'] = display
                 break
-        
+
         if '_hyde_' in name.lower():
             config['query_transform'] = 'hyde'
         elif '_multiquery_' in name.lower():
             config['query_transform'] = 'multiquery'
-        
+
         if '_bgev2_' in name.lower() or '_bge-v2_' in name.lower():
             config['reranker'] = 'bge-v2'
         elif '_bge_' in name.lower() and config['embedding_model'] is None:
             config['reranker'] = 'bge'
-        
+
         # Order matters: more specific patterns first
         for prompt in ['concise_strict', 'concise_json', 'extractive_quoted', 'cot_final',
                        'fewshot_3', 'fewshot_1', 'fewshot', 'concise', 'structured',
@@ -219,84 +290,163 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
             if f'_{prompt}_' in name:
                 config['prompt'] = prompt
                 break
-        
+
         if k_match:
             retriever_match = re.search(r'Instruct_(.+?)_k\d+', name)
+            if not retriever_match:
+                # Try broader match for normalized model names
+                retriever_match = re.search(r'(?:bit|ruct)_(.+?)_k\d+', name)
             if retriever_match:
                 config['retriever'] = retriever_match.group(1)
-    
+
     return config
 
 
+def _enrich_from_metadata(row: Dict[str, Any], metadata: Dict[str, Any]) -> None:
+    """Overlay structured fields from metadata.json onto a parsed row.
+
+    Fields from metadata take priority over name-based parsing because
+    they are authoritative (written by the experiment runner).
+    """
+    # Direct fields from metadata
+    if 'type' in metadata:
+        row['exp_type'] = metadata['type']
+    if 'model' in metadata:
+        row['model'] = metadata['model']
+        row['model_short'] = _model_short_from_spec(metadata['model'])
+    if 'dataset' in metadata:
+        row['dataset'] = metadata['dataset']
+    if 'prompt' in metadata:
+        row['prompt'] = metadata['prompt']
+
+    # Retriever fields
+    if 'retriever' in metadata and metadata['retriever']:
+        row['retriever'] = metadata['retriever']
+        if row.get('retriever_type') is None or row['retriever_type'] == 'unknown':
+            row['retriever_type'] = _retriever_type_from_name(metadata['retriever'])
+        if row.get('embedding_model') is None:
+            row['embedding_model'] = _embedding_model_from_name(metadata['retriever'])
+        if row.get('chunk_size') is None:
+            row['chunk_size'] = _chunk_size_from_name(metadata['retriever'])
+
+    if 'top_k' in metadata and metadata['top_k'] is not None:
+        row['top_k'] = metadata['top_k']
+    if 'fetch_k' in metadata and metadata['fetch_k'] is not None:
+        row['fetch_k'] = metadata['fetch_k']
+
+    # Query transform
+    qt = metadata.get('query_transform')
+    if qt and qt != 'none':
+        row['query_transform'] = qt
+    elif qt == 'none' or qt is None:
+        row.setdefault('query_transform', 'none')
+
+    # Reranker
+    rr = metadata.get('reranker')
+    if rr and rr != 'none':
+        row['reranker'] = rr
+    elif rr == 'none' or rr is None:
+        row.setdefault('reranker', 'none')
+
+    rr_model = metadata.get('reranker_model')
+    if rr_model:
+        row['reranker_model'] = rr_model
+
+    # Agent type
+    at = metadata.get('agent_type')
+    if at:
+        row['agent_type'] = at
+    elif row.get('agent_type') is None:
+        row['agent_type'] = _agent_type_from_name(row.get('name', ''))
+
+
 def load_all_results(study_path: Path = None) -> pd.DataFrame:
-    """Load all experiment results into a DataFrame."""
+    """Load all experiment results into a DataFrame.
+
+    Prefers structured fields from ``metadata.json`` over name parsing.
+    Falls back to name parsing when metadata is unavailable.
+    """
     if study_path is None:
         study_path = DEFAULT_STUDY_PATH
-    
+
     results = []
     loading_errors = []
-    
+
     if not study_path.exists():
         print(f"Warning: Study path does not exist: {study_path}")
         return pd.DataFrame()
-    
+
     for exp_dir in study_path.iterdir():
         if not exp_dir.is_dir():
             continue
-        
+
         results_file = exp_dir / "results.json"
         metadata_file = exp_dir / "metadata.json"
-        
+
         data = None
+        metadata = {}
+
+        # Load results.json (primary: has metrics + metadata)
         if results_file.exists():
             with open(results_file) as f:
                 data = json.load(f)
-        elif metadata_file.exists():
+
+        # Load metadata.json for structured fields
+        if metadata_file.exists():
             with open(metadata_file) as f:
-                data = json.load(f)
+                metadata = json.load(f)
+
+        # Fallback: use metadata as data source if no results.json
+        if data is None and metadata:
+            data = metadata.copy()
             summary_files = list(exp_dir.glob("*_summary.json"))
             if summary_files:
                 with open(summary_files[0]) as f:
                     summary = json.load(f)
                 data['metrics'] = summary.get('overall_metrics', summary)
-        
+
         if data is None:
             continue
-        
+
         try:
             exp_name = data.get('name', exp_dir.name)
+
+            # Step 1: Parse name (baseline, may be imprecise)
             config = parse_experiment_name(exp_name)
-            
+
+            # Step 2: Overlay authoritative fields from metadata
+            _enrich_from_metadata(config, metadata if metadata else data)
+
             row = config.copy()
+
+            # Extract metrics
             metrics = data.get('metrics', data)
-            
             if isinstance(metrics, list):
                 metrics = data.get('overall_metrics', {})
-            
             if not isinstance(metrics, dict):
                 metrics = {}
-            
+
             for metric in METRICS:
                 if metric in metrics:
                     row[metric] = metrics[metric]
                 elif metric in data:
                     row[metric] = data[metric]
-            
+
             row['n_samples'] = data.get('n_samples', data.get('num_questions', None))
             row['duration'] = data.get('duration', 0)
             row['throughput'] = data.get('throughput_qps', 0)
-            
+
             results.append(row)
         except Exception as e:
             loading_errors.append((exp_dir.name, str(e)))
-    
+
     if loading_errors:
-        print(f"⚠️ Failed to load {len(loading_errors)} experiments")
-    
+        print(f"Warning: Failed to load {len(loading_errors)} experiments")
+
     df = pd.DataFrame(results)
     if not df.empty:
         df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
-    
+
     return df
 
 
@@ -523,6 +673,43 @@ def get_experiment_health_summary(study_path: Path = None) -> Dict[str, Any]:
             summary['in_progress'] += 1
     
     return summary
+
+
+def print_search_space_summary(df: pd.DataFrame) -> None:
+    """Print a summary of all iterable search dimensions in the loaded data.
+
+    Useful to quickly verify that every configuration axis is being
+    parsed correctly and to see the full combinatorial space.
+    """
+    dims = [
+        ('exp_type',        'Experiment Type'),
+        ('model_short',     'Model'),
+        ('dataset',         'Dataset'),
+        ('retriever_type',  'Retriever Type'),
+        ('embedding_model', 'Embedding Model'),
+        ('top_k',           'Top-K'),
+        ('query_transform', 'Query Transform'),
+        ('reranker',        'Reranker'),
+        ('prompt',          'Prompt'),
+        ('agent_type',      'Agent Type'),
+        ('chunk_size',      'Chunk Size'),
+    ]
+
+    print("=" * 60)
+    print("Search Space Summary")
+    print("=" * 60)
+    print(f"Total experiments: {len(df)}")
+    print()
+
+    for col, label in dims:
+        if col not in df.columns:
+            continue
+        unique = sorted(df[col].dropna().unique(), key=str)
+        n = len(unique)
+        vals = ', '.join(str(v) for v in unique)
+        print(f"  {label:<18s} ({n:>2d}): {vals}")
+
+    print("=" * 60)
 
 
 # =============================================================================
