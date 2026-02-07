@@ -836,8 +836,27 @@ def compute_marginal_means(
         
         marginal_mean = stratum_means.mean()
         
-        all_values = level_df[metric].values
-        if len(all_values) >= 3:
+        # Bootstrap the *marginal* mean (mean-of-stratum-means) so the CI
+        # matches the point estimate.  Resampling raw values would compute a
+        # CI for the raw mean, which can diverge from the marginal mean when
+        # strata have unequal sizes, leading to negative yerr in plots.
+        strata_groups = {k: v[metric].values for k, v in level_df.groupby('_stratum')}
+        n_strata_with_data = sum(1 for v in strata_groups.values() if len(v) > 0)
+        if n_strata_with_data >= 2 and len(level_df) >= 3:
+            bootstrap_means = []
+            for _ in range(500):
+                stratum_boot_means = []
+                for vals in strata_groups.values():
+                    if len(vals) == 0:
+                        continue
+                    sample = np.random.choice(vals, size=len(vals), replace=True)
+                    stratum_boot_means.append(np.mean(sample))
+                bootstrap_means.append(np.mean(stratum_boot_means))
+            ci_low = np.percentile(bootstrap_means, 2.5)
+            ci_high = np.percentile(bootstrap_means, 97.5)
+        elif len(level_df) >= 3:
+            # Single stratum -- bootstrap the raw values directly
+            all_values = level_df[metric].values
             bootstrap_means = []
             for _ in range(500):
                 sample = np.random.choice(all_values, size=len(all_values), replace=True)
@@ -1132,9 +1151,11 @@ def plot_component_effects(df: pd.DataFrame, factor: str, metric: str = PRIMARY_
         return ax
     
     x = range(len(marginal))
-    ax.bar(x, marginal['marginal_mean'], 
-           yerr=[marginal['marginal_mean'] - marginal['ci_low'], 
-                 marginal['ci_high'] - marginal['marginal_mean']],
+    # Clamp to non-negative to guard against any residual mismatch
+    yerr_low = np.maximum(marginal['marginal_mean'] - marginal['ci_low'], 0)
+    yerr_high = np.maximum(marginal['ci_high'] - marginal['marginal_mean'], 0)
+    ax.bar(x, marginal['marginal_mean'],
+           yerr=[yerr_low, yerr_high],
            capsize=5, alpha=0.7)
     ax.set_xticks(x)
     ax.set_xticklabels(marginal[factor], rotation=45, ha='right')

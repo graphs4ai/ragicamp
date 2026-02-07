@@ -29,6 +29,35 @@ logger = get_logger(__name__)
 CHECKPOINT_INTERVAL = 1
 
 
+def _create_faiss_index(index_type: str, dim: int):
+    """Create a FAISS index based on the configured type.
+
+    Args:
+        index_type: One of ``"flat"``, ``"hnsw"``, ``"ivf"``.
+        dim: Embedding dimension.
+
+    Returns:
+        A FAISS index instance.
+    """
+    import faiss
+
+    if index_type == "hnsw":
+        index = faiss.IndexHNSWFlat(dim, 32, faiss.METRIC_INNER_PRODUCT)
+        index.hnsw.efConstruction = 200
+        index.hnsw.efSearch = 128
+        logger.info("Created HNSW index (dim=%d, M=32, efConstruction=200)", dim)
+        return index
+    elif index_type == "ivf":
+        quantizer = faiss.IndexFlatIP(dim)
+        # nlist will be set properly after training; start with a placeholder
+        index = faiss.IndexIVFFlat(quantizer, dim, 4096, faiss.METRIC_INNER_PRODUCT)
+        logger.info("Created IVF index (dim=%d, nlist=4096)", dim)
+        return index
+    else:
+        logger.info("Created flat (brute-force) index (dim=%d)", dim)
+        return faiss.IndexFlatIP(dim)
+
+
 def build_hierarchical_index(
     retriever_config: dict[str, Any],
     corpus_config: dict[str, Any],
@@ -82,6 +111,7 @@ def build_hierarchical_index(
     child_chunk_size = retriever_config.get("child_chunk_size", 256)
     parent_overlap = retriever_config.get("parent_overlap", 100)
     child_overlap = retriever_config.get("child_overlap", 50)
+    index_type = retriever_config.get("index_type", "flat")
 
     # Use all CPU cores for FAISS
     num_threads = os.cpu_count() or 8
@@ -94,6 +124,7 @@ def build_hierarchical_index(
     print(f"  Parent chunks: {parent_chunk_size}")
     print(f"  Child chunks: {child_chunk_size}")
     print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
+    print(f"  FAISS index type: {index_type}")
     print(f"  FAISS threads: {num_threads}")
     print(f"{'=' * 60}")
 
@@ -163,8 +194,8 @@ def build_hierarchical_index(
         child_count = checkpoint.total_child_chunks
         mapping_file = open(mapping_path, "ab")
     else:
-        # Create fresh index
-        index = faiss.IndexFlatIP(embedding_dim)
+        # Create fresh index based on configured type
+        index = _create_faiss_index(index_type, embedding_dim)
         start_batch = 0
         total_docs = 0
         parent_count = 0
@@ -395,6 +426,7 @@ def build_hierarchical_index(
         "type": "hierarchical",
         "embedding_model": embedding_model,
         "embedding_backend": backend,
+        "index_type": index_type,
         "parent_chunk_size": parent_chunk_size,
         "child_chunk_size": child_chunk_size,
         "parent_overlap": parent_overlap,

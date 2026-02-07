@@ -8,6 +8,7 @@ Commands:
     evaluate  Compute metrics on predictions
     backup    Backup artifacts to Backblaze B2
     download  Download artifacts from Backblaze B2
+    prune     Remove orphaned remote files not present locally
 """
 
 # ============================================================================
@@ -41,6 +42,7 @@ from ragicamp.cli.commands import (
     cmd_index,
     cmd_metrics,
     cmd_migrate_indexes,
+    cmd_prune,
     cmd_resume,
     cmd_run,
 )
@@ -164,6 +166,20 @@ def _add_cache_parser(subparsers) -> None:
     p.set_defaults(func=cmd_cache)
 
 
+def _add_prune_parser(subparsers) -> None:
+    """Add 'prune' subcommand."""
+    p = subparsers.add_parser(
+        "prune",
+        help="Remove orphaned remote files that no longer exist locally",
+    )
+    p.add_argument("path", type=Path, nargs="?", default=None, help="Local directory to compare against")
+    p.add_argument("--bucket", default="masters-bucket", help="B2 bucket name")
+    p.add_argument("--prefix", "-p", default=None, help="S3 key prefix to prune (default: latest backup)")
+    p.add_argument("--dry-run", action="store_true", help="Preview only, do not delete")
+    p.add_argument("--workers", "-w", type=int, default=12, help="Parallel delete threads")
+    p.set_defaults(func=cmd_prune)
+
+
 def _add_migrate_parser(subparsers) -> None:
     """Add 'migrate-indexes' subcommand."""
     p = subparsers.add_parser("migrate-indexes", help="Migrate old index format to new format")
@@ -194,6 +210,7 @@ def create_parser() -> argparse.ArgumentParser:
     _add_metrics_parser(subparsers)
     _add_backup_parser(subparsers)
     _add_download_parser(subparsers)
+    _add_prune_parser(subparsers)
     _add_cache_parser(subparsers)
     _add_migrate_parser(subparsers)
 

@@ -425,6 +425,46 @@ def cmd_download(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Prune orphaned remote files that no longer exist locally."""
+    from ragicamp.cli.backup import list_backups, prune
+
+    # Determine which backup prefix to prune
+    if args.prefix:
+        prefix = args.prefix
+    else:
+        # Default: use latest backup
+        backups = list_backups(args.bucket, limit=1)
+        if not backups:
+            print("No backups found. Specify a prefix with --prefix.")
+            return 1
+        prefix = f"ragicamp-backup/{backups[0]}"
+        print(f"Using latest backup: {backups[0]}")
+
+    # Determine local directories to compare against
+    dirs_to_check: list[Path] = []
+    if args.path:
+        dirs_to_check = [args.path]
+    else:
+        for default_dir in ["artifacts", "outputs"]:
+            p = Path(default_dir)
+            if p.exists():
+                dirs_to_check.append(p)
+
+    if not dirs_to_check:
+        print("No local artifacts/ or outputs/ directories found.")
+        print("Specify a path explicitly: ragicamp prune <path>")
+        return 1
+
+    return prune(
+        dirs_to_check=dirs_to_check,
+        bucket=args.bucket,
+        prefix=prefix,
+        dry_run=args.dry_run,
+        max_workers=args.workers,
+    )
+
+
 def _pickle_needs_migration(pkl_path: Path) -> bool:
     """Check if a pickle file uses the old module path."""
     if not pkl_path.exists():

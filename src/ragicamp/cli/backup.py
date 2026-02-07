@@ -317,6 +317,118 @@ def backup(
     return 0
 
 
+def prune(
+    dirs_to_check: list[Path],
+    bucket: str,
+    prefix: str,
+    dry_run: bool = False,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+) -> int:
+    """Remove remote files that no longer exist locally.
+
+    Scans the B2 prefix, compares against local directories, and deletes
+    remote objects whose corresponding local files are missing.
+
+    Args:
+        dirs_to_check: Local directories that were backed up.
+        prefix: S3 key prefix used during backup.
+        bucket: B2 bucket name.
+        dry_run: If True, only list files that would be deleted.
+        max_workers: Number of parallel delete threads.
+
+    Returns:
+        Exit code (0 on success).
+    """
+    s3, _, _, _ = get_b2_client()
+    if s3 is None:
+        return 1
+
+    print(f"Pruning orphaned files from: s3://{bucket}/{prefix}/")
+    print(f"Comparing against local dirs: {', '.join(str(d) for d in dirs_to_check)}")
+
+    # Build set of local relative paths (same logic as backup)
+    local_keys: set[str] = set()
+    for backup_dir in dirs_to_check:
+        if not backup_dir.exists():
+            continue
+        for root, dirs, files in os.walk(backup_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")]
+            for file in files:
+                local_path = Path(root) / file
+                if should_skip_file(local_path):
+                    continue
+                relative_path = local_path.relative_to(backup_dir.parent)
+                s3_key = f"{prefix}/{relative_path}"
+                local_keys.add(s3_key)
+
+    print(f"Local files tracked: {len(local_keys)}")
+
+    # List all remote files under the prefix
+    remote_keys: list[tuple[str, int]] = []
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                remote_keys.append((obj["Key"], obj["Size"]))
+    except Exception as e:
+        print(f"Error listing remote files: {e}")
+        return 1
+
+    print(f"Remote files found: {len(remote_keys)}")
+
+    # Find orphans: remote keys that have no corresponding local file
+    orphans = [(key, size) for key, size in remote_keys if key not in local_keys]
+
+    if not orphans:
+        print("No orphaned files found. Remote is in sync with local.")
+        return 0
+
+    orphan_bytes = sum(size for _, size in orphans)
+    print(f"\nFound {len(orphans)} orphaned files ({orphan_bytes / (1024**2):.1f} MB)")
+
+    if dry_run:
+        print("\n[DRY RUN] Would delete:")
+        for key, size in orphans[:20]:
+            print(f"  {key} ({size / 1024:.1f} KB)")
+        if len(orphans) > 20:
+            print(f"  ... and {len(orphans) - 20} more files")
+        return 0
+
+    # Delete orphans in parallel
+    deleted = 0
+    errors = 0
+
+    def delete_one(key: str, size: int) -> tuple[bool, str | None]:
+        try:
+            s3.delete_object(Bucket=bucket, Key=key)
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
+    from tqdm import tqdm
+
+    with tqdm(total=len(orphans), desc="Deleting", unit="file") as pbar:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(delete_one, key, size): key
+                for key, size in orphans
+            }
+            for future in as_completed(futures):
+                success, error = future.result()
+                if success:
+                    deleted += 1
+                else:
+                    errors += 1
+                    logger.warning("Failed to delete %s: %s", futures[future], error)
+                pbar.update(1)
+
+    print(f"\nDeleted {deleted}/{len(orphans)} orphaned files ({orphan_bytes / (1024**2):.1f} MB freed)")
+    if errors:
+        print(f"  {errors} deletions failed (see warnings above)")
+
+    return 0 if errors == 0 else 1
+
+
 def download(
     bucket: str,
     backup_name: Optional[str] = None,
