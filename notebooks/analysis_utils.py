@@ -341,12 +341,10 @@ def _enrich_from_metadata(row: Dict[str, Any], metadata: Dict[str, Any]) -> None
     elif qt == 'none' or qt is None:
         row.setdefault('query_transform', 'none')
 
-    # Reranker
-    rr = metadata.get('reranker')
-    if rr and rr != 'none':
-        row['reranker'] = rr
-    elif rr == 'none' or rr is None:
-        row.setdefault('reranker', 'none')
+    # Reranker — metadata is authoritative, always override
+    if 'reranker' in metadata:
+        rr = metadata['reranker']
+        row['reranker'] = rr if rr else 'none'
 
     rr_model = metadata.get('reranker_model')
     if rr_model:
