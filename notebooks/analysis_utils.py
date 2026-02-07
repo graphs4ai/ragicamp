@@ -68,6 +68,14 @@ EMBEDDING_MAP = {
     'e5_mistral': 'E5-Mistral-7B',
 }
 
+# Dataset aliases — normalise alternative names to canonical short forms
+DATASET_ALIASES = {
+    'natural_questions': 'nq',
+}
+
+# Directories to skip when scanning experiment outputs
+SKIP_DIRS = {'_archived_fake_reranked', 'analysis', '__pycache__', '.ipynb_checkpoints'}
+
 
 # =============================================================================
 # STYLING
@@ -306,17 +314,20 @@ def _enrich_from_metadata(row: Dict[str, Any], metadata: Dict[str, Any]) -> None
     """Overlay structured fields from metadata.json onto a parsed row.
 
     Fields from metadata take priority over name-based parsing because
-    they are authoritative (written by the experiment runner).
+    they are authoritative (written by the experiment runner).  However,
+    empty-string values are treated as missing so that name-parsed values
+    are preserved.
     """
-    # Direct fields from metadata
-    if 'type' in metadata:
+    # Direct fields from metadata — only override if value is truthy
+    if metadata.get('type'):
         row['exp_type'] = metadata['type']
-    if 'model' in metadata:
+    if metadata.get('model'):
         row['model'] = metadata['model']
         row['model_short'] = _model_short_from_spec(metadata['model'])
-    if 'dataset' in metadata:
-        row['dataset'] = metadata['dataset']
-    if 'prompt' in metadata:
+    if metadata.get('dataset'):
+        ds = metadata['dataset']
+        row['dataset'] = DATASET_ALIASES.get(ds, ds)
+    if metadata.get('prompt'):
         row['prompt'] = metadata['prompt']
 
     # Retriever fields
@@ -375,7 +386,7 @@ def load_all_results(study_path: Path = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     for exp_dir in study_path.iterdir():
-        if not exp_dir.is_dir():
+        if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
             continue
 
         results_file = exp_dir / "results.json"
@@ -475,7 +486,7 @@ def load_failed_experiments(study_path: Path = None) -> pd.DataFrame:
         return pd.DataFrame()
     
     for exp_dir in study_path.iterdir():
-        if not exp_dir.is_dir():
+        if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
             continue
         
         state_file = exp_dir / "state.json"
