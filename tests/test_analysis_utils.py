@@ -14,6 +14,8 @@ from analysis_utils import (  # noqa: E402
     _strip_fake_tokens,
     _effective_config_key,
     _deduplicate_experiments,
+    _model_short_from_spec,
+    filter_to_search_space,
 )
 
 
@@ -232,3 +234,128 @@ class TestDeduplicateExperiments:
         result = _deduplicate_experiments(df)
 
         assert len(result) == 2  # different prompts → kept
+
+
+class TestFilterToSearchSpace:
+    """Test filter_to_search_space()."""
+
+    _SPACE = {
+        'model': {'vllm:meta-llama/Llama-3.2-3B-Instruct'},
+        'retriever': {'dense_bge_large_512'},
+        'top_k': {5, 10},
+        'prompt': {'concise', 'cot'},
+        'direct_prompt': {'concise', 'fewshot_3'},
+        'dataset': {'nq', 'triviaqa'},
+        'query_transform': {'none', 'hyde'},
+        'reranker': {'none', 'bge'},
+        'agent_type': {'fixed_rag'},
+    }
+
+    def _make_df(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_keeps_experiment_within_space(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 1
+
+    def test_drops_experiment_with_unknown_retriever(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_e5_mistral_512',  # not in space
+            'top_k': 5, 'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_drops_experiment_with_unknown_model(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Gemma2-9B',  # not in space (only Llama)
+            'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_drops_experiment_with_top_k_outside_space(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 20,  # not in {5, 10}
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_direct_uses_direct_prompt_set(self):
+        rows = [{
+            'name': 'direct_test', 'exp_type': 'direct',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': None, 'top_k': None,
+            'prompt': 'fewshot_3',  # in direct_prompt but not rag prompt
+            'agent_type': 'direct_llm',
+            'f1': 0.3,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 1
+
+    def test_direct_dropped_for_unknown_prompt(self):
+        rows = [{
+            'name': 'direct_test', 'exp_type': 'direct',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': None, 'top_k': None,
+            'prompt': 'structured',  # not in direct_prompt
+            'agent_type': 'direct_llm',
+            'f1': 0.3,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_empty_dataframe(self):
+        df = pd.DataFrame()
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert result.empty
+
+    def test_mixed_keep_and_drop(self):
+        rows = [
+            {  # Keep: within space
+                'name': 'rag_good', 'exp_type': 'rag',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'retriever': 'dense_bge_large_512', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag', 'f1': 0.5,
+            },
+            {  # Drop: retriever outside space
+                'name': 'rag_old', 'exp_type': 'rag',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'retriever': 'hier_bge_large_2048p_448c', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag', 'f1': 0.4,
+            },
+            {  # Keep: direct within space
+                'name': 'direct_good', 'exp_type': 'direct',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'triviaqa',
+                'retriever': None, 'top_k': None,
+                'prompt': 'concise', 'agent_type': 'direct_llm', 'f1': 0.3,
+            },
+        ]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 2
+        assert set(result['name']) == {'rag_good', 'direct_good'}

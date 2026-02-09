@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
 
+import yaml
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -88,6 +90,148 @@ _FAKE_RERANKER_TOKENS = {
 }
 _FAKE_RERANKER_NORMALISED = {t.replace('-', '') for t in _FAKE_RERANKER_TOKENS}
 _FAKE_QT_TOKENS = {'hyde', 'multiquery'}
+
+# Default config path (relative to notebooks/)
+DEFAULT_CONFIG_PATH = Path("../conf/study/smart_retrieval_slm.yaml")
+
+
+def load_study_search_space(config_path: Path = None) -> Dict[str, set]:
+    """Load the current study's search space from the YAML config.
+
+    Returns a dict mapping dimension names to sets of valid values::
+
+        {
+            'model': {'vllm:meta-llama/Llama-3.2-3B-Instruct', ...},
+            'retriever': {'dense_bge_large_512', ...},
+            'top_k': {3, 5, 10, 15, 20},
+            'prompt': {'concise', 'concise_strict', ...},
+            'dataset': {'nq', 'triviaqa', 'hotpotqa'},
+            'query_transform': {'none', 'hyde', 'multiquery'},
+            'reranker': {'none', 'bge', 'bge-v2'},
+            'agent_type': {'fixed_rag', 'iterative_rag', 'self_rag'},
+        }
+    """
+    if config_path is None:
+        config_path = DEFAULT_CONFIG_PATH
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    rag = cfg.get('rag', {})
+    sampling = rag.get('sampling', {})
+
+    space: Dict[str, set] = {}
+
+    # Models (shared for direct + rag via YAML anchors)
+    models = cfg.get('models') or rag.get('models', [])
+    space['model'] = set(models)
+
+    # Retriever names
+    space['retriever'] = set(rag.get('retriever_names', []))
+
+    # Top-K
+    space['top_k'] = set(rag.get('top_k_values', []))
+
+    # Prompts (RAG)
+    space['prompt'] = set(rag.get('prompts', []))
+
+    # Direct prompts (may differ from RAG)
+    direct_cfg = cfg.get('direct', {})
+    space['direct_prompt'] = set(direct_cfg.get('prompts', []))
+
+    # Datasets
+    space['dataset'] = set(cfg.get('datasets', []))
+
+    # Query transform
+    qt = rag.get('query_transform', [])
+    space['query_transform'] = set(qt) if qt else {'none'}
+
+    # Reranker
+    rr_configs = rag.get('reranker', {}).get('configs', [])
+    space['reranker'] = {c.get('name', 'none') for c in rr_configs}
+
+    # Agent types
+    space['agent_type'] = set(sampling.get('agent_types', ['fixed_rag']))
+
+    return space
+
+
+def filter_to_search_space(
+    df: pd.DataFrame,
+    search_space: Dict[str, set] = None,
+    config_path: Path = None,
+) -> pd.DataFrame:
+    """Filter a DataFrame to only experiments within the study's search space.
+
+    This matches Optuna's seeding logic: an experiment is included only if
+    every one of its parameters is in the configured search space.
+
+    Direct experiments are filtered by model, dataset, and direct_prompt.
+    RAG experiments are filtered by model, dataset, retriever, top_k, and prompt.
+
+    Args:
+        df: DataFrame from ``load_all_results()``.
+        search_space: Pre-loaded search space dict, or None to auto-load.
+        config_path: Path to the YAML config (used if search_space is None).
+
+    Returns:
+        Filtered DataFrame.
+    """
+    if df.empty:
+        return df
+
+    if search_space is None:
+        search_space = load_study_search_space(config_path)
+
+    # Build short-model lookup for matching notebook's model_short to YAML's full spec
+    model_short_set = {_model_short_from_spec(m) for m in search_space.get('model', set())}
+
+    masks = []
+    for idx, row in df.iterrows():
+        keep = True
+
+        # Model check (use model_short since that's what the notebook normalises to)
+        if model_short_set and row.get('model_short', 'unknown') not in model_short_set:
+            keep = False
+
+        # Dataset check
+        ds_set = search_space.get('dataset', set())
+        if ds_set and row.get('dataset', 'unknown') not in ds_set:
+            keep = False
+
+        if row.get('exp_type') == 'direct':
+            # Direct: check prompt against direct_prompt set
+            dp = search_space.get('direct_prompt', set())
+            if dp and row.get('prompt', 'unknown') not in dp:
+                keep = False
+        else:
+            # RAG: check retriever, top_k, prompt
+            ret_set = search_space.get('retriever', set())
+            if ret_set and row.get('retriever') not in ret_set:
+                keep = False
+
+            tk_set = search_space.get('top_k', set())
+            if tk_set and row.get('top_k') not in tk_set:
+                keep = False
+
+            p_set = search_space.get('prompt', set())
+            if p_set and row.get('prompt', 'unknown') not in p_set:
+                keep = False
+
+            at_set = search_space.get('agent_type', set())
+            if at_set and row.get('agent_type', 'fixed_rag') not in at_set:
+                keep = False
+
+        masks.append(keep)
+
+    filtered = df.loc[masks].copy().reset_index(drop=True)
+
+    n_removed = len(df) - len(filtered)
+    if n_removed > 0:
+        print(f"  Search-space filter: dropped {n_removed} experiments "
+              f"outside current YAML config")
+
+    return filtered
 
 
 # =============================================================================
@@ -485,7 +629,11 @@ def _deduplicate_experiments(df: pd.DataFrame) -> pd.DataFrame:
     return deduped.reset_index(drop=True)
 
 
-def load_all_results(study_path: Path = None, deduplicate: bool = True) -> pd.DataFrame:
+def load_all_results(
+    study_path: Path = None,
+    deduplicate: bool = True,
+    config_path: Path = None,
+) -> pd.DataFrame:
     """Load all experiment results into a DataFrame.
 
     Prefers structured fields from ``metadata.json`` over name parsing.
@@ -496,6 +644,10 @@ def load_all_results(study_path: Path = None, deduplicate: bool = True) -> pd.Da
         deduplicate: If True (default), remove duplicate experiments that
             differ only in unwired reranker/query_transform tokens, keeping
             the one with the best F1 per effective configuration.
+        config_path: Path to the study YAML config.  When provided (or when
+            the default config exists), experiments whose parameters fall
+            outside the current search space are dropped — matching the
+            same filter that Optuna uses for seeding.
     """
     if study_path is None:
         study_path = DEFAULT_STUDY_PATH
@@ -593,6 +745,12 @@ def load_all_results(study_path: Path = None, deduplicate: bool = True) -> pd.Da
     if not df.empty:
         if deduplicate:
             df = _deduplicate_experiments(df)
+
+        # Filter to current search space when config is available
+        cfg = config_path or DEFAULT_CONFIG_PATH
+        if Path(cfg).exists():
+            df = filter_to_search_space(df, config_path=cfg)
+
         df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
 
     return df
