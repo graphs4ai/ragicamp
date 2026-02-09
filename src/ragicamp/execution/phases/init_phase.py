@@ -55,11 +55,22 @@ class InitHandler(PhaseHandler):
         with open(questions_path, "w") as f:
             json.dump(questions_data, f, indent=2)
 
-        # Save metadata
+        # Save metadata — include all spec fields so that metadata.json is
+        # useful even if the experiment fails before the runner can overwrite it.
         metadata = {
             "name": spec.name,
+            "type": spec.exp_type,
+            "model": spec.model,
+            "dataset": spec.dataset,  # Use spec (canonical short name, e.g. "nq")
+            "prompt": spec.prompt,
+            "retriever": spec.retriever,
+            "top_k": spec.top_k,
+            "fetch_k": spec.fetch_k,
+            "query_transform": spec.query_transform,
+            "reranker": spec.reranker,
+            "reranker_model": spec.reranker_model,
+            "agent_type": spec.agent_type,
             "agent": context.agent.name,
-            "dataset": context.dataset.name,
             "metrics": [m.name for m in context.metrics] if context.metrics else [],
             "started_at": state.started_at,
         }
