@@ -15,10 +15,11 @@ For experiment specification and building, see the spec/ package.
 import json
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, IO, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.spec import ExperimentSpec
@@ -315,20 +316,39 @@ def run_spec_subprocess(
     if llm_judge_config:
         cmd.extend(["--llm-judge-config", json.dumps(llm_judge_config)])
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=False,
-            timeout=timeout,
-            check=False,
-        )
+    log_file = exp_out / "experiment.log"
 
-        if result.returncode == 0:
+    try:
+        with open(log_file, "a", buffering=1, encoding="utf-8") as lf:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            def _tee(stream: IO[str], console: IO[str], log: IO[str]) -> None:
+                for line in stream:
+                    console.write(line)
+                    console.flush()
+                    log.write(line)
+
+            tee_thread = threading.Thread(
+                target=_tee, args=(proc.stdout, sys.stdout, lf), daemon=True
+            )
+            tee_thread.start()
+            proc.wait(timeout=timeout)
+            tee_thread.join(timeout=5)
+
+        if proc.returncode == 0:
             return "ran"
         else:
             return "failed"
 
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
         logger.warning("Timeout after %ds", timeout)
         return "timeout"
 
