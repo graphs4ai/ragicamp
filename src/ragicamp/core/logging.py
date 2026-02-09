@@ -126,6 +126,7 @@ def configure_logging(
     # Get root logger for ragicamp
     root_logger = logging.getLogger("ragicamp")
     root_logger.setLevel(level)
+    root_logger.propagate = False  # Don't propagate to Python root logger
 
     # Clear existing handlers
     root_logger.handlers.clear()
