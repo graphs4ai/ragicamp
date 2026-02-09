@@ -252,6 +252,166 @@ def filter_to_search_space(
     return filtered
 
 
+def get_outside_search_space_summary(
+    df: pd.DataFrame,
+    search_space: Dict[str, set] = None,
+    config_path: Path = None,
+) -> Dict[str, Any]:
+    """Identify experiments outside the current YAML search space and summarize.
+
+    Use this to keep all experiments in the notebook but see which configs
+    are "outside" the active study, and get suggestions for what to add to
+    the YAML if you want to explore them.
+
+    Returns:
+        Dict with:
+        - n_in_space: number of experiments with all params in the config
+        - n_outside: number with at least one param outside
+        - outside_by_dimension: { 'retriever': 45, 'prompt': 30, ... }  (count
+          of experiments that have this dimension outside)
+        - outside_values: { 'retriever': ['dense_e5_mistral_512', ...],
+          'prompt': ['structured', ...], ... }  (unique values seen outside)
+        - df_outside: DataFrame of experiments that are outside (for inspection)
+    """
+    if df.empty:
+        return {
+            'n_in_space': 0,
+            'n_outside': 0,
+            'outside_by_dimension': {},
+            'outside_values': {},
+            'df_outside': pd.DataFrame(),
+        }
+
+    if search_space is None:
+        search_space = load_study_search_space(config_path)
+
+    model_full_set = search_space.get('model', set())
+    model_short_set = {_model_short_from_spec(m) for m in model_full_set}
+
+    # For each row, record which dimensions are outside
+    dims_checked = [
+        'model', 'dataset', 'retriever', 'top_k', 'prompt',
+        'query_transform', 'reranker', 'agent_type', 'direct_prompt',
+    ]
+    outside_by_dimension: Dict[str, int] = defaultdict(int)
+    outside_values: Dict[str, set] = defaultdict(set)
+
+    outside_idx = []
+
+    for idx, row in df.iterrows():
+        row_outside_dims = []
+
+        # Model
+        full_model = row.get('model')
+        if model_full_set:
+            if not (full_model and full_model in model_full_set) and row.get('model_short', 'unknown') not in model_short_set:
+                row_outside_dims.append('model')
+                outside_values['model'].add(row.get('model_short', 'unknown'))
+
+        # Dataset
+        ds_set = search_space.get('dataset', set())
+        if ds_set and row.get('dataset', 'unknown') not in ds_set:
+            row_outside_dims.append('dataset')
+            outside_values['dataset'].add(row.get('dataset', 'unknown'))
+
+        if row.get('exp_type') == 'direct':
+            dp = search_space.get('direct_prompt', set())
+            if dp and row.get('prompt', 'unknown') not in dp:
+                row_outside_dims.append('direct_prompt')
+                outside_values['direct_prompt'].add(row.get('prompt', 'unknown'))
+        else:
+            ret_set = search_space.get('retriever', set())
+            rv = row.get('retriever')
+            if ret_set and rv not in ret_set:
+                row_outside_dims.append('retriever')
+                if rv is not None:
+                    outside_values['retriever'].add(rv)
+
+            tk_set = search_space.get('top_k', set())
+            tv = row.get('top_k')
+            if tk_set and tv not in tk_set:
+                row_outside_dims.append('top_k')
+                if tv is not None:
+                    outside_values['top_k'].add(tv)
+
+            p_set = search_space.get('prompt', set())
+            if p_set and row.get('prompt', 'unknown') not in p_set:
+                row_outside_dims.append('prompt')
+                outside_values['prompt'].add(row.get('prompt', 'unknown'))
+
+            qt_set = search_space.get('query_transform', set())
+            qt_val = row.get('query_transform') or 'none'
+            if qt_set and qt_val not in qt_set:
+                row_outside_dims.append('query_transform')
+                outside_values['query_transform'].add(qt_val)
+
+            rr_set = search_space.get('reranker', set())
+            rr_val = row.get('reranker') or 'none'
+            if rr_set and rr_val not in rr_set:
+                row_outside_dims.append('reranker')
+                outside_values['reranker'].add(rr_val)
+
+            at_set = search_space.get('agent_type', set())
+            if at_set and row.get('agent_type', 'fixed_rag') not in at_set:
+                row_outside_dims.append('agent_type')
+                outside_values['agent_type'].add(row.get('agent_type', 'fixed_rag'))
+
+        for d in row_outside_dims:
+            outside_by_dimension[d] += 1
+        if row_outside_dims:
+            outside_idx.append(idx)
+
+    n_outside = len(outside_idx)
+    n_in_space = len(df) - n_outside
+
+    # Convert sets to sorted lists for stable output
+    outside_values_sorted = {
+        k: sorted(v, key=str) for k, v in outside_values.items() if v
+    }
+
+    return {
+        'n_in_space': n_in_space,
+        'n_outside': n_outside,
+        'outside_by_dimension': dict(outside_by_dimension),
+        'outside_values': outside_values_sorted,
+        'df_outside': df.loc[outside_idx].copy() if outside_idx else pd.DataFrame(),
+    }
+
+
+def print_outside_search_space_suggestion(
+    df: pd.DataFrame,
+    config_path: Path = None,
+    max_values_per_dim: int = 10,
+) -> None:
+    """Print a short summary of experiments outside the current YAML and suggest exploring them.
+
+    Call this after load_all_results() to see what configs are not in the
+    current study and might be worth adding to the YAML.
+    """
+    cfg = config_path or DEFAULT_CONFIG_PATH
+    if not Path(cfg).exists():
+        return
+
+    summary = get_outside_search_space_summary(df, config_path=cfg)
+
+    if summary['n_outside'] == 0:
+        return
+
+    n = summary['n_outside']
+    by_dim = summary['outside_by_dimension']
+    vals = summary['outside_values']
+
+    print(f"\n  {n} experiment(s) use configs outside the current YAML.")
+    print("  Consider adding these to your study config to explore them:")
+    for dim in ['retriever', 'prompt', 'model', 'top_k', 'query_transform', 'reranker', 'agent_type', 'dataset', 'direct_prompt']:
+        if dim not in vals or not vals[dim]:
+            continue
+        count = by_dim.get(dim, 0)
+        items = vals[dim][:max_values_per_dim]
+        extra = f", ... (+{len(vals[dim]) - max_values_per_dim} more)" if len(vals[dim]) > max_values_per_dim else ""
+        print(f"    • {dim}: {count} exps — {', '.join(str(x) for x in items)}{extra}")
+
+
 # =============================================================================
 # STYLING
 # =============================================================================
@@ -650,6 +810,7 @@ def _deduplicate_experiments(df: pd.DataFrame) -> pd.DataFrame:
 def load_all_results(
     study_path: Path = None,
     deduplicate: bool = True,
+    filter_to_search_space: bool = False,
     config_path: Path = None,
 ) -> pd.DataFrame:
     """Load all experiment results into a DataFrame.
@@ -662,10 +823,12 @@ def load_all_results(
         deduplicate: If True (default), remove duplicate experiments that
             differ only in unwired reranker/query_transform tokens, keeping
             the one with the best F1 per effective configuration.
-        config_path: Path to the study YAML config.  When provided (or when
-            the default config exists), experiments whose parameters fall
-            outside the current search space are dropped — matching the
-            same filter that Optuna uses for seeding.
+        filter_to_search_space: If True, drop experiments whose parameters
+            fall outside the current YAML search space (to align with Optuna).
+            Default False — all experiments are kept; use
+            ``get_outside_search_space_summary()`` or
+            ``print_outside_search_space_suggestion()`` to inspect outside configs.
+        config_path: Path to the study YAML config (for filtering or summary).
     """
     if study_path is None:
         study_path = DEFAULT_STUDY_PATH
@@ -761,12 +924,13 @@ def load_all_results(
 
     df = pd.DataFrame(results)
     if not df.empty:
-        # Filter to current search space FIRST (before dedup) so that
-        # dedup only picks "best F1" among experiments that are within
-        # the active search space.
         cfg = config_path or DEFAULT_CONFIG_PATH
-        if Path(cfg).exists():
+        if filter_to_search_space and Path(cfg).exists():
+            # Filter FIRST (before dedup) so dedup only picks best F1 among in-space exps
             df = filter_to_search_space(df, config_path=cfg)
+        elif Path(cfg).exists():
+            # Keep all; suggest exploring outside configs
+            print_outside_search_space_suggestion(df, config_path=cfg)
 
         if deduplicate:
             df = _deduplicate_experiments(df)

@@ -16,6 +16,7 @@ from analysis_utils import (  # noqa: E402
     _deduplicate_experiments,
     _model_short_from_spec,
     filter_to_search_space,
+    get_outside_search_space_summary,
 )
 
 
@@ -408,3 +409,50 @@ class TestFilterToSearchSpace:
         result = filter_to_search_space(df, search_space=self._SPACE)
         assert len(result) == 2
         assert set(result['name']) == {'rag_good', 'direct_good'}
+
+
+class TestGetOutsideSearchSpaceSummary:
+    """Test get_outside_search_space_summary()."""
+
+    _SPACE = TestFilterToSearchSpace._SPACE
+
+    def test_all_in_space(self):
+        rows = [{
+            'name': 'rag_1', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none', 'reranker': 'none', 'f1': 0.5,
+        }]
+        df = pd.DataFrame(rows)
+        out = get_outside_search_space_summary(df, search_space=self._SPACE)
+        assert out['n_in_space'] == 1
+        assert out['n_outside'] == 0
+        assert not out['outside_values']
+        assert out['df_outside'].empty
+
+    def test_reports_outside_retriever_and_values(self):
+        rows = [
+            {
+                'name': 'rag_in', 'exp_type': 'rag',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'retriever': 'dense_bge_large_512', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'query_transform': 'none', 'reranker': 'none', 'f1': 0.5,
+            },
+            {
+                'name': 'rag_out', 'exp_type': 'rag',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'retriever': 'dense_e5_mistral_512', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'query_transform': 'none', 'reranker': 'none', 'f1': 0.4,
+            },
+        ]
+        df = pd.DataFrame(rows)
+        out = get_outside_search_space_summary(df, search_space=self._SPACE)
+        assert out['n_in_space'] == 1
+        assert out['n_outside'] == 1
+        assert out['outside_by_dimension']['retriever'] == 1
+        assert 'dense_e5_mistral_512' in out['outside_values']['retriever']
+        assert len(out['df_outside']) == 1
+        assert out['df_outside'].iloc[0]['name'] == 'rag_out'
