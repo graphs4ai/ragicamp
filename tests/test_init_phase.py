@@ -215,5 +215,30 @@ class TestInitHandlerMetadata:
         assert metadata["query_transform"] is None
 
 
+class TestInitHandlerMinimalSpec:
+    """Verify InitHandler works safely with _MinimalSpec (programmatic API)."""
+
+    def test_minimal_spec_does_not_crash(self, temp_dir):
+        """When spec has only 'name', init should still write metadata without errors."""
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class MinimalSpec:
+            name: str
+
+        spec = MinimalSpec(name="programmatic_test")
+        ctx = _make_context(temp_dir, dataset_name="natural_questions")
+        handler = InitHandler()
+        handler.execute(spec, _make_state(), ctx)
+
+        metadata = json.loads((temp_dir / "metadata.json").read_text())
+        assert metadata["name"] == "programmatic_test"
+        # Falls back to context.dataset.name when spec.dataset is None
+        assert metadata["dataset"] == "natural_questions"
+        # Other fields should be None, not crash
+        assert metadata["model"] is None
+        assert metadata["type"] is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

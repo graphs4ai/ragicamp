@@ -326,7 +326,7 @@ class Experiment:
 
         handlers = self._get_handlers()
         if phase in handlers:
-            spec = _MinimalSpec(name=self.name)
+            spec = self._spec if self._spec is not None else _MinimalSpec(name=self.name)
             context = self._create_context()
             self._state = handlers[phase].execute(spec, self._state, context)
 
