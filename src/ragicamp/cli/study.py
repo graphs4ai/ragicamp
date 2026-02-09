@@ -29,6 +29,12 @@ from ragicamp.utils.artifacts import get_artifact_manager
 _study_logger = get_logger(__name__)
 
 
+def _log_print(msg: str) -> None:
+    """Print to terminal AND log to study.log (strips emoji for the log)."""
+    print(msg)
+    _study_logger.info(msg.strip())
+
+
 def _index_exists(index_path: Path) -> bool:
     """Check if index exists, supporting both old and new formats.
     
@@ -292,7 +298,7 @@ def _run_spec_list(
     results = {"completed": 0, "failed": 0, "skipped": 0}
 
     for i, spec in enumerate(specs):
-        print(f"\n[{i + 1}/{len(specs)}] {spec.name}")
+        _log_print(f"\n[{i + 1}/{len(specs)}] {spec.name}")
 
         status = run_spec(
             spec=spec,
@@ -399,10 +405,10 @@ def run_study(
     # ===================================================================
     warnings = validate_config(config)
     for w in warnings:
-        print(f"⚠️  {w}")
+        _log_print(f"⚠️  {w}")
 
     if validate_only:
-        print("✓ Configuration is valid")
+        _log_print("✓ Configuration is valid")
         return
 
     study_name = config["name"]
@@ -414,11 +420,11 @@ def run_study(
     log_path = add_file_handler(out / "study.log")
     _study_logger.info("Study log: %s", log_path)
 
-    print(f"\n{'=' * 70}")
-    print(f"Study: {study_name}")
+    _log_print(f"\n{'=' * 70}")
+    _log_print(f"Study: {study_name}")
     if description:
-        print(f"  {description}")
-    print(f"{'=' * 70}")
+        _log_print(f"  {description}")
+    _log_print(f"{'=' * 70}")
 
     if limit is None:
         limit = config.get("num_questions")
@@ -453,18 +459,18 @@ def run_study(
     # 4. Preview
     # ===================================================================
     label = "Baseline/singleton" if sampling_mode else "Total"
-    print(f"\n📋 {label} experiments: {len(specs)}")
+    _log_print(f"\n📋 {label} experiments: {len(specs)}")
     for s in specs:
-        print(f"   - {s.name}")
+        _log_print(f"   - {s.name}")
 
     if sampling_mode and rag_config.get("enabled"):
         n_trials = effective_sampling.get("n_experiments", 50)
         optimize_metric = effective_sampling.get("optimize_metric", "f1")
         mode_desc = "optimizing" if sampling_mode != "random" else "sampling"
-        print(f"🔬 + {n_trials} RAG trials ({sampling_mode} {mode_desc} {optimize_metric})")
+        _log_print(f"🔬 + {n_trials} RAG trials ({sampling_mode} {mode_desc} {optimize_metric})")
 
     if dry_run:
-        print("\n[DRY RUN] Would run the above experiments")
+        _log_print("\n[DRY RUN] Would run the above experiments")
         return
 
     # ===================================================================
@@ -503,12 +509,12 @@ def run_study(
     # ===================================================================
     # 7. Summary
     # ===================================================================
-    print(f"\n{'=' * 70}")
-    print(f"Study Complete: {study_name}")
-    print(f"  Completed: {results['completed']}")
-    print(f"  Failed: {results['failed']}")
-    print(f"  Skipped: {results['skipped']}")
-    print(f"{'=' * 70}")
+    _log_print(f"\n{'=' * 70}")
+    _log_print(f"Study Complete: {study_name}")
+    _log_print(f"  Completed: {results['completed']}")
+    _log_print(f"  Failed: {results['failed']}")
+    _log_print(f"  Skipped: {results['skipped']}")
+    _log_print(f"{'=' * 70}")
 
     meta = {
         "name": study_name,
