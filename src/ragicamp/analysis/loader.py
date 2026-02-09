@@ -292,6 +292,19 @@ class ResultsLoader:
         logger.info("Loaded %d experiments from comparison.json", len(results))
         return results
 
+    # Directories that contain deprecated / archived experiments
+    _SKIP_DIRS = frozenset({
+        '_archived_fake_reranked', '_tainted', '_collisions', '_incomplete',
+        'analysis', '__pycache__', '.ipynb_checkpoints',
+    })
+
+    def _is_deprecated_path(self, path: Path) -> bool:
+        """Return True if *path* is inside a deprecated / archive directory."""
+        for part in path.relative_to(self.base_dir).parts:
+            if part in self._SKIP_DIRS or part.startswith('_') or part.startswith('.'):
+                return True
+        return False
+
     def _load_from_directories(self) -> list[ExperimentResult]:
         """Load from individual experiment directories."""
         results = []
@@ -299,6 +312,22 @@ class ResultsLoader:
         # Find all metadata.json files
         for metadata_path in self.base_dir.rglob("metadata.json"):
             exp_dir = metadata_path.parent
+
+            # Skip archived / deprecated experiment directories
+            if self._is_deprecated_path(exp_dir):
+                continue
+
+            # Skip incomplete / failed experiments
+            state_file = exp_dir / "state.json"
+            if state_file.exists():
+                try:
+                    with open(state_file) as f:
+                        state = json.load(f)
+                    phase = state.get("phase", "")
+                    if phase in ("failed", "generating", "init", "computing_metrics"):
+                        continue
+                except (json.JSONDecodeError, OSError):
+                    pass
 
             try:
                 with open(metadata_path) as f:

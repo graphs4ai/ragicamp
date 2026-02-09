@@ -74,7 +74,10 @@ DATASET_ALIASES = {
 }
 
 # Directories to skip when scanning experiment outputs
-SKIP_DIRS = {'_archived_fake_reranked', 'analysis', '__pycache__', '.ipynb_checkpoints'}
+SKIP_DIRS = {
+    '_archived_fake_reranked', '_tainted', '_collisions', '_incomplete',
+    'analysis', '__pycache__', '.ipynb_checkpoints',
+}
 
 
 # =============================================================================
@@ -388,6 +391,21 @@ def load_all_results(study_path: Path = None) -> pd.DataFrame:
     for exp_dir in study_path.iterdir():
         if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
             continue
+        # Skip hidden/archive directories (e.g. _tainted, _collisions)
+        if exp_dir.name.startswith('.') or exp_dir.name.startswith('_'):
+            continue
+
+        # Skip incomplete / failed experiments — they have no useful metrics
+        state_file = exp_dir / "state.json"
+        if state_file.exists():
+            try:
+                with open(state_file) as f:
+                    state = json.load(f)
+                phase = state.get('phase', '')
+                if phase in ('failed', 'generating', 'init', 'computing_metrics'):
+                    continue
+            except (json.JSONDecodeError, OSError):
+                pass
 
         results_file = exp_dir / "results.json"
         metadata_file = exp_dir / "metadata.json"
@@ -487,6 +505,8 @@ def load_failed_experiments(study_path: Path = None) -> pd.DataFrame:
     
     for exp_dir in study_path.iterdir():
         if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
+            continue
+        if exp_dir.name.startswith('.') or exp_dir.name.startswith('_'):
             continue
         
         state_file = exp_dir / "state.json"
@@ -600,7 +620,9 @@ def predict_context_length_issues(study_path: Path = None) -> pd.DataFrame:
         return pd.DataFrame()
     
     for exp_dir in study_path.iterdir():
-        if not exp_dir.is_dir():
+        if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
+            continue
+        if exp_dir.name.startswith('.') or exp_dir.name.startswith('_'):
             continue
         
         config = parse_experiment_name(exp_dir.name)
@@ -660,7 +682,9 @@ def get_experiment_health_summary(study_path: Path = None) -> Dict[str, Any]:
     }
     
     for exp_dir in study_path.iterdir():
-        if not exp_dir.is_dir():
+        if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
+            continue
+        if exp_dir.name.startswith('.') or exp_dir.name.startswith('_'):
             continue
         
         summary['total_experiments'] += 1

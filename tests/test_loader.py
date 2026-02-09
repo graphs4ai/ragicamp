@@ -612,6 +612,135 @@ class TestExperimentResultToDict:
         assert round_trip_data["chunk_size"] == 1024
 
 
+class TestIsDeprecatedPath:
+    """Test ResultsLoader._is_deprecated_path() method."""
+
+    def test_skip_collisions_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "_collisions" / "exp1") is True
+
+    def test_skip_incomplete_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "_incomplete" / "exp1") is True
+
+    def test_skip_tainted_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "_tainted" / "exp1") is True
+
+    def test_skip_archived_fake_reranked_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "_archived_fake_reranked" / "exp1") is True
+
+    def test_skip_underscore_prefixed_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "_whatever" / "exp1") is True
+
+    def test_skip_dot_prefixed_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / ".hidden" / "exp1") is True
+
+    def test_allow_normal_experiment(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "rag_vllm_llama_k5_nq") is False
+
+    def test_skip_analysis_dir(self, tmp_path):
+        loader = ResultsLoader(tmp_path)
+        assert loader._is_deprecated_path(tmp_path / "analysis" / "some_file") is True
+
+
+class TestResultsLoaderFiltering:
+    """Test that ResultsLoader skips deprecated and incomplete experiments."""
+
+    def _make_complete_experiment(self, exp_dir):
+        """Create a complete experiment directory with metadata, results, and state."""
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {"name": exp_dir.name, "type": "rag", "model": "test"}
+        results = {"metrics": {"f1": 0.85}, "overall_metrics": {"f1": 0.85}}
+        state = {"phase": "complete"}
+        with open(exp_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f)
+        with open(exp_dir / "results.json", "w") as f:
+            json.dump(results, f)
+        with open(exp_dir / "state.json", "w") as f:
+            json.dump(state, f)
+
+    def test_skips_collisions_directory(self, tmp_path):
+        self._make_complete_experiment(tmp_path / "good_exp")
+        self._make_complete_experiment(tmp_path / "_collisions" / "bad_exp")
+
+        loader = ResultsLoader(tmp_path)
+        results = loader.load_all()
+        names = [r.name for r in results]
+
+        assert "good_exp" in names
+        assert "bad_exp" not in names
+
+    def test_skips_incomplete_directory(self, tmp_path):
+        self._make_complete_experiment(tmp_path / "good_exp")
+        self._make_complete_experiment(tmp_path / "_incomplete" / "stale_exp")
+
+        loader = ResultsLoader(tmp_path)
+        results = loader.load_all()
+        names = [r.name for r in results]
+
+        assert "good_exp" in names
+        assert "stale_exp" not in names
+
+    def test_skips_failed_experiments(self, tmp_path):
+        self._make_complete_experiment(tmp_path / "good_exp")
+
+        # Create a failed experiment
+        failed_dir = tmp_path / "failed_exp"
+        failed_dir.mkdir()
+        with open(failed_dir / "metadata.json", "w") as f:
+            json.dump({"name": "failed_exp", "type": "rag"}, f)
+        with open(failed_dir / "results.json", "w") as f:
+            json.dump({"metrics": {"f1": 0.0}, "overall_metrics": {"f1": 0.0}}, f)
+        with open(failed_dir / "state.json", "w") as f:
+            json.dump({"phase": "failed", "error": "OOM"}, f)
+
+        loader = ResultsLoader(tmp_path)
+        results = loader.load_all()
+        names = [r.name for r in results]
+
+        assert "good_exp" in names
+        assert "failed_exp" not in names
+
+    def test_skips_generating_experiments(self, tmp_path):
+        self._make_complete_experiment(tmp_path / "good_exp")
+
+        in_progress_dir = tmp_path / "generating_exp"
+        in_progress_dir.mkdir()
+        with open(in_progress_dir / "metadata.json", "w") as f:
+            json.dump({"name": "generating_exp", "type": "rag"}, f)
+        with open(in_progress_dir / "results.json", "w") as f:
+            json.dump({"metrics": {}, "overall_metrics": {}}, f)
+        with open(in_progress_dir / "state.json", "w") as f:
+            json.dump({"phase": "generating"}, f)
+
+        loader = ResultsLoader(tmp_path)
+        results = loader.load_all()
+        names = [r.name for r in results]
+
+        assert "good_exp" in names
+        assert "generating_exp" not in names
+
+    def test_loads_experiment_without_state_file(self, tmp_path):
+        """Experiments without state.json should still be loaded (legacy data)."""
+        exp_dir = tmp_path / "legacy_exp"
+        exp_dir.mkdir()
+        with open(exp_dir / "metadata.json", "w") as f:
+            json.dump({"name": "legacy_exp", "type": "rag", "model": "test"}, f)
+        with open(exp_dir / "results.json", "w") as f:
+            json.dump({"metrics": {"f1": 0.80}, "overall_metrics": {"f1": 0.80}}, f)
+
+        loader = ResultsLoader(tmp_path)
+        results = loader.load_all()
+        names = [r.name for r in results]
+
+        assert "legacy_exp" in names
+
+
 class TestResultsLoader:
     """Test ResultsLoader class."""
 
