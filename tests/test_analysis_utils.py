@@ -260,6 +260,7 @@ class TestFilterToSearchSpace:
             'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
             'retriever': 'dense_bge_large_512', 'top_k': 5,
             'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none', 'reranker': 'none',
             'f1': 0.5,
         }]
         df = self._make_df(rows)
@@ -272,6 +273,7 @@ class TestFilterToSearchSpace:
             'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
             'retriever': 'dense_e5_mistral_512',  # not in space
             'top_k': 5, 'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none', 'reranker': 'none',
             'f1': 0.5,
         }]
         df = self._make_df(rows)
@@ -285,6 +287,7 @@ class TestFilterToSearchSpace:
             'dataset': 'nq',
             'retriever': 'dense_bge_large_512', 'top_k': 5,
             'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none', 'reranker': 'none',
             'f1': 0.5,
         }]
         df = self._make_df(rows)
@@ -297,6 +300,7 @@ class TestFilterToSearchSpace:
             'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
             'retriever': 'dense_bge_large_512', 'top_k': 20,  # not in {5, 10}
             'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none', 'reranker': 'none',
             'f1': 0.5,
         }]
         df = self._make_df(rows)
@@ -334,25 +338,70 @@ class TestFilterToSearchSpace:
         result = filter_to_search_space(df, search_space=self._SPACE)
         assert result.empty
 
+    def test_drops_experiment_with_qt_outside_space(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'iterative_2',  # not in {none, hyde, multiquery}
+            'reranker': 'none',
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_drops_experiment_with_rr_outside_space(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'none',
+            'reranker': 'msmarco',  # not in {none, bge}
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 0
+
+    def test_keeps_valid_qt_and_rr(self):
+        rows = [{
+            'name': 'rag_test', 'exp_type': 'rag',
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'retriever': 'dense_bge_large_512', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'query_transform': 'hyde',  # in space
+            'reranker': 'bge',          # in space
+            'f1': 0.5,
+        }]
+        df = self._make_df(rows)
+        result = filter_to_search_space(df, search_space=self._SPACE)
+        assert len(result) == 1
+
     def test_mixed_keep_and_drop(self):
         rows = [
             {  # Keep: within space
                 'name': 'rag_good', 'exp_type': 'rag',
                 'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
                 'retriever': 'dense_bge_large_512', 'top_k': 5,
-                'prompt': 'concise', 'agent_type': 'fixed_rag', 'f1': 0.5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'query_transform': 'none', 'reranker': 'none', 'f1': 0.5,
             },
             {  # Drop: retriever outside space
                 'name': 'rag_old', 'exp_type': 'rag',
                 'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
                 'retriever': 'hier_bge_large_2048p_448c', 'top_k': 5,
-                'prompt': 'concise', 'agent_type': 'fixed_rag', 'f1': 0.4,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'query_transform': 'none', 'reranker': 'none', 'f1': 0.4,
             },
             {  # Keep: direct within space
                 'name': 'direct_good', 'exp_type': 'direct',
                 'model_short': 'Llama-3.2-3B', 'dataset': 'triviaqa',
                 'retriever': None, 'top_k': None,
-                'prompt': 'concise', 'agent_type': 'direct_llm', 'f1': 0.3,
+                'prompt': 'concise', 'agent_type': 'direct_llm',
+                'query_transform': 'none', 'reranker': 'none', 'f1': 0.3,
             },
         ]
         df = self._make_df(rows)

@@ -163,11 +163,13 @@ def filter_to_search_space(
 ) -> pd.DataFrame:
     """Filter a DataFrame to only experiments within the study's search space.
 
-    This matches Optuna's seeding logic: an experiment is included only if
-    every one of its parameters is in the configured search space.
+    This mirrors Optuna's ``_seed_from_existing`` logic: an experiment is
+    included only if **every** parameter is in the configured search space.
 
-    Direct experiments are filtered by model, dataset, and direct_prompt.
-    RAG experiments are filtered by model, dataset, retriever, top_k, and prompt.
+    Dimensions checked for RAG: model (full spec), dataset, retriever,
+    top_k, prompt, query_transform, reranker, agent_type.
+
+    Dimensions checked for Direct: model (full spec), dataset, prompt.
 
     Args:
         df: DataFrame from ``load_all_results()``.
@@ -183,16 +185,21 @@ def filter_to_search_space(
     if search_space is None:
         search_space = load_study_search_space(config_path)
 
-    # Build short-model lookup for matching notebook's model_short to YAML's full spec
-    model_short_set = {_model_short_from_spec(m) for m in search_space.get('model', set())}
+    # Two-level model check: prefer exact full-spec match, fallback to model_short
+    model_full_set = search_space.get('model', set())
+    model_short_set = {_model_short_from_spec(m) for m in model_full_set}
 
     masks = []
     for idx, row in df.iterrows():
         keep = True
 
-        # Model check (use model_short since that's what the notebook normalises to)
-        if model_short_set and row.get('model_short', 'unknown') not in model_short_set:
-            keep = False
+        # Model check — exact full spec first, fallback to model_short
+        full_model = row.get('model')
+        if model_full_set:
+            if full_model and full_model in model_full_set:
+                pass  # exact match
+            elif row.get('model_short', 'unknown') not in model_short_set:
+                keep = False
 
         # Dataset check
         ds_set = search_space.get('dataset', set())
@@ -205,7 +212,8 @@ def filter_to_search_space(
             if dp and row.get('prompt', 'unknown') not in dp:
                 keep = False
         else:
-            # RAG: check retriever, top_k, prompt
+            # RAG: check ALL dimensions that Optuna validates
+
             ret_set = search_space.get('retriever', set())
             if ret_set and row.get('retriever') not in ret_set:
                 keep = False
@@ -216,6 +224,16 @@ def filter_to_search_space(
 
             p_set = search_space.get('prompt', set())
             if p_set and row.get('prompt', 'unknown') not in p_set:
+                keep = False
+
+            qt_set = search_space.get('query_transform', set())
+            qt_val = row.get('query_transform') or 'none'
+            if qt_set and qt_val not in qt_set:
+                keep = False
+
+            rr_set = search_space.get('reranker', set())
+            rr_val = row.get('reranker') or 'none'
+            if rr_set and rr_val not in rr_set:
                 keep = False
 
             at_set = search_space.get('agent_type', set())
@@ -743,13 +761,15 @@ def load_all_results(
 
     df = pd.DataFrame(results)
     if not df.empty:
-        if deduplicate:
-            df = _deduplicate_experiments(df)
-
-        # Filter to current search space when config is available
+        # Filter to current search space FIRST (before dedup) so that
+        # dedup only picks "best F1" among experiments that are within
+        # the active search space.
         cfg = config_path or DEFAULT_CONFIG_PATH
         if Path(cfg).exists():
             df = filter_to_search_space(df, config_path=cfg)
+
+        if deduplicate:
+            df = _deduplicate_experiments(df)
 
         df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
 
