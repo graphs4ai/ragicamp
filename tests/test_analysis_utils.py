@@ -1,0 +1,234 @@
+"""Tests for analysis_utils deduplication and fake-token stripping."""
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+# analysis_utils lives in notebooks/, not in an installed package.
+_NOTEBOOKS_DIR = Path(__file__).resolve().parent.parent / "notebooks"
+sys.path.insert(0, str(_NOTEBOOKS_DIR))
+
+from analysis_utils import (  # noqa: E402
+    _strip_fake_tokens,
+    _effective_config_key,
+    _deduplicate_experiments,
+)
+
+
+class TestStripFakeTokens:
+    """Test _strip_fake_tokens()."""
+
+    def test_strips_hyde_token(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_hyde_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert "hyde" not in result
+        assert result.endswith("_k5_concise_nq")
+
+    def test_strips_multiquery_token(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_multiquery_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert "multiquery" not in result
+
+    def test_strips_bge_reranker_token(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_bge_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert result.endswith("_k5_concise_nq")
+
+    def test_strips_bgev2_reranker_token(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_bgev2_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert "bgev2" not in result
+
+    def test_strips_multiple_fake_tokens(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_hyde_bge_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert "hyde" not in result
+        assert result.endswith("_k5_concise_nq")
+
+    def test_no_strip_on_clean_name(self):
+        name = "rag_vllm_llama_dense_bge_large_512_k5_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is None
+
+    def test_no_strip_on_direct_experiment(self):
+        name = "direct_vllm_llama_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is None  # no k{N} segment
+
+    def test_no_strip_short_tail(self):
+        name = "rag_vllm_llama_k5_nq"  # only 1 token after k5
+        result = _strip_fake_tokens(name)
+        assert result is None
+
+    def test_preserves_prefix_and_retriever(self):
+        name = "rag_vllm_metallamaLlama3_dense_bge_large_512_k5_hyde_concise_nq"
+        result = _strip_fake_tokens(name)
+        assert result is not None
+        assert result.startswith("rag_vllm_metallamaLlama3_dense_bge_large_512_k5_")
+
+
+class TestEffectiveConfigKey:
+    """Test _effective_config_key()."""
+
+    def test_same_key_for_different_reranker(self):
+        row_a = {
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'exp_type': 'rag', 'retriever_type': 'dense',
+            'embedding_model': 'BGE-large', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+            'reranker': 'bge', 'query_transform': 'none',
+        }
+        row_b = row_a.copy()
+        row_b['reranker'] = 'none'
+        # reranker is NOT part of the key (since it was never wired)
+        assert _effective_config_key(row_a) == _effective_config_key(row_b)
+
+    def test_different_key_for_different_model(self):
+        row_a = {
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'exp_type': 'rag', 'retriever_type': 'dense',
+            'embedding_model': 'BGE-large', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+        }
+        row_b = row_a.copy()
+        row_b['model_short'] = 'Phi-3-mini'
+        assert _effective_config_key(row_a) != _effective_config_key(row_b)
+
+
+class TestDeduplicateExperiments:
+    """Test _deduplicate_experiments()."""
+
+    def _make_df(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_keeps_best_f1_among_duplicates(self):
+        rows = [
+            {
+                'name': 'rag_vllm_llama_dense_bge_large_512_k5_hyde_bge_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'rag', 'retriever_type': 'dense',
+                'embedding_model': 'BGE-large', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'reranker': 'bge', 'query_transform': 'hyde',
+                'f1': 0.40,
+            },
+            {
+                'name': 'rag_vllm_llama_dense_bge_large_512_k5_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'rag', 'retriever_type': 'dense',
+                'embedding_model': 'BGE-large', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'reranker': 'none', 'query_transform': 'none',
+                'f1': 0.42,
+            },
+        ]
+        df = self._make_df(rows)
+        result = _deduplicate_experiments(df)
+
+        assert len(result) == 1
+        assert result.iloc[0]['f1'] == 0.42
+
+    def test_normalises_reranker_and_qt_for_fake_tokens(self):
+        rows = [
+            {
+                'name': 'rag_vllm_llama_dense_bge_large_512_k5_hyde_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'rag', 'retriever_type': 'dense',
+                'embedding_model': 'BGE-large', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'reranker': 'none', 'query_transform': 'hyde',
+                'f1': 0.45,
+            },
+        ]
+        df = self._make_df(rows)
+        result = _deduplicate_experiments(df)
+
+        # query_transform should be overridden to 'none'
+        assert result.iloc[0]['query_transform'] == 'none'
+
+    def test_keeps_distinct_configs(self):
+        rows = [
+            {
+                'name': 'rag_vllm_llama_dense_bge_large_512_k5_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'rag', 'retriever_type': 'dense',
+                'embedding_model': 'BGE-large', 'top_k': 5,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'reranker': 'none', 'query_transform': 'none',
+                'f1': 0.42,
+            },
+            {
+                'name': 'rag_vllm_llama_dense_bge_large_512_k10_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'rag', 'retriever_type': 'dense',
+                'embedding_model': 'BGE-large', 'top_k': 10,
+                'prompt': 'concise', 'agent_type': 'fixed_rag',
+                'reranker': 'none', 'query_transform': 'none',
+                'f1': 0.50,
+            },
+        ]
+        df = self._make_df(rows)
+        result = _deduplicate_experiments(df)
+
+        assert len(result) == 2  # different top_k → distinct configs
+
+    def test_handles_three_way_duplicate(self):
+        """Three experiments with same effective config → keep best."""
+        base = {
+            'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+            'exp_type': 'rag', 'retriever_type': 'dense',
+            'embedding_model': 'BGE-large', 'top_k': 5,
+            'prompt': 'concise', 'agent_type': 'fixed_rag',
+        }
+        rows = [
+            {**base, 'name': 'rag_vllm_llama_dense_bge_large_512_k5_hyde_bge_concise_nq',
+             'reranker': 'bge', 'query_transform': 'hyde', 'f1': 0.38},
+            {**base, 'name': 'rag_vllm_llama_dense_bge_large_512_k5_hyde_concise_nq',
+             'reranker': 'none', 'query_transform': 'hyde', 'f1': 0.40},
+            {**base, 'name': 'rag_vllm_llama_dense_bge_large_512_k5_concise_nq',
+             'reranker': 'none', 'query_transform': 'none', 'f1': 0.42},
+        ]
+        df = self._make_df(rows)
+        result = _deduplicate_experiments(df)
+
+        assert len(result) == 1
+        assert result.iloc[0]['f1'] == 0.42
+
+    def test_empty_dataframe(self):
+        df = pd.DataFrame()
+        result = _deduplicate_experiments(df)
+        assert result.empty
+
+    def test_direct_experiments_not_stripped(self):
+        """Direct experiments have no k{N} → no stripping → each is unique."""
+        rows = [
+            {
+                'name': 'direct_vllm_llama_concise_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'direct', 'retriever_type': None,
+                'embedding_model': None, 'top_k': None,
+                'prompt': 'concise', 'agent_type': 'direct_llm',
+                'reranker': 'none', 'query_transform': 'none',
+                'f1': 0.30,
+            },
+            {
+                'name': 'direct_vllm_llama_cot_nq',
+                'model_short': 'Llama-3.2-3B', 'dataset': 'nq',
+                'exp_type': 'direct', 'retriever_type': None,
+                'embedding_model': None, 'top_k': None,
+                'prompt': 'cot', 'agent_type': 'direct_llm',
+                'reranker': 'none', 'query_transform': 'none',
+                'f1': 0.35,
+            },
+        ]
+        df = self._make_df(rows)
+        result = _deduplicate_experiments(df)
+
+        assert len(result) == 2  # different prompts → kept

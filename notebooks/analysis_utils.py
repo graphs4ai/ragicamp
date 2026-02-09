@@ -79,6 +79,16 @@ SKIP_DIRS = {
     'analysis', '__pycache__', '.ipynb_checkpoints',
 }
 
+# Tokens for parameters that were configured but NEVER WIRED in the old code.
+# These appear in experiment names but had no effect on results.
+_FAKE_RERANKER_TOKENS = {
+    'bge', 'bgev2', 'bgev2m3', 'bgebase',
+    'msmarco', 'msmarcolarge',
+    'bge-v2', 'bge-base', 'ms-marco', 'ms-marco-large',
+}
+_FAKE_RERANKER_NORMALISED = {t.replace('-', '') for t in _FAKE_RERANKER_TOKENS}
+_FAKE_QT_TOKENS = {'hyde', 'multiquery'}
+
 
 # =============================================================================
 # STYLING
@@ -372,11 +382,120 @@ def _enrich_from_metadata(row: Dict[str, Any], metadata: Dict[str, Any]) -> None
         row['agent_type'] = _agent_type_from_name(row.get('name', ''))
 
 
-def load_all_results(study_path: Path = None) -> pd.DataFrame:
+def _strip_fake_tokens(name: str) -> Optional[str]:
+    """Strip fake reranker/query_transform tokens from an experiment name.
+
+    Due to bugs in the old code, ``query_transform`` (hyde, multiquery) and
+    ``reranker`` (bge, bgev2, …) were encoded in names but never wired.
+    This returns the corrected name (or None if nothing to strip).
+    """
+    parts = name.split('_')
+
+    # Find _k{N}_ segment — tokens to strip sit between k{N} and prompt_dataset
+    k_idx = None
+    for i, p in enumerate(parts):
+        if re.match(r'^k\d+$', p):
+            k_idx = i
+            break
+
+    if k_idx is None:
+        return None
+
+    tail = parts[k_idx + 1:]
+    if len(tail) < 2:
+        return None
+
+    prompt_dataset = tail[-2:]
+    middle = tail[:-2]
+
+    cleaned = []
+    any_stripped = False
+    for token in middle:
+        token_norm = token.lower().replace('-', '')
+        if token_norm in _FAKE_RERANKER_NORMALISED or token.lower() in _FAKE_QT_TOKENS:
+            any_stripped = True
+        else:
+            cleaned.append(token)
+
+    if not any_stripped:
+        return None
+
+    new_parts = parts[: k_idx + 1] + cleaned + prompt_dataset
+    return '_'.join(new_parts)
+
+
+def _effective_config_key(row: Dict[str, Any]) -> tuple:
+    """Compute a deduplication key treating unwired reranker/qt as 'none'.
+
+    Two experiments that differ only in fake tokens produce the same key.
+    """
+    return (
+        row.get('model_short', 'unknown'),
+        row.get('dataset', 'unknown'),
+        row.get('exp_type', 'unknown'),
+        row.get('retriever_type'),
+        row.get('embedding_model'),
+        row.get('top_k'),
+        row.get('prompt', 'unknown'),
+        row.get('agent_type', 'unknown'),
+    )
+
+
+def _deduplicate_experiments(df: pd.DataFrame) -> pd.DataFrame:
+    """Deduplicate experiments that differ only in unwired parameters.
+
+    For each group of experiments that share the same *effective* configuration
+    (model, dataset, retriever, top_k, prompt, agent_type — treating reranker
+    and query_transform as 'none' because they were never wired), keeps only
+    the row with the best F1 score.
+
+    Also normalises the ``query_transform`` and ``reranker`` columns to
+    ``'none'`` for experiments whose names contained fake tokens.
+    """
+    if df.empty:
+        return df
+
+    # Detect which rows have fake tokens in their name
+    fake_mask = df['name'].apply(lambda n: _strip_fake_tokens(n) is not None)
+
+    # For rows with fake tokens, override reranker/qt to 'none'
+    if fake_mask.any():
+        df.loc[fake_mask, 'query_transform'] = 'none'
+        df.loc[fake_mask, 'reranker'] = 'none'
+
+    # Compute effective key for every row
+    keys = df.apply(_effective_config_key, axis=1)
+
+    # Group and keep best F1
+    keep_idx = []
+    for _key, group in df.groupby(keys):
+        if PRIMARY_METRIC in group.columns:
+            best = group[PRIMARY_METRIC].fillna(-1).idxmax()
+        else:
+            best = group.index[0]
+        keep_idx.append(best)
+
+    deduped = df.loc[keep_idx].copy()
+
+    n_removed = len(df) - len(deduped)
+    if n_removed > 0:
+        print(f"  Deduplicated: dropped {n_removed} duplicate experiments "
+              f"(same effective config, kept best F1)")
+
+    return deduped.reset_index(drop=True)
+
+
+def load_all_results(study_path: Path = None, deduplicate: bool = True) -> pd.DataFrame:
     """Load all experiment results into a DataFrame.
 
     Prefers structured fields from ``metadata.json`` over name parsing.
     Falls back to name parsing when metadata is unavailable.
+
+    Args:
+        study_path: Path to the study directory.
+        deduplicate: If True (default), remove duplicate experiments that
+            differ only in unwired reranker/query_transform tokens, keeping
+            the one with the best F1 per effective configuration.
     """
     if study_path is None:
         study_path = DEFAULT_STUDY_PATH
@@ -472,6 +591,8 @@ def load_all_results(study_path: Path = None) -> pd.DataFrame:
 
     df = pd.DataFrame(results)
     if not df.empty:
+        if deduplicate:
+            df = _deduplicate_experiments(df)
         df = df.sort_values(['exp_type', 'model_short', 'dataset']).reset_index(drop=True)
 
     return df
