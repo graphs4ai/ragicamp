@@ -107,6 +107,11 @@ class IterativeRAGAgent(Agent):
         max_iterations: int = 2,
         stop_on_sufficient: bool = True,
         prompt_builder: PromptBuilder | None = None,
+        retrieval_store: Any | None = None,
+        retriever_name: str | None = None,
+        reranker_provider: Any | None = None,
+        fetch_k: int | None = None,
+        query_transformer: Any | None = None,
         **config,
     ):
         """Initialize agent with providers.
@@ -120,14 +125,12 @@ class IterativeRAGAgent(Agent):
             max_iterations: Maximum refinement iterations
             stop_on_sufficient: Stop early if context is sufficient
             prompt_builder: For building prompts
+            retrieval_store: Optional RetrievalStore for caching retrieval results
+            retriever_name: Retriever identifier for cache keys
+            reranker_provider: Optional RerankerProvider for cross-encoder reranking
+            fetch_k: Documents to retrieve before reranking (None = same as top_k)
+            query_transformer: Optional QueryTransformer for query expansion
         """
-        # Pop retrieval cache kwargs before passing to super
-        self.retrieval_store = config.pop("retrieval_store", None)
-        self.retriever_name: Optional[str] = config.pop("retriever_name", None)
-        self.reranker_provider = config.pop("reranker_provider", None)
-        self.fetch_k: int = config.pop("fetch_k", top_k)
-        self.query_transformer = config.pop("query_transformer", None)
-
         super().__init__(name, **config)
 
         self.embedder_provider = embedder_provider
@@ -137,6 +140,11 @@ class IterativeRAGAgent(Agent):
         self.max_iterations = max_iterations
         self.stop_on_sufficient = stop_on_sufficient
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
+        self.retrieval_store = retrieval_store
+        self.retriever_name = retriever_name
+        self.reranker_provider = reranker_provider
+        self.fetch_k = fetch_k if fetch_k is not None else top_k
+        self.query_transformer = query_transformer
 
         # Detect hybrid searcher (needs query text for sparse leg)
         self._is_hybrid = is_hybrid_searcher(index)

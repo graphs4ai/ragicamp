@@ -9,7 +9,10 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
+from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
+
+logger = get_logger(__name__)
 
 
 def _get_wikirank_cache_path(language: str) -> Path:
@@ -34,7 +37,7 @@ def _load_wikirank_scores(language: str) -> dict:
 
     # Try cache first
     if cache_path.exists():
-        print(f"  Loading cached WikiRank scores from {cache_path}")
+        logger.info("  Loading cached WikiRank scores from %s", cache_path)
         with open(cache_path, "rb") as f:
             return pickle.load(f)
 
@@ -42,7 +45,7 @@ def _load_wikirank_scores(language: str) -> dict:
     url = f"https://huggingface.co/datasets/lewoniewski/wikipedia_quality_wikirank/resolve/main/languages/{language}.csv"
 
     try:
-        print(f"  Downloading from: {url}")
+        logger.info("  Downloading from: %s", url)
         df = pd.read_csv(url)
     except Exception as e:
         raise RuntimeError(
@@ -50,7 +53,7 @@ def _load_wikirank_scores(language: str) -> dict:
             f"Available languages: en, simple, de, fr, es, etc."
         ) from e
 
-    print(f"  Loaded {len(df):,} article scores")
+    logger.info("  Loaded %s article scores", len(df))
 
     # Identify columns - the dataset has: page_id, title, wikirank_score
     title_col = "title" if "title" in df.columns else df.columns[1]
@@ -59,7 +62,7 @@ def _load_wikirank_scores(language: str) -> dict:
         df.columns[-1],
     )
 
-    print(f"  Using columns: title='{title_col}', score='{score_col}'")
+    logger.info("  Using columns: title='%s', score='%s'", title_col, score_col)
 
     # Build title -> score map (normalize titles)
     scores = {}
@@ -70,7 +73,7 @@ def _load_wikirank_scores(language: str) -> dict:
     # Cache for next time
     with open(cache_path, "wb") as f:
         pickle.dump(scores, f)
-    print(f"  Cached scores to {cache_path}")
+    logger.info("  Cached scores to %s", cache_path)
 
     return scores
 
@@ -91,13 +94,13 @@ def _load_wikirank_top_titles(top_k: int, language: str = "en") -> set[str]:
     Returns:
         Set of normalized titles (lowercase, spaces not underscores)
     """
-    print(f"Loading WikiRank scores for top {top_k:,} {language} articles...")
+    logger.info("Loading WikiRank scores for top %s %s articles...", top_k, language)
 
     scores = _load_wikirank_scores(language)
 
     # Find threshold for top-K
     if top_k >= len(scores):
-        print(f"  Requested {top_k:,} but only {len(scores):,} available, using all")
+        logger.info("  Requested %s but only %s available, using all", top_k, len(scores))
         return set(scores.keys())
 
     top_scores = heapq.nlargest(top_k, scores.values())
@@ -105,7 +108,7 @@ def _load_wikirank_top_titles(top_k: int, language: str = "en") -> set[str]:
 
     # Build allowed set
     allowed = {t for t, s in scores.items() if s >= threshold}
-    print(f"  Filter threshold: {threshold:.6f}, passing: {len(allowed):,}")
+    logger.info("  Filter threshold: %.6f, passing: %s", threshold, len(allowed))
 
     return allowed
 
@@ -184,9 +187,9 @@ class WikipediaCorpus(DocumentCorpus):
         if self._dataset is None:
             try:
                 if use_streaming:
-                    print("  Loading Wikipedia (streaming mode)...")
+                    logger.info("  Loading Wikipedia (streaming mode)...")
                 else:
-                    print(f"  Loading Wikipedia into RAM with {num_proc} workers...")
+                    logger.info("  Loading Wikipedia into RAM with %s workers...", num_proc)
 
                 # num_proc only works for non-streaming (sharded loading)
                 load_kwargs = {
@@ -202,7 +205,7 @@ class WikipediaCorpus(DocumentCorpus):
                 self._dataset = load_dataset(**load_kwargs)
 
                 if not use_streaming:
-                    print(f"  ✓ Loaded {len(self._dataset):,} articles into RAM")
+                    logger.info("  Loaded %s articles into RAM", len(self._dataset))
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load Wikipedia corpus '{self.config.version}': {e}\n"
@@ -212,7 +215,7 @@ class WikipediaCorpus(DocumentCorpus):
         # If we have WikiRank filter and non-streaming, use parallel filter
         dataset_to_iterate = self._dataset
         if not use_streaming and self._allowed_titles is not None:
-            print(f"  Filtering with {num_proc} workers (this parallelizes the scan)...")
+            logger.info("  Filtering with %s workers (this parallelizes the scan)...", num_proc)
 
             # Need to pass allowed_titles to filter function
             allowed_titles = self._allowed_titles
@@ -226,7 +229,7 @@ class WikipediaCorpus(DocumentCorpus):
                 num_proc=num_proc,
                 desc="WikiRank filter",
             )
-            print(f"  ✓ {len(dataset_to_iterate):,} articles pass WikiRank filter")
+            logger.info("  %s articles pass WikiRank filter", len(dataset_to_iterate))
 
         # Yield documents
         seen_titles = set()

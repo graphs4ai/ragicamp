@@ -12,8 +12,11 @@ Supports three modes:
 import random
 from typing import Any, Optional
 
+from ragicamp.core.logging import get_logger
 from ragicamp.spec.experiment import ExperimentSpec
 from ragicamp.spec.naming import name_direct, name_rag
+
+logger = get_logger(__name__)
 
 
 def build_specs(
@@ -147,8 +150,10 @@ def _apply_sampling(
         specs = [s for s in specs if s.name not in exclude_names]
         excluded_count = original_count - len(specs)
         if excluded_count > 0:
-            print(
-                f"📋 [{spec_type}] Excluding {excluded_count} already-completed experiments from sampling pool"
+            logger.info(
+                "[%s] Excluding %d already-completed experiments from sampling pool",
+                spec_type,
+                excluded_count
             )
 
     if n_experiments >= len(specs):
@@ -160,20 +165,24 @@ def _apply_sampling(
     if mode == "random":
         # Simple random sampling
         sampled = random.sample(specs, n_experiments)
-        print(f"🎲 [{spec_type}] Random sampling: {len(sampled)}/{len(specs)} experiments")
+        logger.info("[%s] Random sampling: %d/%d experiments", spec_type, len(sampled), len(specs))
         return sampled
 
     elif mode == "stratified":
         # Stratified sampling: ensure at least one experiment per stratum
         stratify_by = sampling_config.get("stratify_by", ["model", "retriever"])
         sampled = _stratified_sample(specs, n_experiments, stratify_by)
-        print(
-            f"🎯 [{spec_type}] Stratified sampling by {stratify_by}: {len(sampled)}/{len(specs)} experiments"
+        logger.info(
+            "[%s] Stratified sampling by %s: %d/%d experiments",
+            spec_type,
+            stratify_by,
+            len(sampled),
+            len(specs)
         )
         return sampled
 
     else:
-        print(f"⚠️  Unknown sampling mode '{mode}', using all experiments")
+        logger.warning("Unknown sampling mode '%s', using all experiments", mode)
         return specs
 
 

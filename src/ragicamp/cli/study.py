@@ -23,7 +23,7 @@ from ragicamp.execution.runner import run_spec
 from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
 from ragicamp.models import OpenAIModel
 from ragicamp.spec.builder import build_specs
-from ragicamp.core.logging import get_logger
+from ragicamp.core.logging import add_file_handler, get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
 
 _study_logger = get_logger(__name__)
@@ -409,6 +409,10 @@ def run_study(
     description = config.get("description", "")
     out = Path(config.get("output_dir", f"outputs/{study_name}"))
     out.mkdir(parents=True, exist_ok=True)
+
+    # Enable file logging for the study
+    log_path = add_file_handler(out / "study.log")
+    _study_logger.info("Study log: %s", log_path)
 
     print(f"\n{'=' * 70}")
     print(f"Study: {study_name}")

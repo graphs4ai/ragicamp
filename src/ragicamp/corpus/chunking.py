@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ragicamp.core.constants import Defaults
+from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -398,11 +401,11 @@ class DocumentChunker:
             yield from doc_chunks
 
             if show_progress and doc_count % 100 == 0:
-                print(f"  Processed {doc_count} docs → {total_chunks} chunks")
+                logger.info("  Processed %s docs -> %s chunks", doc_count, total_chunks)
 
         if show_progress:
-            print(f"✓ Chunking complete: {doc_count} docs → {total_chunks} chunks")
-            print(f"  Avg chunks per doc: {total_chunks / max(doc_count, 1):.1f}")
+            logger.info("Chunking complete: %s docs -> %s chunks", doc_count, total_chunks)
+            logger.info("  Avg chunks per doc: %.1f", total_chunks / max(doc_count, 1))
 
     def get_info(self) -> dict[str, Any]:
         """Get chunking configuration info."""

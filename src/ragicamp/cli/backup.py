@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+from ragicamp.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Default number of parallel workers for upload/download
 DEFAULT_MAX_WORKERS = 12
@@ -85,7 +87,7 @@ def _parallel_transfer(
                     progress.record_error(Path(str(item[0])), error or "Unknown error")
                     if not continue_on_error:
                         progress.request_early_exit()
-                        print(f"\nError: {error}")
+                        logger.error("Transfer failed: %s", error)
                 pbar.update(file_size)
 
                 if progress.should_exit and not continue_on_error:
@@ -127,7 +129,7 @@ def get_b2_client():
         import boto3
         from botocore.config import Config
     except ImportError:
-        logger.error("boto3 not installed. Install with: uv pip install boto3")
+        print("Error: boto3 not installed. Install with: uv pip install boto3")
         return None, None, None, None
 
     key_id = os.environ.get("B2_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID")
@@ -135,8 +137,8 @@ def get_b2_client():
     endpoint = os.environ.get("B2_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
 
     if not key_id or not app_key:
-        logger.error(
-            "Backblaze credentials not set. Set environment variables:\n"
+        print(
+            "Error: Backblaze credentials not set. Set environment variables:\n"
             "  export B2_KEY_ID='your-key-id'\n"
             "  export B2_APP_KEY='your-application-key'\n"
             "  export B2_ENDPOINT='https://s3.us-east-005.backblazeb2.com'  # optional"
@@ -215,7 +217,7 @@ def backup(
     # If sync mode, get existing files from B2
     existing_files: dict[str, int] = {}
     if sync:
-        print("Checking existing files in B2...")
+        logger.info("Checking existing files in B2...")
         try:
             paginator = s3.get_paginator("list_objects_v2")
             page_count = 0
@@ -224,10 +226,10 @@ def backup(
                 contents = page.get("Contents", [])
                 for obj in contents:
                     existing_files[obj["Key"]] = obj["Size"]
-            print(f"Found {len(existing_files)} existing files in backup (scanned {page_count} pages)")
+            logger.info("Found %d existing files in backup (scanned %d pages)", len(existing_files), page_count)
         except Exception as e:
-            print(f"Warning: Could not list existing files: {e}")
-            print("Proceeding without sync (will upload all files)")
+            logger.warning("Could not list existing files: %s", e)
+            logger.warning("Proceeding without sync (will upload all files)")
 
     # Collect files to upload
     files_to_upload = []
@@ -308,9 +310,9 @@ def backup(
     print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
     if progress.errors:
-        print(f"\n⚠️  {len(progress.errors)} errors:")
+        logger.warning("%d upload errors occurred", len(progress.errors))
         for path, err in progress.errors[:5]:
-            print(f"  {path}: {err}")
+            logger.warning("  %s: %s", path, err)
         if not continue_on_error:
             return 1
 
@@ -371,7 +373,7 @@ def prune(
             for obj in page.get("Contents", []):
                 remote_keys.append((obj["Key"], obj["Size"]))
     except Exception as e:
-        print(f"Error listing remote files: {e}")
+        logger.error("Failed to list remote files: %s", e)
         return 1
 
     print(f"Remote files found: {len(remote_keys)}")
@@ -424,7 +426,7 @@ def prune(
 
     print(f"\nDeleted {deleted}/{len(orphans)} orphaned files ({orphan_bytes / (1024**2):.1f} MB freed)")
     if errors:
-        print(f"  {errors} deletions failed (see warnings above)")
+        logger.warning("%d deletions failed", errors)
 
     return 0 if errors == 0 else 1
 
@@ -510,7 +512,7 @@ def download(
                 
                 files_to_download.append((s3_key, local_path, size))
     except Exception as e:
-        print(f"Error listing backup contents: {e}")
+        logger.error("Failed to list backup contents: %s", e)
         return 1
 
     if not files_to_download:
@@ -566,9 +568,9 @@ def download(
     print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
 
     if progress.errors:
-        print(f"\n⚠️  {len(progress.errors)} errors:")
+        logger.warning("%d download errors occurred", len(progress.errors))
         for path, err in progress.errors[:5]:
-            print(f"  {path}: {err}")
+            logger.warning("  %s: %s", path, err)
         if not continue_on_error:
             return 1
 
@@ -583,14 +585,14 @@ def download(
     if migrate_indexes and (artifacts_only or indexes_only or not outputs_only):
         indexes_dir = Path("artifacts/indexes")
         if indexes_dir.exists():
-            print("\n🔄 Migrating indexes to new format...")
+            logger.info("Migrating indexes to new format...")
             try:
                 from ragicamp.cli.commands import cmd_migrate_indexes
                 import argparse
                 migrate_args = argparse.Namespace(index_name=None, dry_run=False)
                 cmd_migrate_indexes(migrate_args)
             except Exception as e:
-                print(f"  Warning: Index migration failed: {e}")
-                print("  Run manually: uv run ragicamp migrate-indexes")
+                logger.warning("Index migration failed: %s", e)
+                logger.warning("Run manually: uv run ragicamp migrate-indexes")
 
     return 0

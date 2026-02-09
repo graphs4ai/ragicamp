@@ -255,6 +255,45 @@ class LogContext:
         return False  # Don't suppress exceptions
 
 
+def add_file_handler(
+    log_file: Union[str, Path],
+    level: int = logging.DEBUG,
+) -> Path:
+    """Add a file handler to the ragicamp root logger.
+
+    Use this to capture all logs to a file without disrupting existing
+    console logging. The file receives all messages at the specified level
+    (default: DEBUG), giving a complete record for post-mortem debugging.
+
+    Args:
+        log_file: Path for the log file (parent dirs created automatically)
+        level: Minimum level for the file handler (default: DEBUG)
+
+    Returns:
+        Resolved path to the log file
+
+    Example:
+        >>> from ragicamp.core.logging import add_file_handler
+        >>> log_path = add_file_handler("outputs/my_study/study.log")
+        >>> # All ragicamp.* logs now also go to that file
+    """
+    if not _configured:
+        configure_logging()
+
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    root_logger = logging.getLogger("ragicamp")
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(FILE_FORMAT, FILE_DATE_FORMAT))
+    root_logger.addHandler(file_handler)
+
+    root_logger.info("File logging enabled: %s", log_path)
+    return log_path
+
+
 def create_experiment_logger(
     experiment_name: str,
     output_dir: Optional[Path] = None,

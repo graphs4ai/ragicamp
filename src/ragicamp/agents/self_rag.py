@@ -12,7 +12,7 @@ Batched architecture (three clean phases, minimal model loads):
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from ragicamp.agents.base import (
     Agent,
@@ -128,6 +128,11 @@ class SelfRAGAgent(Agent):
         verify_answer: bool = False,
         fallback_to_direct: bool = True,
         prompt_builder: PromptBuilder | None = None,
+        retrieval_store: Any | None = None,
+        retriever_name: str | None = None,
+        reranker_provider: Any | None = None,
+        fetch_k: int | None = None,
+        query_transformer: Any | None = None,
         **config,
     ):
         """Initialize agent with providers.
@@ -142,14 +147,12 @@ class SelfRAGAgent(Agent):
             verify_answer: Whether to verify answer is grounded
             fallback_to_direct: If verification fails, fall back to direct
             prompt_builder: For building prompts
+            retrieval_store: Optional RetrievalStore for caching retrieval results
+            retriever_name: Retriever identifier for cache keys
+            reranker_provider: Optional RerankerProvider for cross-encoder reranking
+            fetch_k: Documents to retrieve before reranking (None = same as top_k)
+            query_transformer: Optional QueryTransformer for query expansion
         """
-        # Pop retrieval cache kwargs before passing to super
-        self.retrieval_store = config.pop("retrieval_store", None)
-        self.retriever_name: Optional[str] = config.pop("retriever_name", None)
-        self.reranker_provider = config.pop("reranker_provider", None)
-        self.fetch_k: int = config.pop("fetch_k", top_k)
-        self.query_transformer = config.pop("query_transformer", None)
-
         super().__init__(name, **config)
 
         self.embedder_provider = embedder_provider
@@ -160,6 +163,11 @@ class SelfRAGAgent(Agent):
         self.verify_answer = verify_answer
         self.fallback_to_direct = fallback_to_direct
         self.prompt_builder = prompt_builder or PromptBuilder(PromptConfig())
+        self.retrieval_store = retrieval_store
+        self.retriever_name = retriever_name
+        self.reranker_provider = reranker_provider
+        self.fetch_k = fetch_k if fetch_k is not None else top_k
+        self.query_transformer = query_transformer
 
         # Detect hybrid searcher (needs query text for sparse leg)
         self._is_hybrid = is_hybrid_searcher(index)

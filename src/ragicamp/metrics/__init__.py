@@ -185,11 +185,15 @@ def compute_metrics_batched(
 
                 # Recompute aggregate from aggregated per-item scores
                 avg_score = sum(aggregated_per_item) / len(aggregated_per_item)
-                # Update the main metric score with aggregated value
-                for key in scores:
-                    if metric.name in key:
-                        scores[key] = avg_score
-                        break
+                # Update the main metric score with properly aggregated value
+                if metric.name in scores:
+                    scores[metric.name] = avg_score
+                else:
+                    logger.warning(
+                        "Could not find key '%s' in metric results %s; "
+                        "multi-reference aggregation skipped for this metric",
+                        metric.name, list(scores.keys()),
+                    )
             elif expanded_per_item:
                 per_item_metrics[metric.name] = expanded_per_item
 

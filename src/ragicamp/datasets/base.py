@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from ragicamp.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class QAExample:
@@ -103,8 +107,8 @@ class QADataset(ABC):
         ]
         filtered_count = original_count - len(self.examples)
         if filtered_count > 0:
-            print(f"Filtered out {filtered_count} examples without explicit answers")
-            print(f"Remaining: {len(self.examples)} examples")
+            logger.info("Filtered out %d examples without explicit answers", filtered_count)
+            logger.info("Remaining: %d examples", len(self.examples))
 
     def get_examples_with_answers(self, n: Optional[int] = None) -> list[QAExample]:
         """Get examples that have explicit answers.
@@ -207,7 +211,7 @@ class QADataset(ABC):
 
             return True
         except (json.JSONDecodeError, KeyError) as e:
-            print(f"Warning: Failed to load cache from {cache_path}: {e}")
+            logger.warning("Failed to load cache from %s: %s", cache_path, e)
             return False
 
     @classmethod
@@ -244,8 +248,8 @@ class QADataset(ABC):
 
         # Check cache first unless force_download
         if not force_download and dataset.load_from_cache():
-            print(f"✓ Loaded from cache: {dataset.get_cache_path()}")
-            print(f"  {len(dataset)} examples")
+            logger.info("Loaded from cache: %s", dataset.get_cache_path())
+            logger.info("  %d examples", len(dataset))
 
             # Apply max_examples if specified
             if max_examples and len(dataset) > max_examples:
@@ -254,18 +258,18 @@ class QADataset(ABC):
             return dataset
 
         # Load from source (already done in __init__)
-        print(f"Loaded {len(dataset)} examples from HuggingFace")
+        logger.info("Loaded %d examples from HuggingFace", len(dataset))
 
         # Filter if requested
         if filter_no_answer:
             original_size = len(dataset)
             dataset.filter_with_answers()
-            print(f"Filtered: {original_size} → {len(dataset)} examples")
+            logger.info("Filtered: %d -> %d examples", original_size, len(dataset))
 
         # Limit if requested
         if max_examples and len(dataset) > max_examples:
             dataset.examples = dataset.examples[:max_examples]
-            print(f"Limited to {len(dataset)} examples")
+            logger.info("Limited to %d examples", len(dataset))
 
         # Save to cache
         info = {
@@ -276,6 +280,6 @@ class QADataset(ABC):
             "filter_no_answer": filter_no_answer,
         }
         cache_path = dataset.save_to_cache(info)
-        print(f"✓ Saved to cache: {cache_path}")
+        logger.info("Saved to cache: %s", cache_path)
 
         return dataset

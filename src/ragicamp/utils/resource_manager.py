@@ -22,6 +22,10 @@ from typing import Any, Callable
 
 import torch
 
+from ragicamp.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 class ResourceManager:
     """Centralized resource management for experiments.
@@ -73,10 +77,13 @@ class ResourceManager:
         """Print current memory status."""
         info = ResourceManager.get_gpu_memory_info()
         if info["available"]:
-            prefix = f"[{phase}] " if phase else ""
-            print(
-                f"🧠 {prefix}GPU: {info['allocated_gb']:.1f}/{info['total_gb']:.1f} GiB "
-                f"(free: {info['free_gb']:.1f} GiB)"
+            prefix = "[%s] " % phase if phase else ""
+            logger.info(
+                "%sGPU: %.1f/%.1f GiB (free: %.1f GiB)",
+                prefix,
+                info['allocated_gb'],
+                info['total_gb'],
+                info['free_gb']
             )
 
     @staticmethod
@@ -89,9 +96,9 @@ class ResourceManager:
             total = info["total_gb"]
             vllm_gb = total * Defaults.VLLM_GPU_MEMORY_FRACTION
             faiss_gb = total * Defaults.FAISS_GPU_MEMORY_FRACTION
-            print(f"📊 GPU Memory Partitioning (total: {total:.1f} GiB):")
-            print(f"   vLLM:  {vllm_gb:.1f} GiB ({Defaults.VLLM_GPU_MEMORY_FRACTION * 100:.0f}%)")
-            print(f"   FAISS: {faiss_gb:.1f} GiB ({Defaults.FAISS_GPU_MEMORY_FRACTION * 100:.0f}%)")
+            logger.info("GPU Memory Partitioning (total: %.1f GiB):", total)
+            logger.info("   vLLM:  %.1f GiB (%.0f%%)", vllm_gb, Defaults.VLLM_GPU_MEMORY_FRACTION * 100)
+            logger.info("   FAISS: %.1f GiB (%.0f%%)", faiss_gb, Defaults.FAISS_GPU_MEMORY_FRACTION * 100)
 
 
 @contextmanager
@@ -115,7 +122,7 @@ def managed_model(model_factory: Callable[[], Any], name: str = "model"):
             output = model.generate("Hello")
         # Model automatically cleaned up
     """
-    print(f"📦 Loading {name}...")
+    logger.info("Loading %s...", name)
     ResourceManager.print_memory_status("before")
 
     model = model_factory()
@@ -126,7 +133,7 @@ def managed_model(model_factory: Callable[[], Any], name: str = "model"):
         yield model
     finally:
         # Cleanup
-        print(f"🧹 Unloading {name}...")
+        logger.info("Unloading %s...", name)
 
         # Try to move to CPU first (for non-quantized models)
         if hasattr(model, "model") and model.model is not None:

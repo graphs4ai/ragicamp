@@ -169,7 +169,7 @@ class OpenAIModel(LanguageModel):
                         results[idx] = future.result()
                     except Exception as e:
                         logger.warning("OpenAI API error for prompt %d: %s", idx, e)
-                        results[idx] = f"[ERROR: {str(e)}]"
+                        results[idx] = ""
 
             return results
         else:
@@ -286,7 +286,7 @@ class OpenAIModel(LanguageModel):
                     return (idx, result)
                 except Exception as e:
                     logger.warning("OpenAI async API error for prompt %d: %s", idx, e)
-                    return (idx, f"[ERROR: {str(e)}]")
+                    return (idx, "")
 
         # Create tasks for all prompts
         tasks = [rate_limited_generate(i, p) for i, p in enumerate(prompts)]

@@ -23,32 +23,9 @@ Usage:
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Optional
 
-# =============================================================================
-# Enums
-# =============================================================================
-
-
-class AgentType(str, Enum):
-    """Types of RAG agents."""
-
-    DIRECT_LLM = "direct_llm"
-    FIXED_RAG = "fixed_rag"
-    ITERATIVE_RAG = "iterative_rag"
-    SELF_RAG = "self_rag"
-
-
-class PromptStyle(str, Enum):
-    """Prompt styles available."""
-
-    DEFAULT = "default"
-    CONCISE = "concise"
-    FEWSHOT = "fewshot"
-    FEWSHOT_3 = "fewshot_3"
-    FEWSHOT_1 = "fewshot_1"
-
+from ragicamp.core.constants import AgentType
 
 # =============================================================================
 # Retrieved Documents
@@ -344,51 +321,3 @@ class RAGResponseMeta:
         if self.pipeline_log:
             d.update(self.pipeline_log.to_dict())
         return d
-
-
-# =============================================================================
-# Experiment Specification
-# =============================================================================
-
-
-@dataclass
-class ExperimentSpec:
-    """Full specification for an experiment.
-
-    This replaces the ExpSpec namedtuple in study.py with a proper dataclass.
-
-    Attributes:
-        name: Unique experiment identifier
-        exp_type: "direct" or "rag"
-        model: Model spec (e.g., "hf:google/gemma-2b-it")
-        dataset: Dataset name (e.g., "nq", "hotpotqa")
-        prompt_style: Prompt style to use
-        quantization: Model quantization ("4bit", "8bit", "none")
-        retriever: Retriever name (RAG only)
-        top_k: Number of docs to retrieve (RAG only)
-        batch_size: Batch size for generation
-    """
-
-    name: str
-    exp_type: str  # "direct" or "rag"
-    model: str
-    dataset: str
-    prompt_style: PromptStyle = PromptStyle.DEFAULT
-    quantization: str = "4bit"
-    retriever: Optional[str] = None
-    top_k: int = 5
-    batch_size: int = 32
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dict for JSON serialization."""
-        return {
-            "name": self.name,
-            "exp_type": self.exp_type,
-            "model": self.model,
-            "dataset": self.dataset,
-            "prompt_style": self.prompt_style.value,
-            "quantization": self.quantization,
-            "retriever": self.retriever,
-            "top_k": self.top_k,
-            "batch_size": self.batch_size,
-        }

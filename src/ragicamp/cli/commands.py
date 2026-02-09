@@ -173,7 +173,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            logger.error("OPENAI_API_KEY not set. Required for llm_judge_qa. Set it with: export OPENAI_API_KEY='your-key'")
+            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
+            print("Set it with: export OPENAI_API_KEY='your-key'")
             return 1
         from ragicamp.models.openai import OpenAIModel
 
@@ -315,7 +316,8 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            logger.error("OPENAI_API_KEY not set. Required for llm_judge_qa.")
+            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
+            print("Set it with: export OPENAI_API_KEY='your-key'")
             return 1
         from ragicamp.models.openai import OpenAIModel
 
@@ -374,7 +376,8 @@ def cmd_backup(args: argparse.Namespace) -> int:
         # Use the most recent backup as target
         backups = list_backups(args.bucket, limit=1)
         if not backups:
-            logger.error("No existing backups found. Cannot use --latest. Run a full backup first without --latest flag.")
+            print("Error: No existing backups found. Cannot use --latest.")
+            print("Run a full backup first without --latest flag.")
             return 1
         latest_backup = backups[0]
         print(f"Using latest backup: {latest_backup}")

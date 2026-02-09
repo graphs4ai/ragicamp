@@ -272,11 +272,11 @@ def run_spec_subprocess(
     health = check_health(exp_out, check_metrics)
 
     if health.is_complete:
-        print(f"✓ {spec.name} (complete)")
+        logger.info("%s (complete)", spec.name)
         return "complete"
 
     if health.phase == ExperimentPhase.FAILED:
-        print(f"⚠ {spec.name} (previously failed, retrying)")
+        logger.warning("%s (previously failed, retrying)", spec.name)
 
     # Note: Don't print header here - the subprocess will print it
     # This avoids duplicate output
@@ -382,24 +382,24 @@ def run_spec(
     health = check_health(exp_out, check_metrics)
 
     if health.is_complete and not force:
-        print(f"✓ {spec.name} (complete)")
+        logger.info("%s (complete)", spec.name)
         return "complete"
 
     if health.phase == ExperimentPhase.FAILED and not force:
-        print(f"✗ {spec.name} (failed: {health.error})")
-        print("  Use --force to retry")
+        logger.error("%s (failed: %s)", spec.name, health.error)
+        logger.info("  Use --force to retry")
         return "skipped"
 
     # Determine which phase we're resuming from
     if health.can_resume:
-        action = f"↻ Resuming from {health.resume_phase.value}"
+        action = "Resuming from %s" % health.resume_phase.value
     else:
-        action = "▶ Starting"
+        action = "Starting"
 
-    print(f"\n{'=' * 60}")
-    print(f"{spec.exp_type.upper()}: {spec.name}")
-    print(f"{action}")
-    print(f"{'=' * 60}")
+    logger.info("=" * 60)
+    logger.info("%s: %s", spec.exp_type.upper(), spec.name)
+    logger.info("%s", action)
+    logger.info("=" * 60)
 
     try:
         # Note: GPU memory cleared by parent before subprocess spawn
@@ -424,11 +424,11 @@ def run_spec(
             )
 
     except KeyboardInterrupt:
-        print("\n⚠️  Interrupted by user")
+        logger.warning("Interrupted by user")
         return "interrupted"
 
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        logger.error("Error: %s", e)
         # Save error info with full spec for debugging
         with open(exp_out / "error.log", "w") as f:
             import traceback

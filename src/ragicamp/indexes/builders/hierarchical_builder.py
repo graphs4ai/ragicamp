@@ -117,16 +117,16 @@ def build_hierarchical_index(
     num_threads = os.cpu_count() or 8
     faiss.omp_set_num_threads(num_threads)
 
-    print(f"\n{'=' * 60}")
-    print(f"Building hierarchical index: {index_name}")
-    print(f"  Embedding model: {embedding_model}")
-    print(f"  Embedding backend: {backend}")
-    print(f"  Parent chunks: {parent_chunk_size}")
-    print(f"  Child chunks: {child_chunk_size}")
-    print(f"  Doc batch size: {doc_batch_size}, embedding batch size: {embedding_batch_size}")
-    print(f"  FAISS index type: {index_type}")
-    print(f"  FAISS threads: {num_threads}")
-    print(f"{'=' * 60}")
+    logger.info("=" * 60)
+    logger.info("Building hierarchical index: %s", index_name)
+    logger.info("  Embedding model: %s", embedding_model)
+    logger.info("  Embedding backend: %s", backend)
+    logger.info("  Parent chunks: %s", parent_chunk_size)
+    logger.info("  Child chunks: %s", child_chunk_size)
+    logger.info("  Doc batch size: %s, embedding batch size: %s", doc_batch_size, embedding_batch_size)
+    logger.info("  FAISS index type: %s", index_type)
+    logger.info("  FAISS threads: %s", num_threads)
+    logger.info("=" * 60)
 
     # Build metadata dict for WikiRank filter and other options
     corpus_metadata = {}
@@ -157,7 +157,7 @@ def build_hierarchical_index(
     )
 
     # Initialize encoder using factory (backend-agnostic)
-    print(f"Loading embedding model ({backend})...")
+    logger.info("Loading embedding model (%s)...", backend)
     encoder = create_embedder(
         model_name=embedding_model,
         backend=backend,
@@ -165,7 +165,7 @@ def build_hierarchical_index(
         enforce_eager=False,
     )
     embedding_dim = encoder.get_sentence_embedding_dimension()
-    print(f"  Embedder loaded (dim={embedding_dim})")
+    logger.info("  Embedder loaded (dim=%s)", embedding_dim)
 
     # Setup work directory for checkpointing and temp storage
     work_dir = manager.indexes_dir / ".work" / index_name
@@ -182,12 +182,12 @@ def build_hierarchical_index(
     # Check for existing checkpoint (resume support)
     checkpoint = checkpoint_mgr.load(HierarchicalCheckpoint)
     if checkpoint and index_checkpoint_path.exists():
-        print(
-            f"  Resuming from checkpoint: batch {checkpoint.batch_num}, {checkpoint.total_docs} docs"
+        logger.info(
+            "  Resuming from checkpoint: batch %s, %s docs", checkpoint.batch_num, checkpoint.total_docs
         )
-        print("  Loading checkpointed index...")
+        logger.info("  Loading checkpointed index...")
         index = faiss.read_index(str(index_checkpoint_path))
-        print(f"  Loaded index with {index.ntotal} vectors")
+        logger.info("  Loaded index with %s vectors", index.ntotal)
         start_batch = checkpoint.batch_num
         total_docs = checkpoint.total_docs
         parent_count = checkpoint.total_parent_chunks
@@ -209,7 +209,7 @@ def build_hierarchical_index(
     # ==========================================================================
     # INCREMENTAL BUILD: Chunk → Embed → Normalize → Add to FAISS
     # ==========================================================================
-    print("Building index incrementally (chunk → embed → normalize → index)...")
+    logger.info("Building index incrementally (chunk -> embed -> normalize -> index)...")
 
     try:
         for doc in corpus.load():
@@ -235,17 +235,16 @@ def build_hierarchical_index(
                     continue
 
                 batch_size = len(doc_batch)
-                print(f"\n  [Batch {batch_num}] Processing {batch_size} documents...")
+                logger.info("\n  [Batch %s] Processing %s documents...", batch_num, batch_size)
 
                 # Chunking phase
                 t_chunk = time.time()
-                print("    Chunking (hierarchical)...", end=" ", flush=True)
                 parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                     iter(doc_batch)
                 )
                 chunk_elapsed = time.time() - t_chunk
-                print(
-                    f"→ {len(parent_chunks)} parents, {len(child_chunks)} children ({chunk_elapsed:.1f}s)"
+                logger.info(
+                    "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)", len(parent_chunks), len(child_chunks), chunk_elapsed
                 )
 
                 # Save mapping
@@ -258,7 +257,7 @@ def build_hierarchical_index(
 
                 if child_chunks:
                     child_texts = [c.text for c in child_chunks]
-                    print(f"    Embedding {len(child_texts)} child chunks...")
+                    logger.info("    Embedding %s child chunks...", len(child_texts))
 
                     # Embed
                     embeddings = encoder.encode(
@@ -273,8 +272,8 @@ def build_hierarchical_index(
                     t_index = time.time()
                     index.add(embeddings.astype(np.float32))
                     index_elapsed = time.time() - t_index
-                    print(
-                        f"    ✓ Added to index in {index_elapsed:.1f}s (total: {index.ntotal} vectors)"
+                    logger.info(
+                        "    Added to index in %.1fs (total: %s vectors)", index_elapsed, index.ntotal
                     )
 
                     # Save child chunks
@@ -284,8 +283,8 @@ def build_hierarchical_index(
                     del child_texts, embeddings
                     gc.collect()
 
-                print(
-                    f"  ✓ Total: {total_docs} docs → {parent_count} parents, {child_count} children"
+                logger.info(
+                    "  Total: %s docs -> %s parents, %s children", total_docs, parent_count, child_count
                 )
                 doc_batch = []
                 del parent_chunks, child_chunks, batch_child_to_parent
@@ -293,7 +292,7 @@ def build_hierarchical_index(
 
                 # Checkpoint every N batches
                 if batch_num % CHECKPOINT_INTERVAL == 0:
-                    print("    Saving checkpoint...")
+                    logger.info("    Saving checkpoint...")
                     faiss.write_index(index, str(index_checkpoint_path))
                     checkpoint_mgr.save(
                         HierarchicalCheckpoint(
@@ -310,16 +309,15 @@ def build_hierarchical_index(
         if doc_batch:
             batch_num += 1
             batch_size = len(doc_batch)
-            print(f"\n  [Batch {batch_num}] Processing {batch_size} documents (final)...")
+            logger.info("\n  [Batch %s] Processing %s documents (final)...", batch_num, batch_size)
 
             t_chunk = time.time()
-            print("    Chunking (hierarchical)...", end=" ", flush=True)
             parent_chunks, child_chunks, batch_child_to_parent = chunker.chunk_documents(
                 iter(doc_batch)
             )
             chunk_elapsed = time.time() - t_chunk
-            print(
-                f"→ {len(parent_chunks)} parents, {len(child_chunks)} children ({chunk_elapsed:.1f}s)"
+            logger.info(
+                "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)", len(parent_chunks), len(child_chunks), chunk_elapsed
             )
 
             pickle.dump(batch_child_to_parent, mapping_file)
@@ -330,7 +328,7 @@ def build_hierarchical_index(
 
             if child_chunks:
                 child_texts = [c.text for c in child_chunks]
-                print(f"    Embedding {len(child_texts)} child chunks...")
+                logger.info("    Embedding %s child chunks...", len(child_texts))
                 embeddings = encoder.encode(
                     child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                 )
@@ -342,21 +340,21 @@ def build_hierarchical_index(
                 # Add to index
                 t_index = time.time()
                 index.add(embeddings.astype(np.float32))
-                print(f"    ✓ Added to index in {time.time() - t_index:.1f}s")
+                logger.info("    Added to index in %.1fs", time.time() - t_index)
 
                 storage.append_chunks(child_chunks, key="child")
                 child_count += len(child_chunks)
 
                 del child_texts, embeddings
 
-            print(f"  ✓ Total: {total_docs} docs → {parent_count} parents, {child_count} children")
+            logger.info("  Total: %s docs -> %s parents, %s children", total_docs, parent_count, child_count)
             del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
             gc.collect()
 
     except Exception as e:
         # Save checkpoint on error
-        print(f"\n*** Error at batch {batch_num}: {e}")
-        print("    Saving checkpoint before exit...")
+        logger.error("\nError at batch %s: %s", batch_num, e)
+        logger.info("    Saving checkpoint before exit...")
         faiss.write_index(index, str(index_checkpoint_path))
         checkpoint_mgr.save(
             HierarchicalCheckpoint(
@@ -373,29 +371,29 @@ def build_hierarchical_index(
         raise RuntimeError(f"Build failed at batch {batch_num}: {e}") from e
 
     mapping_file.close()
-    print(
-        f"\n✓ Build complete: {total_docs} docs → {parent_count} parents, {child_count} children → {index.ntotal} vectors"
+    logger.info(
+        "\nBuild complete: %s docs -> %s parents, %s children -> %s vectors", total_docs, parent_count, child_count, index.ntotal
     )
 
     # ==========================================================================
     # Save to final location
     # ==========================================================================
-    print("\nSaving to final location...")
+    logger.info("\nSaving to final location...")
     index_path = manager.get_embedding_index_path(index_name)
     index_path.mkdir(parents=True, exist_ok=True)
 
     # Load and save all documents
-    print("  Saving parent documents...")
+    logger.info("  Saving parent documents...")
     all_parent_docs = storage.load_all_chunks(key="parent")
     with open(index_path / "parent_docs.pkl", "wb") as f:
         pickle.dump(all_parent_docs, f)
-    print(f"    ✓ {len(all_parent_docs)} parent docs")
+    logger.info("    %s parent docs", len(all_parent_docs))
 
-    print("  Saving child documents...")
+    logger.info("  Saving child documents...")
     all_child_docs = storage.load_all_chunks(key="child")
     with open(index_path / "child_docs.pkl", "wb") as f:
         pickle.dump(all_child_docs, f)
-    print(f"    ✓ {len(all_child_docs)} child docs")
+    logger.info("    %s child docs", len(all_child_docs))
 
     # Build parent ID -> index mapping
     parent_id_to_idx = {}
@@ -403,7 +401,7 @@ def build_hierarchical_index(
         parent_id_to_idx[doc.id] = idx
 
     # Load and merge child_to_parent mapping
-    print("  Saving child-to-parent mapping...")
+    logger.info("  Saving child-to-parent mapping...")
     child_to_parent = {}
     with open(mapping_path, "rb") as f:
         while True:
@@ -415,7 +413,7 @@ def build_hierarchical_index(
 
     with open(index_path / "child_to_parent.pkl", "wb") as f:
         pickle.dump(child_to_parent, f)
-    print(f"    ✓ {len(child_to_parent)} mappings")
+    logger.info("    %s mappings", len(child_to_parent))
 
     # Save FAISS index
     faiss.write_index(index, str(index_path / "child_index.faiss"))
@@ -473,5 +471,5 @@ def build_hierarchical_index(
     del chunker
     gc.collect()
 
-    print(f"✓ Saved hierarchical index: {index_name}")
+    logger.info("Saved hierarchical index: %s", index_name)
     return index_name

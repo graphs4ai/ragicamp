@@ -57,10 +57,17 @@ class ExperimentSpec:
     hypothesis: Optional[str] = None
     agent_params: tuple[tuple[str, Any], ...] = field(default_factory=tuple)
 
+    _VALID_QUERY_TRANSFORMS = {None, "none", "hyde", "multiquery"}
+
     def __post_init__(self) -> None:
         """Validate spec after initialization."""
         if self.exp_type == "rag" and not self.retriever:
             raise ValueError("RAG experiments require a retriever")
+        if self.query_transform not in self._VALID_QUERY_TRANSFORMS:
+            raise ValueError(
+                f"query_transform must be one of {self._VALID_QUERY_TRANSFORMS}, "
+                f"got '{self.query_transform}'"
+            )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
