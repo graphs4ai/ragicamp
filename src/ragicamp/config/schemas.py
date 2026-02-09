@@ -303,7 +303,7 @@ class ExperimentConfig(BaseModel):
         agent_config = values.get("agent")
         if agent_config:
             agent_type = agent_config.type
-            if agent_type in ["fixed_rag", "bandit_rag", "mdp_rag"] and not v:
+            if agent_type in ["fixed_rag", "iterative_rag", "self_rag"] and not v:
                 raise ValueError(f"{agent_type} agent requires a retriever configuration")
         return v
 

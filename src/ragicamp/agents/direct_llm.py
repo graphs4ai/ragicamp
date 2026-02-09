@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from ragicamp.agents.base import Agent, AgentResult, Query, Step, StepTimer
 from ragicamp.core.logging import get_logger
+from ragicamp.core.step_types import BATCH_GENERATE, GENERATE
 from ragicamp.models.providers import GeneratorProvider
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
 
@@ -72,7 +73,7 @@ class DirectLLMAgent(Agent):
         
         # Load generator, generate, unload
         with self.generator_provider.load() as generator:
-            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_GENERATE, model=self.generator_provider.model_name) as step:
                 step.input = {"n_prompts": len(prompts)}
                 answers = generator.batch_generate(prompts)
                 step.output = {"n_answers": len(answers)}
@@ -90,7 +91,7 @@ class DirectLLMAgent(Agent):
                 query=query,
                 answer=answer,
                 steps=[Step(
-                    type="generate",
+                    type=GENERATE,
                     input=query.text,
                     output=answer,
                     model=self.generator_provider.model_name,

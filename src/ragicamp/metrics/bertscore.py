@@ -9,7 +9,10 @@ from typing import Any, Optional
 if "MPLBACKEND" not in os.environ:
     os.environ["MPLBACKEND"] = "Agg"
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 class BERTScoreMetric(Metric):
@@ -41,7 +44,7 @@ class BERTScoreMetric(Metric):
 
             # Use GPU if available
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            print(f"  📥 Loading BERTScore model: {self.model_type} (device={device})")
+            logger.info("Loading BERTScore model: %s (device=%s)", self.model_type, device)
             self._scorer = BERTScorer(model_type=self.model_type, lang="en", device=device)
         except ImportError as e:
             raise ImportError(
@@ -65,7 +68,7 @@ class BERTScoreMetric(Metric):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
-        print("  🗑️  BERTScore model unloaded")
+        logger.info("BERTScore model unloaded")
 
     def compute(
         self, predictions: list[str], references: list[str], **kwargs: Any
@@ -135,8 +138,9 @@ class BERTScoreMetric(Metric):
                         old_batch_size = batch_size
                         batch_size = batch_size // 2
                         if batch_size >= min_batch_size:
-                            print(
-                                f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}"
+                            logger.warning(
+                                "OOM with batch_size=%d, retrying with %d",
+                                old_batch_size, batch_size,
                             )
                         else:
                             raise RuntimeError(

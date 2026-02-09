@@ -21,9 +21,18 @@ from ragicamp.agents.base import (
     Step,
     StepTimer,
     batch_embed_and_search,
+    batch_transform_embed_and_search,
     is_hybrid_searcher,
 )
 from ragicamp.core.logging import get_logger
+from ragicamp.core.step_types import (
+    BATCH_GENERATE,
+    BATCH_REFINE,
+    BATCH_SUFFICIENCY,
+    EVALUATE_SUFFICIENCY,
+    GENERATE,
+    REFINE_QUERY,
+)
 from ragicamp.core.types import Document, SearchBackend
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
@@ -117,6 +126,7 @@ class IterativeRAGAgent(Agent):
         self.retriever_name: Optional[str] = config.pop("retriever_name", None)
         self.reranker_provider = config.pop("reranker_provider", None)
         self.fetch_k: int = config.pop("fetch_k", top_k)
+        self.query_transformer = config.pop("query_transformer", None)
 
         super().__init__(name, **config)
 
@@ -250,7 +260,13 @@ class IterativeRAGAgent(Agent):
         # Only use retrieval cache on iteration 0 (original queries).
         # Subsequent iterations have LLM-refined queries that aren't cacheable.
         use_cache = iteration == 0 and self.retrieval_store is not None
-        retrievals, encode_step, search_step = batch_embed_and_search(
+
+        # Apply query transform only on iteration 0 (original queries).
+        # Subsequent iterations use LLM-refined queries which shouldn't be re-transformed.
+        use_transformer = self.query_transformer if iteration == 0 else None
+
+        retrievals, embed_search_steps = batch_transform_embed_and_search(
+            query_transformer=use_transformer,
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=texts,
@@ -259,21 +275,19 @@ class IterativeRAGAgent(Agent):
             retrieval_store=self.retrieval_store if use_cache else None,
             retriever_name=self.retriever_name if use_cache else None,
         )
-
         # Apply cross-encoder reranking if configured (iteration 0 only)
         if use_reranker:
             retrievals = self._apply_reranking(texts, retrievals)
 
-        # Broadcast the encode step to each query
+        # Broadcast embed/search steps (and optional transform step) to each query
         for idx in idx_order:
-            active[idx].steps.append(encode_step)
+            active[idx].steps.extend(embed_search_steps)
 
         # Merge results into per-query state
         for idx, results in zip(idx_order, retrievals):
             state = active[idx]
             new_docs = [r.document for r in results]
             state.docs = self._merge_documents(state.docs, new_docs)
-            state.steps.append(search_step)
 
             state.iterations_info.append({
                 "iteration": iteration,
@@ -307,7 +321,7 @@ class IterativeRAGAgent(Agent):
                 )
             )
 
-        with StepTimer("batch_refine", model=self.generator_provider.model_name) as step:
+        with StepTimer(BATCH_REFINE, model=self.generator_provider.model_name) as step:
             refined = generator.batch_generate(refine_prompts, max_tokens=100)
             step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
 
@@ -318,7 +332,7 @@ class IterativeRAGAgent(Agent):
             state = active[idx]
             state.current_text = new_text
             state.steps.append(Step(
-                type="refine_query",
+                type=REFINE_QUERY,
                 input={"original_query": state.query.text, "iteration": iteration},
                 output={"refined_query": new_text},
                 model=self.generator_provider.model_name,
@@ -351,7 +365,7 @@ class IterativeRAGAgent(Agent):
                     SUFFICIENCY_PROMPT.format(context=context, query=state.query.text)
                 )
 
-            with StepTimer("batch_sufficiency", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_SUFFICIENCY, model=self.generator_provider.model_name) as step:
                 suff_responses = generator.batch_generate(suff_prompts, max_tokens=100)
                 step.input = {"n_queries": len(suff_prompts), "iteration": iteration}
 
@@ -362,7 +376,7 @@ class IterativeRAGAgent(Agent):
                 state = active[idx]
                 state.iterations_info[-1]["sufficient"] = is_sufficient
                 state.steps.append(Step(
-                    type="evaluate_sufficiency",
+                    type=EVALUATE_SUFFICIENCY,
                     input={"query": state.query.text, "iteration": iteration},
                     output={"sufficient": is_sufficient},
                     model=self.generator_provider.model_name,
@@ -413,7 +427,7 @@ class IterativeRAGAgent(Agent):
 
         # Batch generate
         with self.generator_provider.load() as generator:
-            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_GENERATE, model=self.generator_provider.model_name) as step:
                 answers = generator.batch_generate(prompts)
                 step.input = {"n_queries": len(prompts)}
                 step.output = {"n_answers": len(answers)}
@@ -423,7 +437,7 @@ class IterativeRAGAgent(Agent):
         for idx, answer, prompt, final_docs in zip(idx_order, answers, prompts, final_docs_per_query):
             state = all_states[idx]
             state.steps.append(Step(
-                type="generate",
+                type=GENERATE,
                 input={"query": state.query.text},
                 output=answer,
                 model=self.generator_provider.model_name,

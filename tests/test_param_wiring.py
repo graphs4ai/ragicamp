@@ -164,15 +164,16 @@ class TestRerankerModelPassthrough:
 # ============================================================================
 
 
-class TestQueryTransformWarning:
-    """query_transform must warn since it's not wired into agents."""
+class TestQueryTransformWiring:
+    """query_transform must create a transformer and pass it to the agent."""
 
-    def test_warns_when_query_transform_set(self):
-        """Setting query_transform should emit a UserWarning."""
+    def test_creates_transformer_when_query_transform_set(self):
+        """Setting query_transform='hyde' should create a HyDETransformer."""
         from ragicamp.factory import AgentFactory
+        from ragicamp.rag.query_transform import HyDETransformer
 
         spec = ExperimentSpec(
-            name="test_qt_warn",
+            name="test_qt_hyde",
             exp_type="rag",
             model="vllm:test/model",
             dataset="nq",
@@ -191,23 +192,22 @@ class TestQueryTransformWarning:
         mock_gen.model_name = "mock"
         mock_gen.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            AgentFactory.from_spec(
-                spec=spec,
-                embedder_provider=mock_embedder,
-                generator_provider=mock_gen,
-                index=mock_index,
-            )
+        agent = AgentFactory.from_spec(
+            spec=spec,
+            embedder_provider=mock_embedder,
+            generator_provider=mock_gen,
+            index=mock_index,
+        )
 
-            qt_warnings = [x for x in w if "query_transform" in str(x.message)]
-            assert len(qt_warnings) >= 1, (
-                "Setting query_transform='hyde' must emit a warning since "
-                "query transformation is not yet wired into agents"
-            )
+        assert hasattr(agent, "query_transformer"), (
+            "RAG agent should have query_transformer attribute"
+        )
+        assert isinstance(agent.query_transformer, HyDETransformer), (
+            f"Expected HyDETransformer, got {type(agent.query_transformer)}"
+        )
 
-    def test_no_warning_when_query_transform_none(self):
-        """No warning when query_transform is None (the default)."""
+    def test_no_transformer_when_query_transform_none(self):
+        """No transformer when query_transform is None (the default)."""
         from ragicamp.factory import AgentFactory
 
         spec = ExperimentSpec(
@@ -229,17 +229,19 @@ class TestQueryTransformWarning:
         mock_gen.model_name = "mock"
         mock_gen.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            AgentFactory.from_spec(
-                spec=spec,
-                embedder_provider=mock_embedder,
-                generator_provider=mock_gen,
-                index=mock_index,
-            )
+        agent = AgentFactory.from_spec(
+            spec=spec,
+            embedder_provider=mock_embedder,
+            generator_provider=mock_gen,
+            index=mock_index,
+        )
 
-            qt_warnings = [x for x in w if "query_transform" in str(x.message)]
-            assert len(qt_warnings) == 0
+        assert hasattr(agent, "query_transformer"), (
+            "RAG agent should have query_transformer attribute"
+        )
+        assert agent.query_transformer is None, (
+            "query_transformer should be None when not configured"
+        )
 
 
 # ============================================================================

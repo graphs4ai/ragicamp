@@ -11,35 +11,19 @@ class AgentType(str, Enum):
 
     DIRECT_LLM = "direct_llm"
     FIXED_RAG = "fixed_rag"
-    BANDIT_RAG = "bandit_rag"
-    MDP_RAG = "mdp_rag"
+    ITERATIVE_RAG = "iterative_rag"
+    SELF_RAG = "self_rag"
 
     @classmethod
     def rag_types(cls) -> list["AgentType"]:
         """Get agent types that use retrieval."""
-        return [cls.FIXED_RAG, cls.BANDIT_RAG, cls.MDP_RAG]
+        return [cls.FIXED_RAG, cls.ITERATIVE_RAG, cls.SELF_RAG]
 
     @classmethod
     def requires_retriever(cls, agent_type: str) -> bool:
         """Check if agent type requires a retriever."""
         return agent_type in [t.value for t in cls.rag_types()]
 
-
-class ModelType(str, Enum):
-    """Model types supported by RAGiCamp."""
-
-    HUGGINGFACE = "huggingface"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"  # Future
-    VLLM = "vllm"  # Future
-
-
-class RetrieverType(str, Enum):
-    """Retriever types supported by RAGiCamp."""
-
-    DENSE = "dense"
-    SPARSE = "sparse"
-    HYBRID = "hybrid"  # Future
 
 
 class MetricType(str, Enum):
@@ -99,50 +83,9 @@ class MetricType(str, Enum):
     def requires_context(cls, metric_type: str) -> bool:
         """Check if metric requires retrieved context."""
         context_metrics = {m.value for m in cls.ragas_metrics()}
-        context_metrics.add(cls.FAITHFULNESS.value)
         context_metrics.add(cls.HALLUCINATION.value)
         return metric_type in context_metrics
 
-
-class DatasetType(str, Enum):
-    """Dataset types supported by RAGiCamp."""
-
-    NATURAL_QUESTIONS = "natural_questions"
-    TRIVIAQA = "triviaqa"
-    HOTPOTQA = "hotpotqa"
-    SQUAD = "squad"  # Future
-
-
-class EvaluationMode(str, Enum):
-    """Evaluation modes."""
-
-    GENERATE = "generate"  # Only generate predictions
-    EVALUATE = "evaluate"  # Only compute metrics
-    BOTH = "both"  # Generate and evaluate
-
-
-class PhaseStatus(str, Enum):
-    """Status of an experiment phase."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-
-
-# === File Extensions ===
-
-
-class FileExtension:
-    """Common file extensions."""
-
-    JSON = ".json"
-    YAML = ".yaml"
-    YML = ".yml"
-    CHECKPOINT = "_checkpoint.json"
-    STATE = "_state.json"
-    LOG = ".log"
 
 
 # === Default Values ===
@@ -213,31 +156,3 @@ class Defaults:
     EMBEDDING_USE_TORCH_COMPILE = True  # Apply torch.compile() for speedup
     # For production, consider using infinity-emb or HuggingFace TEI server
     # which provide vLLM-style continuous batching for embeddings
-
-
-# === Prompt Templates ===
-
-
-class PromptTemplates:
-    """Default prompt templates."""
-
-    QA_SYSTEM = "You are a helpful assistant. Answer the question based on the provided context."
-
-    QA_CONTEXT = """Context:
-{context}
-
-Question: {query}
-
-Answer:"""
-
-    QA_NO_CONTEXT = """Question: {query}
-
-Answer:"""
-
-    LLM_JUDGE = """You are an expert judge. Evaluate if the answer is correct.
-
-Question: {question}
-Reference Answer: {reference}
-Candidate Answer: {candidate}
-
-Is the candidate answer correct? Respond with only "yes" or "no"."""

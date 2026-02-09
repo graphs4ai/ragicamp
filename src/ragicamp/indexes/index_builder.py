@@ -153,26 +153,22 @@ class IndexBuilder:
             
             # Process in batches
             doc_batch = []
-            batch_num = 0
+            batch_num = start_batch  # Continue numbering from checkpoint
             docs_to_skip = start_batch * doc_batch_size
-            
+
             logger.info("Building index (batch_size=%d)...", doc_batch_size)
-            
+
             for doc in documents:
-                # Skip already processed
+                # Skip already processed docs
                 if docs_to_skip > 0:
                     docs_to_skip -= 1
                     continue
-                
+
                 doc_batch.append(doc)
-                
+
                 if len(doc_batch) >= doc_batch_size:
                     batch_num += 1
-                    
-                    if batch_num <= start_batch:
-                        doc_batch = []
-                        continue
-                    
+
                     batch_chunks, batch_embeddings = self._process_batch(
                         doc_batch, embedder, batch_num
                     )

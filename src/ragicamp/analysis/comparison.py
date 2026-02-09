@@ -308,5 +308,5 @@ def _std(values: list[float]) -> float:
     if len(values) < 2:
         return 0.0
     mean = sum(values) / len(values)
-    variance = sum((x - mean) ** 2 for x in values) / len(values)
+    variance = sum((x - mean) ** 2 for x in values) / (len(values) - 1)
     return variance**0.5

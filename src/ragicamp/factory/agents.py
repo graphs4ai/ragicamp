@@ -20,6 +20,7 @@ from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 
 if TYPE_CHECKING:
+    from ragicamp.rag.query_transform import QueryTransformer
     from ragicamp.spec import ExperimentSpec
 
 logger = get_logger(__name__)
@@ -201,18 +202,12 @@ class AgentFactory:
             if index is None:
                 raise ValueError(f"RAG agent '{agent_type}' requires an index")
 
-            # Warn if query_transform is set — not yet implemented
+            # Create query transformer if configured
             qt = spec.query_transform
             if qt and qt != "none":
-                import warnings
-                warnings.warn(
-                    f"query_transform='{qt}' is set on spec '{spec.name}' but "
-                    f"query transformation is not yet wired into the agent pipeline. "
-                    f"Retrieval will use the raw query. Results will be identical to "
-                    f"query_transform=none.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+                transformer = cls._create_query_transformer(qt, generator_provider)
+                kwargs["query_transformer"] = transformer
+                logger.info("Query transform enabled: %s", qt)
 
             # Enable retrieval cache when query_transform is none
             # (retrieval results are independent of LLM model/prompt)
@@ -237,6 +232,32 @@ class AgentFactory:
                 **kwargs,
             )
     
+    @staticmethod
+    def _create_query_transformer(
+        qt_name: str,
+        generator_provider: GeneratorProvider,
+    ) -> "QueryTransformer":
+        """Create a query transformer from its name.
+
+        Args:
+            qt_name: Transformer type ('hyde' or 'multiquery').
+            generator_provider: Generator provider for LLM calls.
+
+        Returns:
+            Configured QueryTransformer instance.
+        """
+        from ragicamp.rag.query_transform import HyDETransformer, MultiQueryTransformer
+
+        if qt_name == "hyde":
+            return HyDETransformer(generator_provider)
+        elif qt_name == "multiquery":
+            return MultiQueryTransformer(generator_provider)
+        else:
+            raise ValueError(
+                f"Unknown query_transform: '{qt_name}'. "
+                f"Available: 'hyde', 'multiquery', 'none'"
+            )
+
     @staticmethod
     def _get_retrieval_cache_kwargs(spec: "ExperimentSpec") -> dict[str, Any]:
         """Build retrieval cache kwargs if caching is enabled.

@@ -9,7 +9,10 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 class FaithfulnessMetric(Metric):
@@ -245,7 +248,7 @@ Response:"""
                 # Unclear response, default to neutral
                 return 0.5
         except Exception as e:
-            print(f"Warning: LLM faithfulness check failed: {e}")
+            logger.warning("LLM faithfulness check failed: %s", e)
             return 0.5
 
     def aggregate(self, scores: list[float]) -> dict[str, Any]:

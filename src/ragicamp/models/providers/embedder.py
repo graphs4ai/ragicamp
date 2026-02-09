@@ -56,8 +56,13 @@ class EmbedderProvider(ModelProvider):
         try:
             if self.config.backend == "vllm":
                 embedder = self._load_vllm(gpu_fraction)
-            else:
+            elif self.config.backend == "sentence_transformers":
                 embedder = self._load_sentence_transformers()
+            else:
+                raise ValueError(
+                    f"Unknown embedder backend: '{self.config.backend}'. "
+                    f"Supported: 'vllm', 'sentence_transformers'"
+                )
 
             _load_s = _pc() - _t0
             logger.info("Embedder loaded in %.1fs: %s", _load_s, self.model_name)
@@ -142,3 +147,17 @@ class SentenceTransformerWrapper(Embedder):
 
     def get_dimension(self) -> int:
         return self._model.get_sentence_embedding_dimension()
+
+    def unload(self) -> None:
+        """Move model off GPU and free references."""
+        import gc
+
+        import torch
+
+        if hasattr(self._model, "to"):
+            self._model.to("cpu")
+        del self._model
+        self._model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

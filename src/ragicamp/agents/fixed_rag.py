@@ -25,10 +25,13 @@ from ragicamp.agents.base import (
     Step,
     StepTimer,
     batch_embed_and_search,
+    batch_transform_embed_and_search,
     is_hybrid_searcher,
 )
 from ragicamp.core.logging import get_logger
+from ragicamp.core.step_types import BATCH_GENERATE, GENERATE, RERANK
 from ragicamp.core.types import SearchBackend, SearchResult
+from ragicamp.indexes.vector_index import VectorIndex
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
 from ragicamp.utils.prompts import PromptBuilder, PromptConfig
@@ -66,6 +69,7 @@ class FixedRAGAgent(Agent):
         retriever_name: str | None = None,
         reranker_provider: Any | None = None,
         fetch_k: int | None = None,
+        query_transformer: Any | None = None,
         **config,
     ):
         """Initialize agent with providers (not loaded models).
@@ -81,6 +85,7 @@ class FixedRAGAgent(Agent):
             retriever_name: Retriever identifier for cache keys
             reranker_provider: Optional RerankerProvider for cross-encoder reranking
             fetch_k: Documents to retrieve before reranking (None = same as top_k)
+            query_transformer: Optional QueryTransformer for query expansion
         """
         super().__init__(name, **config)
 
@@ -93,6 +98,7 @@ class FixedRAGAgent(Agent):
         self.retriever_name = retriever_name
         self.reranker_provider = reranker_provider
         self.fetch_k = fetch_k or top_k
+        self.query_transformer = query_transformer
 
         # Check if this is a hybrid searcher (needs query text too)
         self._is_hybrid = is_hybrid_searcher(index)
@@ -166,7 +172,8 @@ class FixedRAGAgent(Agent):
         # When reranking, retrieve more docs (fetch_k) then trim after rerank
         retrieve_k = self.fetch_k if self.reranker_provider else self.top_k
 
-        retrievals, encode_step, search_step = batch_embed_and_search(
+        retrievals, steps = batch_transform_embed_and_search(
+            query_transformer=self.query_transformer,
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=query_texts,
@@ -175,8 +182,6 @@ class FixedRAGAgent(Agent):
             retrieval_store=self.retrieval_store,
             retriever_name=self.retriever_name,
         )
-
-        steps = [encode_step, search_step]
 
         # Apply cross-encoder reranking if configured
         if self.reranker_provider is not None:
@@ -228,7 +233,7 @@ class FixedRAGAgent(Agent):
         )
 
         rerank_step = Step(
-            type="rerank",
+            type=RERANK,
             input={"n_queries": len(query_texts), "fetch_k": self.fetch_k},
             output={"top_k": self.top_k},
             model=self.reranker_provider.model_name,
@@ -258,7 +263,7 @@ class FixedRAGAgent(Agent):
 
         # Load generator, generate, then unload
         with self.generator_provider.load() as generator:
-            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_GENERATE, model=self.generator_provider.model_name) as step:
                 step.input = {"n_prompts": len(prompts)}
                 answers = generator.batch_generate(prompts)
                 step.output = {"n_answers": len(answers)}
@@ -277,7 +282,7 @@ class FixedRAGAgent(Agent):
             query_steps = retrieve_steps.copy()
             query_steps.append(
                 Step(
-                    type="generate",
+                    type=GENERATE,
                     input={"query": query.text},
                     output=answer,
                     model=self.generator_provider.model_name,

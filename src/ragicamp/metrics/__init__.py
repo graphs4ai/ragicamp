@@ -2,8 +2,11 @@
 
 from typing import Any, Optional, Union
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 def _expand_for_multi_reference(
@@ -75,7 +78,8 @@ def _aggregate_multi_reference_scores(
         if score > best_scores[idx]:
             best_scores[idx] = score
 
-    return best_scores
+    # Replace any remaining -inf (predictions with no references) with 0.0
+    return [s if s != float("-inf") else 0.0 for s in best_scores]
 
 
 def _has_multi_references(references: list[Any]) -> bool:
@@ -132,8 +136,9 @@ def compute_metrics_batched(
         expanded_preds, expanded_refs, expanded_questions, pred_indices, _ = (
             _expand_for_multi_reference(predictions, references, questions)
         )
-        print(
-            f"  Multi-reference detected: {len(predictions)} predictions → {len(expanded_preds)} pairs"
+        logger.info(
+            "Multi-reference detected: %d predictions -> %d pairs",
+            len(predictions), len(expanded_preds),
         )
     else:
         # Simple case: 1-to-1
@@ -144,17 +149,17 @@ def compute_metrics_batched(
 
     for metric in metrics:
         if metric.name in already_computed:
-            print(f"  ✓ {metric.name} (already computed)")
+            logger.info("%s already computed", metric.name)
             continue
 
         try:
-            print(f"  Computing {metric.name}...")
+            logger.info("Computing %s...", metric.name)
             ResourceManager.clear_gpu_memory()
 
             # Call metric with expanded inputs
             if metric.name in ("llm_judge", "llm_judge_qa"):
                 if expanded_questions is None:
-                    print(f"  ⚠ {metric.name} requires questions, skipping")
+                    logger.warning("%s requires questions, skipping", metric.name)
                     failed.append(metric.name)
                     continue
                 scores = metric.compute(
@@ -197,7 +202,7 @@ def compute_metrics_batched(
             ResourceManager.clear_gpu_memory()
 
         except Exception as e:
-            print(f"  ⚠ {metric.name} failed: {e}")
+            logger.warning("%s failed: %s", metric.name, e)
             failed.append(metric.name)
             ResourceManager.clear_gpu_memory()
 

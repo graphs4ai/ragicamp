@@ -31,19 +31,6 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def _log_gpu_mem(label: str, always: bool = False) -> None:
-    """Log GPU memory usage for debugging."""
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            alloc = torch.cuda.memory_allocated() / 1024**3
-            if always or alloc > 0.1:  # Only log if significant
-                print(f"  [GPU] {label}: {alloc:.2f} GiB allocated")
-    except Exception:
-        pass
-
-
 def run_metrics_only(
     exp_name: str,
     output_path: Path,
@@ -71,12 +58,12 @@ def run_metrics_only(
     from ragicamp.metrics import compute_metrics_batched
     from ragicamp.utils.experiment_io import ExperimentIO
 
-    print("  📊 Metrics-only mode (no model loaded)")
+    logger.info("Metrics-only mode (no model loaded)")
 
     io = ExperimentIO(output_path)
 
     if not io.predictions_exist():
-        print(f"  ❌ No predictions file found at {io.predictions_path}")
+        logger.error("No predictions file found at %s", io.predictions_path)
         return "failed"
 
     # Load predictions using ExperimentIO
@@ -127,7 +114,7 @@ def run_metrics_only(
     # Check if all metrics are done
     missing = set(metrics) - set(state.metrics_computed)
     if missing:
-        print(f"  ⚠ Missing metrics: {list(missing)}")
+        logger.warning("Missing metrics: %s", list(missing))
         return "incomplete"
 
     # Mark complete
@@ -149,7 +136,7 @@ def run_metrics_only(
     from ragicamp.utils.formatting import format_metrics_summary
 
     metrics_str = format_metrics_summary(existing_metrics)
-    print(f"  ✓ All metrics computed: {metrics_str}")
+    logger.info("All metrics computed: %s", metrics_str)
     return "ran"
 
 
@@ -184,7 +171,7 @@ def run_generation(
     # Note: GPU memory is cleared by parent before subprocess spawn
     # No need to clear again here - subprocess starts with clean GPU state
 
-    print(f"  Loading model: {spec.model}")
+    logger.info("Loading model: %s", spec.model)
 
     # Create experiment from spec - handles all component creation
     exp = Experiment.from_spec(
@@ -194,7 +181,7 @@ def run_generation(
         judge_model=judge_model,
     )
 
-    print(f"  Dataset: {len(exp.dataset)} examples")
+    logger.info("Dataset: %d examples", len(exp.dataset))
 
     # Run the experiment
     result = exp.run(
@@ -224,10 +211,10 @@ def run_generation(
         errored = sum(1 for p in predictions if p.get("error"))
 
         if aborted > 0:
-            print(f"  ⚠ WARNING: {aborted} predictions were aborted due to model failures")
+            logger.warning("%d predictions were aborted due to model failures", aborted)
             return "failed"
         if errored > len(predictions) * 0.5:  # >50% errors
-            print(f"  ⚠ WARNING: {errored}/{len(predictions)} predictions had errors")
+            logger.warning("%d/%d predictions had errors", errored, len(predictions))
             return "failed"
 
     return "ran"
@@ -342,7 +329,7 @@ def run_spec_subprocess(
             return "failed"
 
     except subprocess.TimeoutExpired:
-        print(f"  ⏱ Timeout after {timeout}s")
+        logger.warning("Timeout after %ds", timeout)
         return "timeout"
 
 

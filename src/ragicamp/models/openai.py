@@ -15,6 +15,7 @@ Example:
 """
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Union
 
@@ -23,6 +24,8 @@ import tiktoken
 from openai import AsyncOpenAI
 
 from ragicamp.models.base import LanguageModel
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIModel(LanguageModel):
@@ -165,7 +168,7 @@ class OpenAIModel(LanguageModel):
                     try:
                         results[idx] = future.result()
                     except Exception as e:
-                        # On error, store error message
+                        logger.warning("OpenAI API error for prompt %d: %s", idx, e)
                         results[idx] = f"[ERROR: {str(e)}]"
 
             return results
@@ -282,6 +285,7 @@ class OpenAIModel(LanguageModel):
                     )
                     return (idx, result)
                 except Exception as e:
+                    logger.warning("OpenAI async API error for prompt %d: %s", idx, e)
                     return (idx, f"[ERROR: {str(e)}]")
 
         # Create tasks for all prompts

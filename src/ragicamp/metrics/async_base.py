@@ -26,7 +26,10 @@ from typing import Any, Optional
 
 from tqdm.asyncio import tqdm as atqdm
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 class AsyncAPIMetric(Metric):
@@ -117,7 +120,7 @@ class AsyncAPIMetric(Metric):
                     return await self.acompute_single(pred, ref, q, **kwargs)
                 except Exception as e:
                     # Return error score but don't crash the batch
-                    print(f"⚠️  Error computing metric for item {idx}: {e}")
+                    logger.warning("Error computing metric for item %d: %s", idx, e)
                     return {self.name: 0.0, f"{self.name}_error": 1.0}
 
         # Build tasks

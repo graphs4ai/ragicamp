@@ -15,6 +15,7 @@ from time import perf_counter
 from typing import Any, Callable
 
 from ragicamp.core.logging import get_logger
+from ragicamp.core.step_types import BATCH_ENCODE, BATCH_SEARCH, QUERY_TRANSFORM
 
 logger = get_logger(__name__)
 
@@ -213,6 +214,108 @@ def is_hybrid_searcher(index: Any) -> bool:
     return hasattr(index, "sparse_index")
 
 
+def batch_transform_embed_and_search(
+    query_transformer: Any | None,
+    embedder_provider: Any,
+    index: Any,
+    query_texts: list[str],
+    top_k: int,
+    is_hybrid: bool,
+    retrieval_store: Any = None,
+    retriever_name: str | None = None,
+) -> tuple[list[list], list["Step"]]:
+    """Query-transform-aware wrapper around :func:`batch_embed_and_search`.
+
+    If *query_transformer* is ``None`` this simply delegates to
+    :func:`batch_embed_and_search` and returns the steps list.
+
+    When a transformer is provided:
+      1. Records a ``query_transform`` :class:`Step` with timing.
+      2. Calls ``transformer.batch_transform(query_texts)`` to expand each
+         original query into one-or-more search queries.
+      3. Flattens the expanded queries, calls :func:`batch_embed_and_search`.
+      4. Merges results back: for each original query, collects results
+         from all its expansions, deduplicates by document content, sorts
+         by score descending, and takes the top *top_k*.
+
+    Args:
+        query_transformer: Optional :class:`QueryTransformer` instance.
+        embedder_provider: EmbedderProvider instance.
+        index: Search backend (VectorIndex, HybridSearcher, etc.).
+        query_texts: List of original user query strings.
+        top_k: Number of results per original query.
+        is_hybrid: Whether the index is a HybridSearcher.
+        retrieval_store: Optional retrieval cache (disabled when transforming).
+        retriever_name: Retriever identifier for cache keys.
+
+    Returns:
+        Tuple of (search_results_per_query, list_of_steps).
+    """
+    if query_transformer is None:
+        retrievals, encode_step, search_step = batch_embed_and_search(
+            embedder_provider=embedder_provider,
+            index=index,
+            query_texts=query_texts,
+            top_k=top_k,
+            is_hybrid=is_hybrid,
+            retrieval_store=retrieval_store,
+            retriever_name=retriever_name,
+        )
+        return retrievals, [encode_step, search_step]
+
+    # --- Transform queries -----------------------------------------------
+    with StepTimer(QUERY_TRANSFORM) as transform_step:
+        transform_step.input = {"n_queries": len(query_texts)}
+        expanded: list[list[str]] = query_transformer.batch_transform(query_texts)
+        total_expanded = sum(len(eq) for eq in expanded)
+        transform_step.output = {
+            "total_expanded": total_expanded,
+            "transformer": repr(query_transformer),
+        }
+
+    # Build flat list + index mapping (original_idx → slice range)
+    flat_queries: list[str] = []
+    boundaries: list[tuple[int, int]] = []  # (start, end) in flat list
+    for eq_list in expanded:
+        start = len(flat_queries)
+        flat_queries.extend(eq_list)
+        boundaries.append((start, len(flat_queries)))
+
+    logger.info(
+        "Query transform: %d queries -> %d expanded queries",
+        len(query_texts), len(flat_queries),
+    )
+
+    # --- Embed + search expanded queries (no cache — transformed) --------
+    flat_retrievals, encode_step, search_step = batch_embed_and_search(
+        embedder_provider=embedder_provider,
+        index=index,
+        query_texts=flat_queries,
+        top_k=top_k,
+        is_hybrid=is_hybrid,
+    )
+
+    # --- Merge results back to original queries --------------------------
+    merged_retrievals: list[list] = []
+    for start, end in boundaries:
+        # Collect all results from this query's expansions
+        seen_contents: set[str] = set()
+        candidates: list[tuple[float, Any]] = []  # (score, SearchResult)
+        for i in range(start, end):
+            for sr in flat_retrievals[i]:
+                content_key = sr.document.text[:200] if sr.document and sr.document.text else ""
+                if content_key not in seen_contents:
+                    seen_contents.add(content_key)
+                    candidates.append((sr.score if sr.score is not None else 0.0, sr))
+
+        # Sort by score descending, take top_k
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        merged_retrievals.append([sr for _, sr in candidates[:top_k]])
+
+    steps = [transform_step, encode_step, search_step]
+    return merged_retrievals, steps
+
+
 def batch_embed_and_search(
     embedder_provider: Any,
     index: Any,
@@ -285,17 +388,17 @@ def batch_embed_and_search(
             ]
             # Return synthetic steps (no actual work done)
             encode_step = Step(
-                name="batch_encode",
+                type=BATCH_ENCODE,
                 model=embedder_provider.model_name,
                 input={"n_queries": len(query_texts)},
                 output={"cache_hit": True},
-                duration_s=0.0,
+                timing_ms=0.0,
             )
             search_step = Step(
-                name="batch_search",
+                type=BATCH_SEARCH,
                 input={"n_queries": len(query_texts), "top_k": top_k},
                 output={"n_results": sum(len(r) for r in retrievals), "cache_hit": True},
-                duration_s=0.0,
+                timing_ms=0.0,
             )
             return retrievals, encode_step, search_step
 
@@ -326,7 +429,7 @@ def batch_embed_and_search(
         len(texts_to_search), embedder_provider.model_name,
     )
     with embedder_provider.load() as embedder:
-        with StepTimer("batch_encode", model=embedder_provider.model_name) as encode_step:
+        with StepTimer(BATCH_ENCODE, model=embedder_provider.model_name) as encode_step:
             encode_step.input = {"n_queries": len(texts_to_search)}
             embeddings = embedder.batch_encode(texts_to_search)
             if not isinstance(embeddings, np.ndarray):
@@ -339,7 +442,7 @@ def batch_embed_and_search(
         "Searching index (%d queries, top_k=%d)...",
         len(texts_to_search), top_k,
     )
-    with StepTimer("batch_search") as search_step:
+    with StepTimer(BATCH_SEARCH) as search_step:
         search_step.input = {"n_queries": len(texts_to_search), "top_k": top_k}
         if is_hybrid:
             search_results = index.batch_search(embeddings, texts_to_search, top_k=top_k)

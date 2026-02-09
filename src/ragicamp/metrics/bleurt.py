@@ -3,7 +3,10 @@
 import gc
 from typing import Any, Optional
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 class BLEURTMetric(Metric):
@@ -46,7 +49,7 @@ class BLEURTMetric(Metric):
             ) from e
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"  📥 Loading BLEURT model: {self.model_name} (device={device})")
+        logger.info("Loading BLEURT model: %s (device=%s)", self.model_name, device)
 
         self._tokenizer = BleurtTokenizer.from_pretrained(self.model_name)
         self._scorer = BleurtForSequenceClassification.from_pretrained(self.model_name)
@@ -54,7 +57,7 @@ class BLEURTMetric(Metric):
         self._scorer.eval()
         self._device = device
 
-        print("  ✓ BLEURT (PyTorch) loaded")
+        logger.info("BLEURT (PyTorch) loaded")
 
     def _unload_scorer(self) -> None:
         """Unload the BLEURT model to free GPU memory."""
@@ -71,7 +74,7 @@ class BLEURTMetric(Metric):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
-        print("  🗑️  BLEURT model unloaded")
+        logger.info("BLEURT model unloaded")
 
     def compute(
         self, predictions: list[str], references: list[str], **kwargs: Any
@@ -141,8 +144,9 @@ class BLEURTMetric(Metric):
                         old_batch_size = batch_size
                         batch_size = batch_size // 2
                         if batch_size >= min_batch_size:
-                            print(
-                                f"    ⚠ OOM with batch_size={old_batch_size}, retrying with {batch_size}"
+                            logger.warning(
+                                "OOM with batch_size=%d, retrying with %d",
+                                old_batch_size, batch_size,
                             )
                         else:
                             raise RuntimeError(

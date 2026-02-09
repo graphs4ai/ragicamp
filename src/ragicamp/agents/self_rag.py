@@ -22,9 +22,20 @@ from ragicamp.agents.base import (
     Step,
     StepTimer,
     batch_embed_and_search,
+    batch_transform_embed_and_search,
     is_hybrid_searcher,
 )
 from ragicamp.core.logging import get_logger
+from ragicamp.core.step_types import (
+    ASSESS_RETRIEVAL,
+    BATCH_ASSESS,
+    BATCH_FALLBACK_GENERATE,
+    BATCH_GENERATE,
+    BATCH_VERIFY,
+    FALLBACK_GENERATE,
+    GENERATE,
+    VERIFY,
+)
 from ragicamp.core.types import Document, SearchBackend
 from ragicamp.models.providers import EmbedderProvider, GeneratorProvider
 from ragicamp.utils.formatting import ContextFormatter
@@ -137,6 +148,7 @@ class SelfRAGAgent(Agent):
         self.retriever_name: Optional[str] = config.pop("retriever_name", None)
         self.reranker_provider = config.pop("reranker_provider", None)
         self.fetch_k: int = config.pop("fetch_k", top_k)
+        self.query_transformer = config.pop("query_transformer", None)
 
         super().__init__(name, **config)
 
@@ -245,7 +257,7 @@ class SelfRAGAgent(Agent):
         ]
 
         with self.generator_provider.load() as generator:
-            with StepTimer("batch_assess", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_ASSESS, model=self.generator_provider.model_name) as step:
                 responses = generator.batch_generate(prompts, max_tokens=150)
                 step.input = {"n_queries": len(prompts)}
                 step.output = {"n_responses": len(responses)}
@@ -257,7 +269,7 @@ class SelfRAGAgent(Agent):
             state.needs_retrieval = confidence <= self.retrieval_threshold
 
             state.steps.append(Step(
-                type="assess_retrieval",
+                type=ASSESS_RETRIEVAL,
                 input={"query": state.query.text},
                 output={"confidence": confidence},
                 model=self.generator_provider.model_name,
@@ -280,7 +292,8 @@ class SelfRAGAgent(Agent):
         # When reranking, retrieve more docs (fetch_k) then trim after rerank
         retrieve_k = self.fetch_k if self.reranker_provider else self.top_k
 
-        retrievals, encode_step, search_step = batch_embed_and_search(
+        retrievals, embed_search_steps = batch_transform_embed_and_search(
+            query_transformer=self.query_transformer,
             embedder_provider=self.embedder_provider,
             index=self.index,
             query_texts=texts,
@@ -294,15 +307,15 @@ class SelfRAGAgent(Agent):
         if self.reranker_provider is not None:
             retrievals = self._apply_reranking(texts, retrievals)
 
+        # Broadcast all embed/search steps (and optional transform step) to each query
         for idx in idx_order:
-            retrieval_group[idx].steps.append(encode_step)
+            retrieval_group[idx].steps.extend(embed_search_steps)
 
         for idx, results in zip(idx_order, retrievals):
             state = retrieval_group[idx]
             state.docs = [r.document for r in results]
             state.docs_info = RetrievedDocInfo.from_search_results(results)
             state.context_text = ContextFormatter.format_numbered_from_docs(state.docs)
-            state.steps.append(search_step)
 
     # ------------------------------------------------------------------
     # Phase 3: Generate + Verify + Fallback
@@ -320,7 +333,7 @@ class SelfRAGAgent(Agent):
 
         with self.generator_provider.load() as generator:
             # Batch generate ALL answers
-            with StepTimer("batch_generate", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_GENERATE, model=self.generator_provider.model_name) as step:
                 answers = generator.batch_generate(prompts)
                 step.input = {"n_queries": len(prompts)}
                 step.output = {"n_answers": len(answers)}
@@ -329,7 +342,7 @@ class SelfRAGAgent(Agent):
                 state = all_states[idx]
                 state.answer = answer
                 state.steps.append(Step(
-                    type="generate",
+                    type=GENERATE,
                     input={
                         "query": state.query.text,
                         "with_context": state.needs_retrieval,
@@ -362,7 +375,7 @@ class SelfRAGAgent(Agent):
                 )
             )
 
-        with StepTimer("batch_verify", model=self.generator_provider.model_name) as step:
+        with StepTimer(BATCH_VERIFY, model=self.generator_provider.model_name) as step:
             verify_responses = generator.batch_generate(verify_prompts, max_tokens=100)
             step.input = {"n_queries": len(verify_prompts)}
 
@@ -373,7 +386,7 @@ class SelfRAGAgent(Agent):
             state = retrieval_group[idx]
             state.verification = verdict
             state.steps.append(Step(
-                type="verify",
+                type=VERIFY,
                 input={"answer": state.answer[:100]},
                 output={"verification": verdict},
                 model=self.generator_provider.model_name,
@@ -390,7 +403,7 @@ class SelfRAGAgent(Agent):
                 for idx in fallback_ids
             ]
 
-            with StepTimer("batch_fallback_generate", model=self.generator_provider.model_name) as step:
+            with StepTimer(BATCH_FALLBACK_GENERATE, model=self.generator_provider.model_name) as step:
                 fallback_answers = generator.batch_generate(fallback_prompts)
                 step.input = {"n_queries": len(fallback_prompts)}
 
@@ -402,7 +415,7 @@ class SelfRAGAgent(Agent):
                 state.docs_info = []
                 state.context_text = ""
                 state.steps.append(Step(
-                    type="fallback_generate",
+                    type=FALLBACK_GENERATE,
                     input={"query": state.query.text, "fallback": True},
                     output=answer,
                     model=self.generator_provider.model_name,

@@ -36,9 +36,6 @@ class AgentType(str, Enum):
 
     DIRECT_LLM = "direct_llm"
     FIXED_RAG = "fixed_rag"
-    # New agent types
-    VANILLA_RAG = "vanilla_rag"
-    PIPELINE_RAG = "pipeline_rag"  # Alias for fixed_rag with clearer naming
     ITERATIVE_RAG = "iterative_rag"
     SELF_RAG = "self_rag"
 

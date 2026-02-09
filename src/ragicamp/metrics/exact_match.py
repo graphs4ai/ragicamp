@@ -13,7 +13,10 @@ import string
 from collections import Counter
 from typing import Any, Optional
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 def normalize_answer(
@@ -99,8 +102,7 @@ class ExactMatchMetric(Metric):
 
                 self.stemmer = PorterStemmer()
             except ImportError:
-                print("⚠️  NLTK not installed. Stemming disabled.")
-                print("   Install with: pip install nltk")
+                logger.warning("NLTK not installed. Stemming disabled. Install with: pip install nltk")
                 self.use_stemming = False
 
     def compute(
@@ -177,8 +179,7 @@ class F1Metric(Metric):
 
                 self.stemmer = PorterStemmer()
             except ImportError:
-                print("⚠️  NLTK not installed. Stemming disabled.")
-                print("   Install with: pip install nltk")
+                logger.warning("NLTK not installed. Stemming disabled. Install with: pip install nltk")
                 self.use_stemming = False
 
     def compute(
