@@ -1,45 +1,43 @@
 #!/usr/bin/env python3
-"""Diagnose and clean experiment results that were incorrectly run.
+"""Diagnose and fix experiment results that were incorrectly named.
 
-Detects experiments that are tainted by known bugs and should be re-run:
+Due to bugs where ``query_transform`` and ``reranker`` were configured but
+never wired into the agent pipeline, many experiment names encode parameters
+that had no effect.  For example::
 
-1. **Fake reranker** — Name encodes a reranker (e.g. ``_bge_``) but reranking
-   was never wired into the agent pipeline.  Results are identical to the
-   no-reranker baseline.
+    rag_..._k5_hyde_bge_concise_nq    # hyde + bge never wired
+    rag_..._k5_concise_nq             # ← identical results
 
-2. **Fake query_transform** — Name encodes a query transform (e.g. ``_hyde_``)
-   but the feature was never wired.  Results are identical to ``none``.
+This script:
 
-3. **Duplicate configs** — Multiple directories with different names but
-   identical logical configs (same model, dataset, retriever, top_k, prompt).
+1. **Strips fake tokens** from experiment names (``_hyde_``, ``_multiquery_``,
+   ``_bge_``, ``_bgev2_``, etc.) and renames the directory.
+2. **Verifies duplicates** by comparing F1 scores between experiments that
+   map to the same corrected name (within a tolerance).
+3. **Resolves collisions**: when multiple experiments map to the same
+   corrected name, keeps the one with the best F1 and archives the rest.
+4. **Updates JSON files** (metadata.json, results.json) to reflect the
+   corrected name and set ``query_transform`` / ``reranker`` to ``none``.
+5. Optionally **resets Optuna** (``--reset-optuna``) to let TPE restart.
 
-4. **Incomplete / failed** — Experiments stuck in non-terminal phases.
+Modes:
 
-5. **Metadata-impoverished** — metadata.json missing critical fields
-   (model, dataset, retriever), making the experiment un-analysable.
+- **diagnose** (default): Print what would happen.  No changes.
+- ``--execute``: Apply renames, archive collisions, update JSON files.
 
-The script has three modes:
+Usage::
 
-- **diagnose** (default): Print a detailed report of all issues found.
-- **clean**: Move tainted experiments to ``_tainted/`` archive + delete
-  ``optuna_study.db`` so TPE can restart fresh.
-- **nuke**: Delete tainted experiments permanently (no archive).
-
-Usage:
-    # Dry run — just show what's wrong:
+    # Dry run (default):
     python scripts/clean_study.py --study outputs/smart_retrieval_slm
 
-    # Clean tainted experiments (archive + remove Optuna DB):
-    python scripts/clean_study.py --study outputs/smart_retrieval_slm --clean
+    # Execute renames:
+    python scripts/clean_study.py --study outputs/smart_retrieval_slm --execute
 
-    # Nuke tainted experiments (no archive):
-    python scripts/clean_study.py --study outputs/smart_retrieval_slm --nuke
+    # Also reset Optuna DB:
+    python scripts/clean_study.py --study outputs/smart_retrieval_slm --execute --reset-optuna
 
     # Also clean incomplete/failed experiments:
-    python scripts/clean_study.py --study outputs/smart_retrieval_slm --clean --include-incomplete
-
-    # Keep only experiments matching a specific whitelist:
-    python scripts/clean_study.py --study outputs/smart_retrieval_slm --clean --keep-list keep.txt
+    python scripts/clean_study.py --study outputs/smart_retrieval_slm --execute --include-incomplete
 """
 
 from __future__ import annotations
@@ -59,95 +57,101 @@ from typing import Optional
 # ============================================================================
 
 SKIP_DIRS = {
-    "_archived_fake_reranked", "_tainted", "analysis",
+    "_archived_fake_reranked", "_tainted", "_collisions", "analysis",
     "__pycache__", ".ipynb_checkpoints",
 }
 
 KNOWN_RERANKER_TOKENS = {
     "bge", "bgev2", "bgev2m3", "bgebase",
     "msmarco", "msmarcolarge",
+    # Hyphenated forms (collapsed in names)
+    "bge-v2", "bge-base", "ms-marco", "ms-marco-large",
 }
 
 KNOWN_QUERY_TRANSFORMS = {"hyde", "multiquery"}
 
-KNOWN_DATASETS = {"nq", "hotpotqa", "triviaqa", "musique"}
-
 DATASET_ALIASES = {
     "natural_questions": "nq",
 }
+
+# F1 tolerance for verifying that "duplicates" really produced the same results
+F1_TOLERANCE = 0.015
+
+
+# ============================================================================
+# Name manipulation
+# ============================================================================
+
+
+def _strip_fake_tokens(name: str) -> tuple[str | None, list[str]]:
+    """Strip fake reranker and query_transform tokens from an experiment name.
+
+    Returns:
+        (corrected_name, list_of_stripped_tokens)
+        corrected_name is None if nothing to strip.
+    """
+    parts = name.split("_")
+
+    # Find _k{N}_ segment
+    k_idx = None
+    for i, p in enumerate(parts):
+        if re.match(r"^k\d+$", p):
+            k_idx = i
+            break
+
+    if k_idx is None:
+        return None, []
+
+    tail = parts[k_idx + 1:]
+    if len(tail) < 2:
+        return None, []
+
+    prompt_dataset = tail[-2:]
+    middle = tail[:-2]
+
+    stripped = []
+    cleaned = []
+    # Normalise for comparison: collapse hyphens
+    rr_normalised = {t.replace("-", "") for t in KNOWN_RERANKER_TOKENS}
+
+    for token in middle:
+        token_norm = token.lower().replace("-", "")
+        if token_norm in rr_normalised:
+            stripped.append(token)
+        elif token.lower() in KNOWN_QUERY_TRANSFORMS:
+            stripped.append(token)
+        else:
+            cleaned.append(token)
+
+    if not stripped:
+        return None, []
+
+    new_parts = parts[: k_idx + 1] + cleaned + prompt_dataset
+    return "_".join(new_parts), stripped
 
 
 # ============================================================================
 # Data model
 # ============================================================================
 
-@dataclass
-class ExperimentInfo:
-    """Parsed info for a single experiment directory."""
-    dir_path: Path
-    name: str
-    metadata: Optional[dict] = None
-    state: Optional[dict] = None
-    results: Optional[dict] = None
-    issues: list[str] = field(default_factory=list)
-    # Parsed config (normalised for dedup)
-    config_key: Optional[tuple] = None
-
-    @property
-    def phase(self) -> Optional[str]:
-        if self.state:
-            return self.state.get("phase")
-        return None
-
-    @property
-    def is_complete(self) -> bool:
-        return self.phase == "complete"
-
-    @property
-    def has_predictions(self) -> bool:
-        return (self.dir_path / "predictions.json").exists()
-
 
 @dataclass
-class DiagnosticReport:
-    """Summary of all issues found in a study."""
-    total_experiments: int = 0
-    clean_experiments: int = 0
-    fake_reranker: list[ExperimentInfo] = field(default_factory=list)
-    fake_query_transform: list[ExperimentInfo] = field(default_factory=list)
-    duplicates: dict[tuple, list[ExperimentInfo]] = field(default_factory=dict)
-    incomplete: list[ExperimentInfo] = field(default_factory=list)
-    impoverished: list[ExperimentInfo] = field(default_factory=list)
-
-    @property
-    def tainted(self) -> set[str]:
-        """All experiment names that have at least one issue."""
-        names: set[str] = set()
-        for exp in self.fake_reranker:
-            names.add(exp.name)
-        for exp in self.fake_query_transform:
-            names.add(exp.name)
-        for exps in self.duplicates.values():
-            # Keep the best one (most complete, or best f1), taint the rest
-            best = _pick_best(exps)
-            for exp in exps:
-                if exp.name != best.name:
-                    names.add(exp.name)
-        return names
-
-    @property
-    def tainted_including_incomplete(self) -> set[str]:
-        names = self.tainted
-        for exp in self.incomplete:
-            names.add(exp.name)
-        for exp in self.impoverished:
-            names.add(exp.name)
-        return names
+class Action:
+    """A planned rename/archive/delete action."""
+    old_name: str
+    old_dir: Path
+    new_name: str
+    action: str  # "rename", "archive_collision", "archive_incomplete", "keep"
+    detail: str
+    f1: float = 0.0
+    stripped_tokens: list[str] = field(default_factory=list)
+    verified_duplicate: bool = False  # True if F1 matches within tolerance
 
 
 # ============================================================================
 # Helpers
 # ============================================================================
+
 
 def _load_json(path: Path) -> Optional[dict]:
     if not path.exists():
@@ -159,122 +163,90 @@ def _load_json(path: Path) -> Optional[dict]:
         return None
 
 
-def _get_f1(exp: ExperimentInfo) -> float:
-    """Extract F1 score from results or predictions."""
-    if exp.results:
-        metrics = exp.results.get("metrics", {})
-        if isinstance(metrics, dict):
-            return metrics.get("f1", 0.0)
+def _save_json(path: Path, data: dict) -> None:
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _get_f1(exp_dir: Path) -> float:
+    """Read F1 from results.json or predictions.json aggregate_metrics."""
+    results = _load_json(exp_dir / "results.json")
+    if results:
+        metrics = results.get("metrics", {})
+        if isinstance(metrics, dict) and metrics.get("f1"):
+            return metrics["f1"]
+
+    # Fallback: try predictions.json aggregate
+    preds = _load_json(exp_dir / "predictions.json")
+    if preds:
+        agg = preds.get("aggregate_metrics", {})
+        if isinstance(agg, dict) and agg.get("f1"):
+            return agg["f1"]
+
     return 0.0
 
 
-def _pick_best(exps: list[ExperimentInfo]) -> ExperimentInfo:
-    """From a list of duplicates, pick the best to keep."""
-    # Prefer complete > incomplete
-    complete = [e for e in exps if e.is_complete]
-    candidates = complete if complete else exps
-    # Among those, pick highest F1
-    return max(candidates, key=_get_f1)
+def _get_phase(exp_dir: Path) -> Optional[str]:
+    state = _load_json(exp_dir / "state.json")
+    if state:
+        return state.get("phase")
+    return None
 
 
-def _normalise_qt(val: Optional[str]) -> str:
-    if val is None or val == "none" or val == "":
-        return "none"
-    return val.lower()
+def _update_json_fields(exp_dir: Path, new_name: str, stripped: list[str]) -> None:
+    """Update name, reranker, query_transform in metadata/results JSON."""
+    rr_normalised = {t.replace("-", "") for t in KNOWN_RERANKER_TOKENS}
+    has_rr = any(t.lower().replace("-", "") in rr_normalised for t in stripped)
+    has_qt = any(t.lower() in KNOWN_QUERY_TRANSFORMS for t in stripped)
+
+    for fname in ["metadata.json", "results.json"]:
+        data = _load_json(exp_dir / fname)
+        if data is None:
+            continue
+
+        data["name"] = new_name
+
+        if has_rr:
+            if "reranker" in data:
+                data["reranker"] = None
+            if "reranker_model" in data:
+                data["reranker_model"] = None
+
+        if has_qt:
+            if "query_transform" in data:
+                data["query_transform"] = None
+
+        # Also fix nested metadata in results.json
+        if fname == "results.json" and "metadata" in data and isinstance(data["metadata"], dict):
+            data["metadata"]["name"] = new_name
+            if has_rr:
+                data["metadata"]["reranker"] = None
+                data["metadata"]["reranker_model"] = None
+            if has_qt:
+                data["metadata"]["query_transform"] = None
+
+        _save_json(exp_dir / fname, data)
 
 
-def _normalise_reranker(val: Optional[str]) -> str:
-    if val is None or val == "none" or val == "":
-        return "none"
-    return val.lower()
+# ============================================================================
+# Planning
+# ============================================================================
 
 
-def _extract_config_key(exp: ExperimentInfo) -> Optional[tuple]:
-    """Build a normalised config fingerprint for deduplication.
+def plan_actions(
+    study_path: Path,
+    include_incomplete: bool = False,
+) -> list[Action]:
+    """Scan the study directory and plan all actions.
 
-    Returns a tuple of (model, dataset, exp_type, retriever, top_k, prompt,
-    query_transform_effective, reranker_effective) where the "effective"
-    values reflect what the code ACTUALLY did, not what was configured.
+    Returns a list of Action objects describing what to do.
     """
-    meta = exp.metadata
-    if not meta:
-        return None
+    actions: list[Action] = []
 
-    model = meta.get("model") or "unknown"
-    dataset = DATASET_ALIASES.get(meta.get("dataset", ""), meta.get("dataset", "unknown"))
-    exp_type = meta.get("type") or "unknown"
-    retriever = meta.get("retriever") or "none"
-    top_k = meta.get("top_k") or 5
-    prompt = meta.get("prompt") or "unknown"
-    agent_type = meta.get("agent_type") or "fixed_rag"
-
-    # Effective values: these are what the code ACTUALLY used regardless of config.
-    # Both query_transform and reranker were NEVER wired into the agent pipeline
-    # in the old code, so the effective value is always "none" for experiments
-    # produced before the fix.
-    qt_effective = "none"
-    rr_effective = "none"
-
-    return (model, dataset, exp_type, retriever, top_k, prompt, qt_effective, rr_effective, agent_type)
-
-
-def _name_has_reranker(name: str) -> Optional[str]:
-    """Check if experiment name encodes a reranker. Return the token or None."""
-    parts = name.split("_")
-    # Find _k{N}_ segment
-    k_idx = None
-    for i, p in enumerate(parts):
-        if re.match(r"^k\d+$", p):
-            k_idx = i
-            break
-
-    if k_idx is None:
-        return None
-
-    # Tokens between k{N} and the last two parts (prompt, dataset)
-    tail = parts[k_idx + 1:]
-    if len(tail) < 2:
-        return None
-
-    middle = tail[:-2]  # strip prompt + dataset
-    for token in middle:
-        if token.lower() in KNOWN_RERANKER_TOKENS:
-            return token
-    return None
-
-
-def _name_has_query_transform(name: str) -> Optional[str]:
-    """Check if experiment name encodes a query transform. Return the token or None."""
-    parts = name.split("_")
-    k_idx = None
-    for i, p in enumerate(parts):
-        if re.match(r"^k\d+$", p):
-            k_idx = i
-            break
-
-    if k_idx is None:
-        return None
-
-    tail = parts[k_idx + 1:]
-    if len(tail) < 2:
-        return None
-
-    middle = tail[:-2]
-    for token in middle:
-        if token.lower() in KNOWN_QUERY_TRANSFORMS:
-            return token
-    return None
-
-
-# ============================================================================
-# Diagnosis
-# ============================================================================
-
-
-def scan_study(study_path: Path, include_incomplete: bool = False) -> DiagnosticReport:
-    """Scan a study directory and build a diagnostic report."""
-    report = DiagnosticReport()
-    experiments: list[ExperimentInfo] = []
+    # Phase 1: Collect all experiments and their corrected names
+    # Maps corrected_name -> list of (old_name, old_dir, f1, stripped_tokens)
+    corrections: dict[str, list[dict]] = defaultdict(list)
+    incomplete: list[Path] = []
 
     for exp_dir in sorted(study_path.iterdir()):
         if not exp_dir.is_dir() or exp_dir.name in SKIP_DIRS:
@@ -282,71 +254,111 @@ def scan_study(study_path: Path, include_incomplete: bool = False) -> Diagnostic
         if exp_dir.name.startswith("."):
             continue
 
-        exp = ExperimentInfo(
-            dir_path=exp_dir,
-            name=exp_dir.name,
-            metadata=_load_json(exp_dir / "metadata.json"),
-            state=_load_json(exp_dir / "state.json"),
-            results=_load_json(exp_dir / "results.json"),
-        )
+        phase = _get_phase(exp_dir)
 
-        report.total_experiments += 1
-
-        # --- Issue 1: Fake reranker ---
-        rr_token = _name_has_reranker(exp.name)
-        if rr_token:
-            exp.issues.append(f"fake_reranker({rr_token})")
-            report.fake_reranker.append(exp)
-
-        # --- Issue 2: Fake query_transform ---
-        qt_token = _name_has_query_transform(exp.name)
-        if qt_token:
-            exp.issues.append(f"fake_query_transform({qt_token})")
-            report.fake_query_transform.append(exp)
-
-        # --- Issue 4: Incomplete / failed ---
-        phase = exp.phase
+        # Track incomplete/failed experiments
         if phase and phase not in ("complete",):
-            exp.issues.append(f"incomplete({phase})")
-            report.incomplete.append(exp)
+            incomplete.append(exp_dir)
 
-        # --- Issue 5: Impoverished metadata ---
-        if exp.metadata:
-            missing_fields = []
-            if not exp.metadata.get("model"):
-                missing_fields.append("model")
-            if not exp.metadata.get("dataset"):
-                missing_fields.append("dataset")
-            if exp.metadata.get("type") == "rag" and not exp.metadata.get("retriever"):
-                missing_fields.append("retriever")
-            if missing_fields:
-                exp.issues.append(f"missing_metadata({','.join(missing_fields)})")
-                report.impoverished.append(exp)
-        elif not exp.metadata:
-            exp.issues.append("no_metadata")
-            report.impoverished.append(exp)
+        corrected, stripped = _strip_fake_tokens(exp_dir.name)
 
-        experiments.append(exp)
+        if corrected is None:
+            # Name is already clean — nothing to rename
+            continue
 
-    # --- Issue 3: Duplicates (same effective config, different names) ---
-    config_groups: dict[tuple, list[ExperimentInfo]] = defaultdict(list)
-    for exp in experiments:
-        key = _extract_config_key(exp)
-        if key:
-            exp.config_key = key
-            config_groups[key].append(exp)
+        f1 = _get_f1(exp_dir)
 
-    for key, exps in config_groups.items():
-        if len(exps) > 1:
-            report.duplicates[key] = exps
-            for exp in exps:
-                exp.issues.append(f"duplicate(group_size={len(exps)})")
+        corrections[corrected].append({
+            "old_name": exp_dir.name,
+            "old_dir": exp_dir,
+            "f1": f1,
+            "stripped": stripped,
+            "phase": phase,
+        })
 
-    report.clean_experiments = sum(
-        1 for exp in experiments if not exp.issues
-    )
+    # Phase 2: Resolve collisions and plan renames
+    for corrected_name, candidates in sorted(corrections.items()):
+        target_dir = study_path / corrected_name
+        target_exists_on_disk = target_dir.exists() and target_dir.name not in [
+            c["old_name"] for c in candidates
+        ]
 
-    return report
+        # Collect all competitors: candidates + existing on-disk experiment
+        all_competitors = list(candidates)
+        if target_exists_on_disk:
+            all_competitors.append({
+                "old_name": corrected_name,
+                "old_dir": target_dir,
+                "f1": _get_f1(target_dir),
+                "stripped": [],
+                "phase": _get_phase(target_dir),
+                "is_existing": True,
+            })
+
+        # Verify that these are true duplicates (F1 within tolerance)
+        f1_values = [c["f1"] for c in all_competitors if c["f1"] > 0]
+        if len(f1_values) >= 2:
+            f1_range = max(f1_values) - min(f1_values)
+            verified = f1_range <= F1_TOLERANCE
+        elif len(f1_values) == 1:
+            verified = True
+        else:
+            verified = False  # All zeros (failed experiments)
+
+        # Pick the winner: highest F1, prefer complete
+        complete_candidates = [c for c in all_competitors if c.get("phase") == "complete"]
+        pool = complete_candidates if complete_candidates else all_competitors
+        winner = max(pool, key=lambda c: c["f1"])
+
+        for candidate in candidates:
+            if candidate["old_name"] == winner["old_name"]:
+                if candidate["old_name"] == corrected_name:
+                    # Already has the correct name — nothing to do
+                    continue
+                actions.append(Action(
+                    old_name=candidate["old_name"],
+                    old_dir=candidate["old_dir"],
+                    new_name=corrected_name,
+                    action="rename",
+                    detail=(
+                        f"Rename: strip {candidate['stripped']} → '{corrected_name}'"
+                    ),
+                    f1=candidate["f1"],
+                    stripped_tokens=candidate["stripped"],
+                    verified_duplicate=verified,
+                ))
+            else:
+                # Loser in collision
+                actions.append(Action(
+                    old_name=candidate["old_name"],
+                    old_dir=candidate["old_dir"],
+                    new_name=corrected_name,
+                    action="archive_collision",
+                    detail=(
+                        f"Collision loser: f1={candidate['f1']:.4f} vs winner "
+                        f"f1={winner['f1']:.4f} ('{winner['old_name']}')"
+                    ),
+                    f1=candidate["f1"],
+                    stripped_tokens=candidate["stripped"],
+                    verified_duplicate=verified,
+                ))
+
+    # Phase 3: Handle incomplete experiments (optional)
+    if include_incomplete:
+        already_planned = {a.old_name for a in actions}
+        for exp_dir in incomplete:
+            if exp_dir.name not in already_planned:
+                phase = _get_phase(exp_dir) or "unknown"
+                actions.append(Action(
+                    old_name=exp_dir.name,
+                    old_dir=exp_dir,
+                    new_name=exp_dir.name,
+                    action="archive_incomplete",
+                    detail=f"Incomplete experiment: phase={phase}",
+                    f1=_get_f1(exp_dir),
+                ))
+
+    return actions
 
 
 # ============================================================================
@@ -358,181 +370,159 @@ _YELLOW = "\033[93m"
 _GREEN = "\033[92m"
 _CYAN = "\033[96m"
 _BOLD = "\033[1m"
+_DIM = "\033[2m"
 _RESET = "\033[0m"
 
 
-def print_report(report: DiagnosticReport, include_incomplete: bool = False) -> None:
+def print_report(actions: list[Action], study_path: Path) -> None:
     """Print a human-readable diagnostic report."""
+    renames = [a for a in actions if a.action == "rename"]
+    collisions = [a for a in actions if a.action == "archive_collision"]
+    incomplete_acts = [a for a in actions if a.action == "archive_incomplete"]
+
+    # Count total experiments
+    total = sum(1 for d in study_path.iterdir()
+                if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith("."))
+
     print(f"\n{_BOLD}{'=' * 70}")
-    print(f"  STUDY DIAGNOSTIC REPORT")
+    print(f"  STUDY CLEANUP REPORT")
     print(f"{'=' * 70}{_RESET}\n")
 
-    print(f"  Total experiments:  {report.total_experiments}")
-    print(f"  {_GREEN}Clean:              {report.clean_experiments}{_RESET}")
-    print(f"  {_RED}Fake reranker:      {len(report.fake_reranker)}{_RESET}")
-    print(f"  {_RED}Fake query_transform: {len(report.fake_query_transform)}{_RESET}")
-    print(f"  {_YELLOW}Duplicate groups:   {len(report.duplicates)} groups "
-          f"({sum(len(v) for v in report.duplicates.values())} experiments){_RESET}")
-    print(f"  {_YELLOW}Incomplete/failed:  {len(report.incomplete)}{_RESET}")
-    print(f"  {_YELLOW}Missing metadata:   {len(report.impoverished)}{_RESET}")
+    print(f"  Total experiments on disk: {total}")
+    print(f"  {_GREEN}Rename (strip fake tokens): {len(renames)}{_RESET}")
+    print(f"  {_YELLOW}Archive (collision losers):  {len(collisions)}{_RESET}")
+    if incomplete_acts:
+        print(f"  {_YELLOW}Archive (incomplete/failed): {len(incomplete_acts)}{_RESET}")
 
-    # --- Fake reranker details ---
-    if report.fake_reranker:
-        print(f"\n{_BOLD}{_RED}--- FAKE RERANKER (reranker in name but never wired) ---{_RESET}")
-        for exp in report.fake_reranker:
-            rr = _name_has_reranker(exp.name)
-            f1 = _get_f1(exp)
-            status = exp.phase or "?"
-            print(f"  {_RED}✗{_RESET} {exp.name}")
-            print(f"    reranker_token={rr}  f1={f1:.4f}  phase={status}")
+    # Verify duplicates
+    verified = [a for a in renames + collisions if a.verified_duplicate]
+    unverified = [a for a in renames + collisions if not a.verified_duplicate]
+    if verified:
+        print(f"\n  {_GREEN}Verified duplicates (F1 within {F1_TOLERANCE}): "
+              f"{len(verified)}{_RESET}")
+    if unverified:
+        print(f"  {_YELLOW}Unverified (F1 differs or all zero):     "
+              f"{len(unverified)}{_RESET}")
 
-    # --- Fake query_transform details ---
-    if report.fake_query_transform:
-        print(f"\n{_BOLD}{_RED}--- FAKE QUERY_TRANSFORM (qt in name but never wired) ---{_RESET}")
-        for exp in report.fake_query_transform:
-            qt = _name_has_query_transform(exp.name)
-            f1 = _get_f1(exp)
-            status = exp.phase or "?"
-            print(f"  {_RED}✗{_RESET} {exp.name}")
-            print(f"    query_transform={qt}  f1={f1:.4f}  phase={status}")
+    # --- Renames ---
+    if renames:
+        print(f"\n{_BOLD}--- RENAMES (strip fake tokens, keep results) ---{_RESET}")
+        for a in renames[:50]:  # Cap at 50 for readability
+            tokens = ", ".join(a.stripped_tokens)
+            check = f"{_GREEN}✓{_RESET}" if a.verified_duplicate else f"{_YELLOW}?{_RESET}"
+            print(f"  {check} {_DIM}{a.old_name}{_RESET}")
+            print(f"    → {a.new_name}  {_DIM}(strip: {tokens}, f1={a.f1:.4f}){_RESET}")
+        if len(renames) > 50:
+            print(f"  ... and {len(renames) - 50} more")
 
-    # --- Duplicates ---
-    if report.duplicates:
-        print(f"\n{_BOLD}{_YELLOW}--- DUPLICATE CONFIG GROUPS ---{_RESET}")
-        print(f"  (Experiments with the SAME effective config but different names.)")
-        print(f"  (query_transform was not wired, so hyde==none in practice.)\n")
+    # --- Collisions ---
+    if collisions:
+        print(f"\n{_BOLD}{_YELLOW}--- COLLISION LOSERS (archive to _collisions/) ---{_RESET}")
+        for a in collisions[:30]:
+            check = f"{_GREEN}✓{_RESET}" if a.verified_duplicate else f"{_YELLOW}?{_RESET}"
+            print(f"  {check} {a.old_name}")
+            print(f"    {_DIM}{a.detail}{_RESET}")
+        if len(collisions) > 30:
+            print(f"  ... and {len(collisions) - 30} more")
 
-        for i, (key, exps) in enumerate(sorted(report.duplicates.items()), 1):
-            best = _pick_best(exps)
-            model, dataset, exp_type, retriever, top_k, prompt, qt_eff, rr, agent_type = key
-            print(f"  {_CYAN}Group {i}{_RESET}: "
-                  f"model={model.split(':')[-1].split('/')[-1]}  "
-                  f"retriever={retriever}  k={top_k}  "
-                  f"prompt={prompt}  dataset={dataset}  "
-                  f"agent={agent_type}")
-            for exp in exps:
-                f1 = _get_f1(exp)
-                marker = f"{_GREEN}KEEP{_RESET}" if exp.name == best.name else f"{_RED}TAINT{_RESET}"
-                print(f"    [{marker}] {exp.name}  f1={f1:.4f}  phase={exp.phase or '?'}")
+    # --- Incomplete ---
+    if incomplete_acts:
+        print(f"\n{_BOLD}{_YELLOW}--- INCOMPLETE / FAILED (archive to _incomplete/) ---{_RESET}")
+        for a in incomplete_acts[:20]:
+            print(f"  {_YELLOW}⚠{_RESET} {a.old_name}  {_DIM}({a.detail}){_RESET}")
+        if len(incomplete_acts) > 20:
+            print(f"  ... and {len(incomplete_acts) - 20} more")
 
-    # --- Incomplete / failed ---
-    if include_incomplete and report.incomplete:
-        print(f"\n{_BOLD}{_YELLOW}--- INCOMPLETE / FAILED ---{_RESET}")
-        for exp in report.incomplete:
-            f1 = _get_f1(exp)
-            print(f"  {_YELLOW}⚠{_RESET} {exp.name}  phase={exp.phase}  f1={f1:.4f}")
-
-    # --- Summary of what would be cleaned ---
-    tainted = report.tainted
-    if include_incomplete:
-        tainted = report.tainted_including_incomplete
-
-    print(f"\n{_BOLD}--- CLEANUP SUMMARY ---{_RESET}")
-    print(f"  Experiments to remove:  {_RED}{len(tainted)}{_RESET}")
-    print(f"  Experiments to keep:    {_GREEN}{report.total_experiments - len(tainted)}{_RESET}")
-
-    if tainted:
-        # Categorize tainted experiments
-        fake_rr_names = {e.name for e in report.fake_reranker}
-        fake_qt_names = {e.name for e in report.fake_query_transform}
-        dup_losers = set()
-        for exps in report.duplicates.values():
-            best = _pick_best(exps)
-            for exp in exps:
-                if exp.name != best.name:
-                    dup_losers.add(exp.name)
-
-        # Some experiments may be tainted for multiple reasons
-        only_rr = fake_rr_names - fake_qt_names - dup_losers
-        only_qt = fake_qt_names - fake_rr_names - dup_losers
-        only_dup = dup_losers - fake_rr_names - fake_qt_names
-        multi = tainted - only_rr - only_qt - only_dup
-
-        if only_rr:
-            print(f"    {len(only_rr):3d} fake reranker only")
-        if only_qt:
-            print(f"    {len(only_qt):3d} fake query_transform only")
-        if only_dup:
-            print(f"    {len(only_dup):3d} duplicate (worse) only")
-        if multi:
-            print(f"    {len(multi):3d} multiple issues")
-        if include_incomplete:
-            inc_only = {e.name for e in report.incomplete} - fake_rr_names - fake_qt_names - dup_losers
-            if inc_only:
-                print(f"    {len(inc_only):3d} incomplete only")
-
+    # Summary
+    print(f"\n{_BOLD}--- SUMMARY ---{_RESET}")
+    print(f"  Renames:            {_GREEN}{len(renames)}{_RESET}")
+    print(f"  Archived (collision): {_YELLOW}{len(collisions)}{_RESET}")
+    if incomplete_acts:
+        print(f"  Archived (incomplete): {_YELLOW}{len(incomplete_acts)}{_RESET}")
+    untouched = total - len(renames) - len(collisions) - len(incomplete_acts)
+    print(f"  Untouched:          {untouched}")
     print()
 
 
 # ============================================================================
-# Cleanup actions
+# Execution
 # ============================================================================
 
 
-def execute_clean(
+def execute_actions(
+    actions: list[Action],
     study_path: Path,
-    report: DiagnosticReport,
-    include_incomplete: bool = False,
-    archive: bool = True,
+    reset_optuna: bool = False,
 ) -> None:
-    """Move tainted experiments to archive and remove Optuna DB.
+    """Execute the planned actions."""
+    archive_collision_dir = study_path / "_collisions"
+    archive_incomplete_dir = study_path / "_incomplete"
 
-    Args:
-        study_path: Path to the study output directory.
-        report: DiagnosticReport from scan_study.
-        include_incomplete: Also clean incomplete/failed experiments.
-        archive: If True, move to _tainted/; if False, delete permanently.
-    """
-    tainted = report.tainted
-    if include_incomplete:
-        tainted = report.tainted_including_incomplete
+    renamed = 0
+    archived = 0
 
-    if not tainted:
-        print("Nothing to clean.")
-        return
+    for action in actions:
+        if action.action == "rename":
+            target = study_path / action.new_name
 
-    archive_dir = study_path / "_tainted"
-    if archive:
-        archive_dir.mkdir(exist_ok=True)
+            # If the target already exists, the existing experiment at that path
+            # is the "winner" that was already there. Archive the current one
+            # as a collision if target exists AND is a different directory.
+            if target.exists() and target != action.old_dir:
+                # Target already exists — archive the loser instead
+                archive_collision_dir.mkdir(exist_ok=True)
+                dest = archive_collision_dir / action.old_name
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.move(str(action.old_dir), str(dest))
+                print(f"  collision → _collisions/{action.old_name}")
+                archived += 1
+                continue
 
-    removed = 0
-    for name in sorted(tainted):
-        exp_dir = study_path / name
-        if not exp_dir.exists():
-            continue
+            # Update JSON fields first (while dir still has old name)
+            _update_json_fields(action.old_dir, action.new_name, action.stripped_tokens)
 
-        if archive:
-            dest = archive_dir / name
+            # Rename directory
+            action.old_dir.rename(target)
+            print(f"  renamed: {action.old_name} → {action.new_name}")
+            renamed += 1
+
+        elif action.action == "archive_collision":
+            archive_collision_dir.mkdir(exist_ok=True)
+            dest = archive_collision_dir / action.old_name
             if dest.exists():
                 shutil.rmtree(dest)
-            shutil.move(str(exp_dir), str(dest))
-            print(f"  archived: {name}")
-        else:
-            shutil.rmtree(exp_dir)
-            print(f"  deleted:  {name}")
-        removed += 1
+            shutil.move(str(action.old_dir), str(dest))
+            print(f"  archived (collision): {action.old_name}")
+            archived += 1
 
-    # Remove Optuna study DB so TPE can reinitialize
-    optuna_db = study_path / "optuna_study.db"
-    if optuna_db.exists():
-        optuna_db.unlink()
-        print(f"\n  Removed optuna_study.db (TPE will reinitialize on next run)")
+        elif action.action == "archive_incomplete":
+            archive_incomplete_dir.mkdir(exist_ok=True)
+            dest = archive_incomplete_dir / action.old_name
+            if dest.exists():
+                shutil.rmtree(dest)
+            if action.old_dir.exists():
+                shutil.move(str(action.old_dir), str(dest))
+                print(f"  archived (incomplete): {action.old_name}")
+                archived += 1
 
-    # Remove study_summary.json (will be regenerated)
-    summary = study_path / "study_summary.json"
-    if summary.exists():
-        summary.unlink()
-        print(f"  Removed study_summary.json (will be regenerated)")
+    # Reset Optuna + study summaries
+    if reset_optuna:
+        for fname in ["optuna_study.db", "study_summary.json", "comparison.json"]:
+            fpath = study_path / fname
+            if fpath.exists():
+                fpath.unlink()
+                print(f"  removed: {fname}")
 
-    comparison = study_path / "comparison.json"
-    if comparison.exists():
-        comparison.unlink()
-        print(f"  Removed comparison.json (will be regenerated)")
-
-    print(f"\n  Done: {removed} experiments {'archived' if archive else 'deleted'}.")
-    remaining = report.total_experiments - removed
-    print(f"  Remaining: {remaining} clean experiments on disk.")
-    print(f"  Optuna will re-seed from these on next study run.\n")
+    # Final summary
+    remaining = sum(1 for d in study_path.iterdir()
+                    if d.is_dir() and d.name not in SKIP_DIRS
+                    and not d.name.startswith((".", "_")))
+    print(f"\n  Done: {renamed} renamed, {archived} archived.")
+    print(f"  Clean experiments remaining: {remaining}")
+    if reset_optuna:
+        print(f"  Optuna DB removed — TPE will re-seed from clean experiments on next run.")
+    print()
 
 
 # ============================================================================
@@ -542,29 +532,24 @@ def execute_clean(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Diagnose and clean incorrectly-run experiments.",
+        description="Diagnose and fix incorrectly-named experiments.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
     )
     parser.add_argument(
         "--study", required=True, type=Path,
-        help="Path to study output directory (e.g. outputs/smart_retrieval_slm)",
+        help="Path to study output directory",
     )
     parser.add_argument(
-        "--clean", action="store_true",
-        help="Archive tainted experiments to _tainted/ and remove Optuna DB",
-    )
-    parser.add_argument(
-        "--nuke", action="store_true",
-        help="Delete tainted experiments permanently (no archive)",
+        "--execute", action="store_true",
+        help="Apply renames and archive collisions (default: dry-run)",
     )
     parser.add_argument(
         "--include-incomplete", action="store_true",
-        help="Also clean incomplete/failed experiments",
+        help="Also archive incomplete/failed experiments",
     )
     parser.add_argument(
-        "--json", action="store_true",
-        help="Output report as JSON (for piping to other tools)",
+        "--reset-optuna", action="store_true",
+        help="Remove optuna_study.db and study summaries",
     )
     args = parser.parse_args()
 
@@ -573,53 +558,33 @@ def main():
         print(f"Error: {study_path} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    report = scan_study(study_path, include_incomplete=args.include_incomplete)
+    actions = plan_actions(study_path, include_incomplete=args.include_incomplete)
+    print_report(actions, study_path)
 
-    if args.json:
-        tainted = report.tainted
-        if args.include_incomplete:
-            tainted = report.tainted_including_incomplete
-        output = {
-            "total": report.total_experiments,
-            "clean": report.clean_experiments,
-            "fake_reranker": [e.name for e in report.fake_reranker],
-            "fake_query_transform": [e.name for e in report.fake_query_transform],
-            "duplicate_groups": {
-                str(k): [e.name for e in v]
-                for k, v in report.duplicates.items()
-            },
-            "incomplete": [e.name for e in report.incomplete],
-            "impoverished": [e.name for e in report.impoverished],
-            "tainted": sorted(tainted),
-            "to_keep": sorted(
-                set(e.name for e in [])  # placeholder
-                | {e.name for e in []}
-            ),
-        }
-        json.dump(output, sys.stdout, indent=2)
-        print()
+    if not actions:
+        print("Nothing to do.")
+        return
+
+    if args.execute:
+        renames = sum(1 for a in actions if a.action == "rename")
+        collisions = sum(1 for a in actions if a.action == "archive_collision")
+        inc = sum(1 for a in actions if a.action == "archive_incomplete")
+
+        prompt_parts = []
+        if renames:
+            prompt_parts.append(f"{renames} renames")
+        if collisions:
+            prompt_parts.append(f"{collisions} collision archives")
+        if inc:
+            prompt_parts.append(f"{inc} incomplete archives")
+
+        confirm = input(f"Execute {', '.join(prompt_parts)}? [y/N] ")
+        if confirm.lower() == "y":
+            execute_actions(actions, study_path, reset_optuna=args.reset_optuna)
+        else:
+            print("Aborted.")
     else:
-        print_report(report, include_incomplete=args.include_incomplete)
-
-    if args.clean:
-        confirm = input(f"Archive {len(report.tainted)} experiments and remove Optuna DB? [y/N] ")
-        if confirm.lower() == "y":
-            execute_clean(study_path, report, args.include_incomplete, archive=True)
-        else:
-            print("Aborted.")
-
-    elif args.nuke:
-        tainted = report.tainted
-        if args.include_incomplete:
-            tainted = report.tainted_including_incomplete
-        confirm = input(
-            f"{_RED}PERMANENTLY DELETE {len(tainted)} experiments?{_RESET} "
-            f"This cannot be undone. [y/N] "
-        )
-        if confirm.lower() == "y":
-            execute_clean(study_path, report, args.include_incomplete, archive=False)
-        else:
-            print("Aborted.")
+        print(f"{_DIM}Dry run. Use --execute to apply changes.{_RESET}\n")
 
 
 if __name__ == "__main__":
