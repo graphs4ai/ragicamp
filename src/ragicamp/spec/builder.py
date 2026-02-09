@@ -63,6 +63,21 @@ def build_specs(
     """
     specs: list[ExperimentSpec] = []
 
+    # Warn about YAML keys that are not used by the spec builder
+    _KNOWN_KEYS = {
+        "name", "datasets", "batch_size", "metrics", "direct", "rag",
+        "experiments", "models", "description", "version",
+    }
+    unknown_keys = set(config.keys()) - _KNOWN_KEYS
+    if unknown_keys:
+        import warnings
+        warnings.warn(
+            f"Unrecognized top-level config keys: {unknown_keys}. "
+            f"These have no effect. Known keys: {sorted(_KNOWN_KEYS)}",
+            UserWarning,
+            stacklevel=2,
+        )
+
     # Global settings
     datasets = config.get("datasets", ["nq"])
     batch_size = config.get("batch_size", 8)
@@ -271,6 +286,9 @@ def _build_rag_specs(
     for ret_config in retrievers:
         if isinstance(ret_config, dict):
             retriever_configs[ret_config["name"]] = ret_config
+        elif isinstance(ret_config, str):
+            # String-format retriever: use name directly (no extra config)
+            retriever_configs[ret_config] = {"name": ret_config}
 
     # Get retriever names for grid search
     # Priority: retriever_names > extracting names from retrievers list
@@ -295,10 +313,15 @@ def _build_rag_specs(
     # Reranker configs - support both old and new format
     reranker_config = rag_config.get("reranker", {})
     if isinstance(reranker_config, dict):
-        reranker_cfgs = reranker_config.get("configs", [{"enabled": False, "name": "none"}])
-        # Also support simple enabled/model format (legacy)
-        if not reranker_cfgs and reranker_config.get("enabled"):
+        if "configs" in reranker_config:
+            # New format: explicit list of reranker configs
+            reranker_cfgs = reranker_config["configs"]
+        elif reranker_config.get("enabled"):
+            # Legacy format: simple {enabled: true, model: bge}
             reranker_cfgs = [{"enabled": True, "name": reranker_config.get("model", "bge")}]
+        else:
+            # No reranker configured
+            reranker_cfgs = [{"enabled": False, "name": "none"}]
     else:
         reranker_cfgs = [{"enabled": False, "name": "none"}]
 

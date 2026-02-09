@@ -201,9 +201,21 @@ class AgentFactory:
             if index is None:
                 raise ValueError(f"RAG agent '{agent_type}' requires an index")
 
+            # Warn if query_transform is set — not yet implemented
+            qt = spec.query_transform
+            if qt and qt != "none":
+                import warnings
+                warnings.warn(
+                    f"query_transform='{qt}' is set on spec '{spec.name}' but "
+                    f"query transformation is not yet wired into the agent pipeline. "
+                    f"Retrieval will use the raw query. Results will be identical to "
+                    f"query_transform=none.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
             # Enable retrieval cache when query_transform is none
             # (retrieval results are independent of LLM model/prompt)
-            qt = spec.query_transform
             if not qt or qt == "none":
                 kwargs.update(cls._get_retrieval_cache_kwargs(spec))
 

@@ -49,6 +49,7 @@ def run_metrics_only(
     output_path: Path,
     metrics: list[str],
     judge_model: Any = None,
+    spec: Optional["ExperimentSpec"] = None,
 ) -> str:
     """Run metrics computation only - no model needed.
 
@@ -60,6 +61,7 @@ def run_metrics_only(
         output_path: Path to experiment output directory
         metrics: List of metric names to compute
         judge_model: Optional LLM judge model for llm_judge metric
+        spec: Optional ExperimentSpec for enriching results metadata
 
     Returns:
         Status string
@@ -132,15 +134,16 @@ def run_metrics_only(
     state.phase = ExperimentPhase.COMPLETE
     state.save(io.state_path)
 
-    # Save results using ExperimentIO
-    io.save_result_dict(
-        {
-            "name": exp_name,
-            "metrics": existing_metrics,
-            "num_predictions": len(preds),
-            "timestamp": datetime.now().isoformat(),
-        }
-    )
+    # Save results using ExperimentIO — include spec metadata when available
+    result_data = {
+        "name": exp_name,
+        "metrics": existing_metrics,
+        "num_predictions": len(preds),
+        "timestamp": datetime.now().isoformat(),
+    }
+    if spec is not None:
+        result_data["metadata"] = spec.to_dict()
+    io.save_result_dict(result_data)
 
     # Print metric summary
     from ragicamp.utils.formatting import format_metrics_summary
@@ -200,26 +203,16 @@ def run_generation(
         resume=True,
     )
 
-    # Save metadata using ExperimentIO
+    # Save metadata using spec.to_dict() as base to avoid field drift,
+    # then layer on runtime-specific fields
     io = ExperimentIO(exp_out)
-    io.save_metadata(
-        {
-            "name": spec.name,
-            "type": spec.exp_type,
-            "model": spec.model,
-            "prompt": spec.prompt,
-            "dataset": spec.dataset,
-            "retriever": spec.retriever,
-            "top_k": spec.top_k,
-            "fetch_k": spec.fetch_k,
-            "query_transform": spec.query_transform,
-            "reranker": spec.reranker,
-            "reranker_model": spec.reranker_model,
-            "agent_type": spec.agent_type,
-            "metrics": result.metrics,
-            "duration": time.time() - start,
-        }
-    )
+    metadata = spec.to_dict()
+    metadata.update({
+        "type": spec.exp_type,  # Keep "type" key (vs "exp_type" in spec)
+        "metrics": result.metrics,
+        "duration": time.time() - start,
+    })
+    io.save_metadata(metadata)
 
     # Check if there were aborted predictions (model failures)
     predictions_path = exp_out / "predictions.json"
@@ -310,23 +303,15 @@ def run_spec_subprocess(
         / "run_single_experiment.py"
     )
 
-    spec_dict = {
-        "name": spec.name,
-        "exp_type": spec.exp_type,
-        "model": spec.model,
-        "dataset": spec.dataset,
-        "prompt": spec.prompt,
-        "retriever": spec.retriever,
-        "top_k": spec.top_k,
-        "fetch_k": spec.fetch_k,
-        "query_transform": spec.query_transform,
-        "reranker": spec.reranker,
-        "reranker_model": spec.reranker_model,
-        "batch_size": spec.batch_size,
-        "metrics": list(spec.metrics) if spec.metrics else metrics,
-        "agent_type": spec.agent_type,
-        "agent_params": dict(spec.agent_params) if spec.agent_params else {},
-    }
+    # Use spec.to_dict() as the single source of truth to avoid field drift
+    spec_dict = spec.to_dict()
+    # Override metrics with the merged list (spec metrics + CLI metrics)
+    if not spec_dict.get("metrics"):
+        spec_dict["metrics"] = metrics
+
+    # Use the spec's own metrics (already merged above) as the single
+    # source of truth to avoid divergence between spec and CLI arg.
+    merged_metrics = spec_dict.get("metrics", metrics)
 
     cmd = [
         sys.executable,
@@ -336,7 +321,7 @@ def run_spec_subprocess(
         "--output-dir",
         str(out),
         "--metrics",
-        ",".join(metrics),
+        ",".join(merged_metrics),
     ]
     if limit:
         cmd.extend(["--limit", str(limit)])
@@ -439,6 +424,7 @@ def run_spec(
                 output_path=exp_out,
                 metrics=metrics,
                 judge_model=judge_model,
+                spec=spec,
             )
         else:
             # Full path - load model, run generation + metrics
@@ -456,12 +442,19 @@ def run_spec(
 
     except Exception as e:
         print(f"\n❌ Error: {e}")
-        # Save error info
+        # Save error info with full spec for debugging
         with open(exp_out / "error.log", "w") as f:
             import traceback
 
             f.write(f"Error: {e}\n\n")
             f.write(f"Experiment: {spec.name}\n")
-            f.write(f"Model: {spec.model}\n\n")
-            f.write(f"Traceback:\n{traceback.format_exc()}")
+            f.write(f"Model: {spec.model}\n")
+            f.write(f"Dataset: {spec.dataset}\n")
+            f.write(f"Type: {spec.exp_type}\n")
+            if spec.retriever:
+                f.write(f"Retriever: {spec.retriever}\n")
+                f.write(f"Top-K: {spec.top_k}\n")
+            if spec.agent_type:
+                f.write(f"Agent type: {spec.agent_type}\n")
+            f.write(f"\nTraceback:\n{traceback.format_exc()}")
         return "failed"

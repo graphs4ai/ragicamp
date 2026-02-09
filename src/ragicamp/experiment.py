@@ -366,6 +366,18 @@ class Experiment:
         metrics = data.get("aggregate_metrics", {})
         duration = time.time() - self._start_time
 
+        # Build metadata from spec (authoritative) + runtime info
+        result_metadata = {
+            "agent": self.agent.name,
+            "dataset": self.dataset.name,
+            "batch_size": self._batch_size,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if self._spec is not None:
+            spec_data = self._spec.to_dict()
+            # Spec fields as base, runtime fields override
+            result_metadata = {**spec_data, **result_metadata}
+
         result = ExperimentResult(
             name=self.name,
             metrics=metrics,
@@ -373,12 +385,7 @@ class Experiment:
             duration_seconds=duration,
             output_path=self.output_path,
             predictions_path=self.predictions_path,
-            metadata={
-                "agent": self.agent.name,
-                "dataset": self.dataset.name,
-                "batch_size": self._batch_size,
-                "timestamp": datetime.now().isoformat(),
-            },
+            metadata=result_metadata,
         )
 
         with open(self.results_path, "w") as f:
@@ -430,6 +437,16 @@ class Experiment:
         metrics = data.get("aggregate_metrics", {})
         duration = time.time() - self._start_time
 
+        # Build metadata from spec when available
+        result_metadata = {}
+        if self._spec is not None:
+            result_metadata = self._spec.to_dict()
+        result_metadata.update({
+            "agent": self.agent.name,
+            "dataset": self.dataset.name,
+            "batch_size": self._batch_size,
+        })
+
         result_data = {
             "name": self.name,
             "metrics": metrics,
@@ -441,6 +458,7 @@ class Experiment:
             "metrics_missing": list(
                 set(self._state.metrics_requested) - set(self._state.metrics_computed)
             ),
+            "metadata": result_metadata,
         }
 
         with open(self.results_path, "w") as f:
@@ -467,11 +485,16 @@ class Experiment:
         index_name: str,
         index_path: Path,
         retriever_config: dict | None = None,
+        sparse_index_override: Optional[str] = None,
     ) -> "Callable[[], Any]":
         """Return a zero-arg callable that loads the search backend from disk.
 
         Used by :meth:`from_spec` to defer expensive index loading via
         :class:`~ragicamp.retrievers.lazy.LazySearchBackend`.
+
+        Args:
+            sparse_index_override: If provided, use this sparse index name
+                instead of the one in retriever_config.
         """
 
         def _load():
@@ -494,7 +517,8 @@ class Experiment:
                 vector_index = VectorIndex.load(index_path)
 
                 cfg = retriever_config or {}
-                sparse_name = cfg.get("sparse_index", f"{index_name}_sparse_bm25")
+                # Prefer explicit override (from spec) over on-disk config
+                sparse_name = sparse_index_override or cfg.get("sparse_index", f"{index_name}_sparse_bm25")
                 alpha = cfg.get("alpha", 0.5)
 
                 mgr = get_artifact_manager()
@@ -586,7 +610,9 @@ class Experiment:
                 # When retrieval cache gives 100% hits the index is never
                 # touched, saving ~3 min of pickle/FAISS deserialization.
                 retriever_type = retriever_config.get("type", "dense")
-                index_name = retriever_config.get("embedding_index", spec.retriever)
+                # Prefer spec values (set at spec-build time from YAML) over
+                # on-disk config to avoid silent divergence.
+                index_name = spec.embedding_index or retriever_config.get("embedding_index", spec.retriever)
                 index_path = manager.get_embedding_index_path(index_name)
 
                 from ragicamp.retrievers.lazy import LazySearchBackend
@@ -595,6 +621,7 @@ class Experiment:
                     loader=cls._build_index_loader(
                         retriever_type, index_name, index_path,
                         retriever_config=retriever_config,
+                        sparse_index_override=spec.sparse_index,
                     ),
                     is_hybrid=(retriever_type == "hybrid"),
                 )
@@ -610,10 +637,12 @@ class Experiment:
         # Create reranker provider if configured
         reranker_provider = None
         if spec.exp_type == "rag" and spec.reranker and spec.reranker != "none":
-            reranker_provider = ProviderFactory.create_reranker(spec.reranker)
+            # Use reranker_model (full HF path) if provided, else fall back to short name
+            reranker_spec = spec.reranker_model or spec.reranker
+            reranker_provider = ProviderFactory.create_reranker(reranker_spec)
             logger.info(
                 "Reranker enabled: %s (fetch_k=%s, top_k=%d)",
-                spec.reranker, spec.fetch_k, spec.top_k,
+                reranker_spec, spec.fetch_k, spec.top_k,
             )
 
         # Create agent
@@ -649,6 +678,7 @@ class Experiment:
             metrics=metrics,
             output_dir=Path(output_dir),
             _spec=spec,
+            _batch_size=spec.batch_size,
         )
 
     @classmethod
