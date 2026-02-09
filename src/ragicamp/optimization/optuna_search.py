@@ -802,7 +802,24 @@ def run_optuna_study(
             logger.info("  -> pruned: %s", reason)
             raise optuna.TrialPruned(reason)
 
-        # Run the experiment (handles already-complete via health check)
+        # --- Duplicate check: prune if experiment already exists on disk ---
+        # When a config was already seeded (or ran earlier in this session),
+        # run_spec returns "complete" instantly.  Recording it as a new
+        # COMPLETE trial inflates completed_trials and wastes trial slots
+        # on subsequent resumes.  Prune instead — TPE already has the
+        # metric from the seeded trial.
+        exp_out = output_dir / spec.name
+        if exp_out.exists():
+            existing_metric = _get_experiment_metric(
+                spec.name, output_dir, optimize_metric,
+            )
+            if existing_metric is not None:
+                logger.info("  -> already complete on disk (f1=%.4f), pruning duplicate", existing_metric)
+                raise optuna.TrialPruned(
+                    f"experiment already complete: {spec.name}"
+                )
+
+        # Run the experiment
         status = run_spec(
             spec=spec,
             limit=limit,
