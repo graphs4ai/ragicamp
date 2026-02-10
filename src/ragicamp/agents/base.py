@@ -303,7 +303,7 @@ def batch_transform_embed_and_search(
         candidates: list[tuple[float, Any]] = []  # (score, SearchResult)
         for i in range(start, end):
             for sr in flat_retrievals[i]:
-                content_key = sr.document.text[:200] if sr.document and sr.document.text else ""
+                content_key = hash(sr.document.text) if sr.document and sr.document.text else ""
                 if content_key not in seen_contents:
                     seen_contents.add(content_key)
                     candidates.append((sr.score if sr.score is not None else 0.0, sr))
@@ -564,10 +564,23 @@ class Agent(ABC):
         
         results = []
         for r in data.get("results", []):
-            query = Query(idx=r["idx"], text=r["query"], expected=r.get("expected"))
+            # to_dict() writes "question"; accept both for robustness
+            text = r.get("question") or r.get("query", "")
+            query = Query(idx=r["idx"], text=text, expected=r.get("expected"))
+            # Restore steps from checkpoint
+            steps = [
+                Step(
+                    type=s["type"],
+                    timing_ms=s.get("timing_ms", 0.0),
+                    model=s.get("model"),
+                    metadata=s.get("metadata", {}),
+                )
+                for s in r.get("steps", [])
+            ]
             result = AgentResult(
                 query=query,
                 answer=r["answer"],
+                steps=steps,
                 prompt=r.get("prompt"),
                 metadata=r.get("metadata", {}),
             )

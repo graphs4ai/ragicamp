@@ -71,9 +71,9 @@ class BLEURTMetric(Metric):
         self._scorer = None
         self._tokenizer = None
 
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
         logger.info("BLEURT model unloaded")
 
     def compute(
@@ -128,6 +128,7 @@ class BLEURTMetric(Metric):
 
                     # Store per-item scores
                     self._last_scores = all_scores
+                    self._last_per_item = all_scores  # B5 fix: base class compat
 
                     return {
                         "bleurt": float(sum(all_scores) / len(all_scores)) if all_scores else 0.0

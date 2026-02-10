@@ -19,7 +19,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, IO, Optional
+from typing import IO, Any, Optional
 
 from ragicamp.core.logging import get_logger
 from ragicamp.spec import ExperimentSpec
@@ -54,9 +54,9 @@ def run_metrics_only(
     Returns:
         Status string
     """
-    from ragicamp.state import ExperimentPhase, detect_state
     from ragicamp.factory import MetricFactory
     from ragicamp.metrics import compute_metrics_batched
+    from ragicamp.state import ExperimentPhase, detect_state
     from ragicamp.utils.experiment_io import ExperimentIO
 
     logger.info("Metrics-only mode (no model loaded)")
@@ -126,7 +126,7 @@ def run_metrics_only(
     result_data = {
         "name": exp_name,
         "metrics": existing_metrics,
-        "num_predictions": len(preds),
+        "num_examples": len(preds),
         "timestamp": datetime.now().isoformat(),
     }
     if spec is not None:
@@ -143,7 +143,7 @@ def run_metrics_only(
 
 def run_generation(
     spec: ExperimentSpec,
-    limit: Optional[int],
+    limit: int | None,
     metrics: list[str],
     out: Path,
     judge_model: Any = None,
@@ -211,11 +211,25 @@ def run_generation(
         aborted = sum(1 for p in predictions if "[ABORTED" in str(p.get("prediction", "")))
         errored = sum(1 for p in predictions if p.get("error"))
 
-        if aborted > 0:
-            logger.warning("%d predictions were aborted due to model failures", aborted)
-            return "failed"
-        if errored > len(predictions) * 0.5:  # >50% errors
-            logger.warning("%d/%d predictions had errors", errored, len(predictions))
+        if aborted > 0 or errored > len(predictions) * 0.5:
+            # B3 fix: update state to FAILED so re-run doesn't skip this experiment
+            from ragicamp.state import ExperimentState
+
+            state_path = exp_out / "state.json"
+            if state_path.exists():
+                st = ExperimentState.load(state_path)
+                reason = (
+                    f"{aborted} aborted predictions"
+                    if aborted > 0
+                    else f"{errored}/{len(predictions)} errors"
+                )
+                st.set_error(reason)
+                st.save(state_path)
+
+            if aborted > 0:
+                logger.warning("%d predictions were aborted due to model failures", aborted)
+            else:
+                logger.warning("%d/%d predictions had errors", errored, len(predictions))
             return "failed"
 
     return "ran"
@@ -228,10 +242,10 @@ def run_generation(
 
 def run_spec_subprocess(
     spec: ExperimentSpec,
-    limit: Optional[int],
+    limit: int | None,
     metrics: list[str],
     out: Path,
-    llm_judge_config: Optional[dict[str, Any]] = None,
+    llm_judge_config: dict[str, Any] | None = None,
     timeout: int = 7200,
 ) -> str:
     """Run experiment in subprocess for CUDA crash isolation.
@@ -355,11 +369,11 @@ def run_spec_subprocess(
 
 def run_spec(
     spec: ExperimentSpec,
-    limit: Optional[int],
+    limit: int | None,
     metrics: list[str],
     out: Path,
     judge_model: Any = None,
-    llm_judge_config: Optional[dict[str, Any]] = None,
+    llm_judge_config: dict[str, Any] | None = None,
     force: bool = False,
     use_subprocess: bool = True,
     timeout: int = 7200,

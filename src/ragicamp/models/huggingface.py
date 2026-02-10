@@ -103,9 +103,9 @@ class HuggingFaceModel(LanguageModel):
             self.tokenizer = None
 
         # Force GPU memory cleanup
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
 
         self._is_loaded = False
         logger.info("Model %s unloaded from GPU", self.model_name)

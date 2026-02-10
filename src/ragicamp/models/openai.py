@@ -15,7 +15,6 @@ Example:
 """
 
 import asyncio
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Union
 
@@ -23,9 +22,10 @@ import openai
 import tiktoken
 from openai import AsyncOpenAI
 
+from ragicamp.core.logging import get_logger
 from ragicamp.models.base import LanguageModel
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OpenAIModel(LanguageModel):
@@ -113,7 +113,7 @@ class OpenAIModel(LanguageModel):
             api_params["stop"] = stop
 
         response = openai.chat.completions.create(**api_params)
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     def generate(
         self,
@@ -168,8 +168,8 @@ class OpenAIModel(LanguageModel):
                     try:
                         results[idx] = future.result()
                     except Exception as e:
-                        logger.warning("OpenAI API error for prompt %d: %s", idx, e)
-                        results[idx] = ""
+                        logger.error("OpenAI API error for prompt %d: %s", idx, e)
+                        results[idx] = f"[ERROR: {type(e).__name__}: {str(e)[:100]}]"
 
             return results
         else:
@@ -240,7 +240,7 @@ class OpenAIModel(LanguageModel):
             api_params["stop"] = stop
 
         response = await self.async_client.chat.completions.create(**api_params)
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     async def agenerate(
         self,
@@ -285,8 +285,8 @@ class OpenAIModel(LanguageModel):
                     )
                     return (idx, result)
                 except Exception as e:
-                    logger.warning("OpenAI async API error for prompt %d: %s", idx, e)
-                    return (idx, "")
+                    logger.error("OpenAI async API error for prompt %d: %s", idx, e)
+                    return (idx, f"[ERROR: {type(e).__name__}: {str(e)[:100]}]")
 
         # Create tasks for all prompts
         tasks = [rate_limited_generate(i, p) for i, p in enumerate(prompts)]

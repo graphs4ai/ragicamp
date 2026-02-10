@@ -55,9 +55,9 @@ class ResourceManager:
     @staticmethod
     def clear_gpu_memory():
         """Clear GPU memory cache."""
+        gc.collect()  # Release Python refs to GPU tensors first
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            gc.collect()
 
     @staticmethod
     def clear_faiss_gpu_resources():

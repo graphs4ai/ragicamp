@@ -65,9 +65,9 @@ class BERTScoreMetric(Metric):
         self._scorer = None
 
         # Force GPU memory cleanup
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
         logger.info("BERTScore model unloaded")
 
     def compute(
@@ -119,8 +119,10 @@ class BERTScoreMetric(Metric):
 
                     # Store per-item scores for detailed analysis
                     self._last_scores = F1.tolist()
+                    self._last_per_item = self._last_scores  # B5 fix: base class compat
 
                     return {
+                        "bertscore": F1.mean().item(),  # B6 fix: primary key matches metric.name
                         "bertscore_precision": P.mean().item(),
                         "bertscore_recall": R.mean().item(),
                         "bertscore_f1": F1.mean().item(),

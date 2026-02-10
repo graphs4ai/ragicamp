@@ -13,7 +13,7 @@ Supports two methods:
 import pickle
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from tqdm import tqdm
@@ -157,7 +157,11 @@ class SparseIndex:
         similarities = cosine_similarity(query_vec, self._doc_vectors)[0]
 
         top_indices = np.argsort(similarities)[-top_k:][::-1]
-        return [(int(idx), float(similarities[idx])) for idx in top_indices]
+        return [
+            (int(idx), float(similarities[idx]))
+            for idx in top_indices
+            if similarities[idx] > 0.0
+        ]
 
     def _search_bm25(self, query: str, top_k: int) -> list[tuple[int, float]]:
         """Search using BM25."""
@@ -168,7 +172,11 @@ class SparseIndex:
         scores = self._bm25.get_scores(tokenized_query)
 
         top_indices = np.argsort(scores)[-top_k:][::-1]
-        return [(int(idx), float(scores[idx])) for idx in top_indices]
+        return [
+            (int(idx), float(scores[idx]))
+            for idx in top_indices
+            if scores[idx] > 0.0
+        ]
 
     def batch_search(self, queries: list[str], top_k: int = 10) -> list[list[tuple[int, float]]]:
         """Batch search for multiple queries.
@@ -199,17 +207,21 @@ class SparseIndex:
         results = []
         for similarities in all_similarities:
             top_indices = np.argsort(similarities)[-top_k:][::-1]
-            results.append([(int(idx), float(similarities[idx])) for idx in top_indices])
+            results.append([
+                (int(idx), float(similarities[idx]))
+                for idx in top_indices
+                if similarities[idx] > 0.0
+            ])
 
         return results
 
-    def get_document(self, idx: int) -> Optional[Document]:
+    def get_document(self, idx: int) -> Document | None:
         """Get document by index."""
         if 0 <= idx < len(self.documents):
             return self.documents[idx]
         return None
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         """Save sparse index to disk.
 
         Args:
@@ -260,8 +272,8 @@ class SparseIndex:
     def load(
         cls,
         name: str,
-        path: Optional[Path] = None,
-        documents: Optional[list[Document]] = None,
+        path: Path | None = None,
+        documents: list[Document] | None = None,
     ) -> "SparseIndex":
         """Load sparse index from disk.
 

@@ -59,6 +59,8 @@ def _add_run_parser(subparsers) -> None:
     p.add_argument("--sample-mode", choices=["random", "tpe"], default="random", help="Sampling mode")
     p.add_argument("--sample-seed", type=int, default=None, help="Random seed for sampling")
     p.add_argument("--optimize-metric", type=str, default="f1", help="Metric to optimize (default: f1)")
+    p.add_argument("--limit", type=int, default=None, help="Max examples per experiment")
+    p.add_argument("--force", action="store_true", help="Force re-run even if complete/failed")
     p.set_defaults(func=cmd_run)
 
 

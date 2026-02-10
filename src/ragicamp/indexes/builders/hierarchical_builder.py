@@ -203,7 +203,7 @@ def build_hierarchical_index(
         mapping_file = open(mapping_path, "wb")
 
     doc_batch = []
-    batch_num = 0
+    batch_num = start_batch
     docs_to_skip = start_batch * doc_batch_size
 
     # ==========================================================================
@@ -228,12 +228,6 @@ def build_hierarchical_index(
 
             if len(doc_batch) >= doc_batch_size:
                 batch_num += 1
-
-                # Skip if already processed (resume case)
-                if batch_num <= start_batch:
-                    doc_batch = []
-                    continue
-
                 batch_size = len(doc_batch)
                 logger.info("\n  [Batch %s] Processing %s documents...", batch_num, batch_size)
 

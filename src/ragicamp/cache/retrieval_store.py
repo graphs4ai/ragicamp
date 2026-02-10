@@ -68,8 +68,6 @@ class RetrievalStore:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
-        # In-memory read-through cache: {(retriever, query_hash, top_k): list[dict]}
-        self._mem: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
         self._ensure_table()
 
     @classmethod

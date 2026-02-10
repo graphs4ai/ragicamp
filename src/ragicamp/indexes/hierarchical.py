@@ -103,7 +103,7 @@ class HierarchicalIndex:
         from ragicamp.models.vllm_embedder import VLLMEmbedder
 
         # For inference (query encoding), use lower GPU fraction to leave room for generator
-        gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION
+        gpu_fraction = Defaults.VLLM_EMBEDDER_GPU_MEMORY_FRACTION_SHARED
 
         logger.info(
             "Loading vLLM embedding model: %s (gpu_fraction=%.0f%% for inference)",

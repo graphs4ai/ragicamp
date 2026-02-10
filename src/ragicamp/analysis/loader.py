@@ -324,7 +324,7 @@ class ResultsLoader:
                     with open(state_file) as f:
                         state = json.load(f)
                     phase = state.get("phase", "")
-                    if phase in ("failed", "generating", "init", "computing_metrics"):
+                    if phase in ("failed", "generating", "init"):
                         continue
                 except (json.JSONDecodeError, OSError):
                     pass

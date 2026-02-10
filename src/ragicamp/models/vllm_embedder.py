@@ -248,6 +248,7 @@ class VLLMEmbedder:
         # Optionally normalize (in-place for speed)
         if normalize_embeddings:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-12)  # C5 fix: avoid division by zero
             np.divide(embeddings, norms, out=embeddings)
 
         return embeddings

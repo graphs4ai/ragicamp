@@ -87,11 +87,9 @@ class QADataset(ABC):
         """
         import random
 
-        if seed is not None:
-            random.seed(seed)
-
+        rng = random.Random(seed)
         n = min(n, len(self.examples))
-        return random.sample(self.examples, n)
+        return rng.sample(self.examples, n)
 
     def filter_with_answers(self) -> None:
         """Filter dataset to only include examples with explicit answers.

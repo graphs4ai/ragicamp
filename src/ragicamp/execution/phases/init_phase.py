@@ -1,7 +1,8 @@
 """Init phase handler - exports questions and metadata."""
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
@@ -11,6 +12,14 @@ if TYPE_CHECKING:
     from ragicamp.spec import ExperimentSpec
 
 logger = get_logger(__name__)
+
+
+def _atomic_write(path: Path, data: Any) -> None:
+    """Write JSON atomically via temp-then-rename."""
+    temp = path.with_suffix(".tmp")
+    with open(temp, "w") as f:
+        json.dump(data, f, indent=2)
+    temp.replace(path)
 
 
 class InitHandler(PhaseHandler):
@@ -52,8 +61,7 @@ class InitHandler(PhaseHandler):
                 for i, ex in enumerate(examples)
             ],
         }
-        with open(questions_path, "w") as f:
-            json.dump(questions_data, f, indent=2)
+        _atomic_write(questions_path, questions_data)
 
         # Save metadata — include all spec fields so that metadata.json is
         # useful even if the experiment fails before the runner can overwrite it.
@@ -76,8 +84,7 @@ class InitHandler(PhaseHandler):
             "metrics": [m.name for m in context.metrics] if context.metrics else [],
             "started_at": state.started_at,
         }
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+        _atomic_write(metadata_path, metadata)
 
         # Update state
         state.total_questions = len(examples)

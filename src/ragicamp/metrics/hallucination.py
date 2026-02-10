@@ -4,9 +4,7 @@ Detects when the model generates content not supported by retrieved documents.
 Complementary to faithfulness - focuses on identifying problematic outputs.
 """
 
-from typing import Any, Optional
-
-import numpy as np
+from typing import Any
 
 from ragicamp.metrics.base import Metric
 
@@ -19,23 +17,9 @@ class HallucinationMetric(Metric):
     2. Contradicted by the context
     3. Invented from parametric knowledge
 
-    This is essentially the inverse of faithfulness, but provides
-    additional features like contradiction detection and claim-level analysis.
-
     Methods:
     - "nli": NLI-based detection (checks for contradiction)
-    - "claim_analysis": Break answer into claims, check each
     - "simple": Token-based heuristic (fast baseline)
-
-    Example:
-        >>> from ragicamp.metrics.hallucination import HallucinationMetric
-        >>> metric = HallucinationMetric(method="nli")
-        >>> score = metric.compute(
-        ...     prediction="Paris has 10 million people",
-        ...     reference="Paris",
-        ...     context=["Paris is the capital of France."]
-        ... )
-        >>> print(f"Hallucination rate: {score:.2f}")
     """
 
     def __init__(
@@ -45,14 +29,6 @@ class HallucinationMetric(Metric):
         threshold: float = 0.5,
         **kwargs: Any,
     ):
-        """Initialize hallucination detection metric.
-
-        Args:
-            method: Detection method ("nli", "claim_analysis", or "simple")
-            nli_model: NLI model for contradiction detection
-            threshold: Confidence threshold for contradiction (0-1)
-            **kwargs: Additional arguments passed to base Metric
-        """
         super().__init__(name="hallucination", **kwargs)
         self.method = method
         self.nli_model_name = nli_model
@@ -78,65 +54,59 @@ class HallucinationMetric(Metric):
         return self._nli_pipeline
 
     def _has_cuda(self) -> bool:
-        """Check if CUDA is available."""
         try:
             import torch
-
             return torch.cuda.is_available()
         except ImportError:
             return False
 
     def compute(
-        self, prediction: str, reference: str, context: Optional[list[str]] = None, **kwargs: Any
-    ) -> float:
-        """Compute hallucination score.
+        self,
+        predictions: list[str],
+        references: list[str],
+        contexts: list[list[str]] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """Compute hallucination scores for a batch.
 
         Args:
-            prediction: Generated answer
-            reference: Ground truth answer (not used directly)
-            context: Retrieved documents/passages
-            **kwargs: Additional arguments
+            predictions: List of predicted answers
+            references: List of reference answers (unused)
+            contexts: List of context doc lists, one per prediction.
+                      If None, all scores are 1.0 (assume hallucinated).
 
         Returns:
-            Hallucination score between 0 and 1:
-            - 0.0: No hallucination (fully grounded)
-            - 1.0: Complete hallucination (nothing supported)
-
-        Note:
-            If context is None/empty, assumes hallucination (returns 1.0).
-            Empty predictions return 0.0 (can't hallucinate with no output).
+            Dict with "hallucination" aggregate score (0=grounded, 1=hallucinated)
         """
-        # No context means we can't verify - assume hallucination
-        if not context or len(context) == 0:
-            return 1.0
+        scores = []
+        for i, prediction in enumerate(predictions):
+            ctx = contexts[i] if contexts and i < len(contexts) else None
+            scores.append(self._score_single(prediction, ctx))
 
-        # Empty prediction can't hallucinate
+        self._last_per_item = scores
+        avg = sum(scores) / len(scores) if scores else 0.0
+        return {"hallucination": avg}
+
+    def _score_single(
+        self, prediction: str, context: list[str] | None
+    ) -> float:
+        """Score a single prediction."""
+        if not context:
+            return 1.0
         if not prediction or not prediction.strip():
             return 0.0
 
-        # Choose method
         if self.method == "nli":
             return self._detect_nli_hallucination(prediction, context)
         elif self.method == "simple":
             return self._detect_simple_hallucination(prediction, context)
         elif self.method == "claim_analysis":
-            # For now, fall back to NLI
-            # Could be extended to break into claims
             return self._detect_nli_hallucination(prediction, context)
         else:
             raise ValueError(f"Unknown hallucination method: {self.method}")
 
     def _detect_nli_hallucination(self, prediction: str, context: list[str]) -> float:
-        """Detect hallucination using NLI.
-
-        Strategy:
-        1. Check if prediction is contradicted by context
-        2. Check if prediction is not entailed by any passage
-        3. Combine signals to estimate hallucination
-
-        Returns:
-            Hallucination score (0=grounded, 1=hallucinated)
-        """
+        """Detect hallucination using NLI."""
         nli = self._get_nli_pipeline()
 
         max_entailment = 0.0
@@ -146,108 +116,36 @@ class HallucinationMetric(Metric):
             if not passage or not passage.strip():
                 continue
 
-            # Check entailment and contradiction
-            result = nli(f"{passage} [SEP] {prediction}", top_k=None)
+            # A4 fix: pass premise/hypothesis as dict pair, not literal [SEP]
+            result = nli(
+                {"text": passage, "text_pair": prediction}, top_k=None
+            )
 
             for label_result in result:
                 label = label_result["label"].lower()
                 score = label_result["score"]
-
                 if "entailment" in label:
                     max_entailment = max(max_entailment, score)
                 elif "contradiction" in label:
                     max_contradiction = max(max_contradiction, score)
 
-        # Hallucination indicators:
-        # - High contradiction score = likely hallucination
-        # - Low entailment score = possibly hallucination
-
         if max_contradiction > 0.7:
-            # Strong contradiction = definite hallucination
             return float(max_contradiction)
 
-        # Otherwise, inverse of entailment (low entailment = high hallucination)
-        hallucination_score = 1.0 - max_entailment
-
-        return float(hallucination_score)
+        return float(1.0 - max_entailment)
 
     def _detect_simple_hallucination(self, prediction: str, context: list[str]) -> float:
-        """Simple token-based hallucination detection.
-
-        Measures what fraction of content words in prediction
-        do NOT appear in context. High fraction = likely hallucination.
-        """
+        """Simple token-based hallucination detection."""
         pred_tokens = set(prediction.lower().split())
-
-        # Focus on content words (not stopwords)
         stopwords = {
-            "the",
-            "a",
-            "an",
-            "is",
-            "was",
-            "are",
-            "were",
-            "be",
-            "been",
-            "in",
-            "on",
-            "at",
-            "to",
-            "for",
-            "of",
-            "and",
-            "or",
-            "but",
-            "this",
-            "that",
-            "these",
-            "those",
-            "it",
-            "its",
-            "they",
-            "their",
+            "the", "a", "an", "is", "was", "are", "were", "be", "been",
+            "in", "on", "at", "to", "for", "of", "and", "or", "but",
+            "this", "that", "these", "those", "it", "its", "they", "their",
         }
         content_tokens = pred_tokens - stopwords
-
         if not content_tokens:
             return 0.0
 
-        # Combine all context
-        context_text = " ".join(context).lower()
-        context_tokens = set(context_text.split())
-
-        # Calculate how many content tokens are NOT in context
-        unsupported_tokens = content_tokens - context_tokens
-        hallucination_ratio = len(unsupported_tokens) / len(content_tokens)
-
-        return float(hallucination_ratio)
-
-    def aggregate(self, scores: list[float]) -> dict[str, Any]:
-        """Aggregate hallucination scores across examples.
-
-        Args:
-            scores: List of per-example hallucination scores
-
-        Returns:
-            Dictionary with aggregate statistics
-        """
-        if not scores:
-            return {"hallucination_rate": 0.0, "hallucinated_count": 0, "method": self.method}
-
-        scores_array = np.array(scores)
-
-        # Count how many have significant hallucination (> threshold)
-        hallucinated_count = np.sum(scores_array >= self.threshold)
-
-        return {
-            "hallucination_rate": float(np.mean(scores_array)),
-            "hallucinated_ratio": float(hallucinated_count / len(scores)),
-            "hallucinated_count": int(hallucinated_count),
-            "total": len(scores),
-            "std": float(np.std(scores_array)),
-            "min": float(np.min(scores_array)),
-            "max": float(np.max(scores_array)),
-            "method": self.method,
-            "threshold": self.threshold,
-        }
+        context_tokens = set(" ".join(context).lower().split())
+        unsupported = content_tokens - context_tokens
+        return float(len(unsupported) / len(content_tokens))

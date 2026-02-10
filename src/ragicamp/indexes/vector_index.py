@@ -195,7 +195,7 @@ class VectorIndex:
         
         # Create FAISS index
         if config.index_type == "hnsw":
-            faiss_index = faiss.IndexHNSWFlat(dim, Defaults.FAISS_HNSW_M)
+            faiss_index = faiss.IndexHNSWFlat(dim, Defaults.FAISS_HNSW_M, faiss.METRIC_INNER_PRODUCT)
             faiss_index.hnsw.efConstruction = Defaults.FAISS_HNSW_EF_CONSTRUCTION
             faiss_index.hnsw.efSearch = Defaults.FAISS_HNSW_EF_SEARCH
         elif config.index_type == "ivf":

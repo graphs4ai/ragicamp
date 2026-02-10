@@ -313,7 +313,8 @@ class SelfRAGAgent(Agent):
 
         # Apply cross-encoder reranking if configured
         if self.reranker_provider is not None:
-            retrievals = self._apply_reranking(texts, retrievals)
+            retrievals, rerank_step = self._apply_reranking(texts, retrievals)
+            embed_search_steps.append(rerank_step)
 
         # Broadcast all embed/search steps (and optional transform step) to each query
         for idx in idx_order:
@@ -437,20 +438,19 @@ class SelfRAGAgent(Agent):
         self,
         query_texts: list[str],
         retrievals: list[list],
-    ) -> list[list]:
+    ) -> tuple[list[list], Step]:
         """Load reranker, rerank documents, and rebuild SearchResult lists."""
-        from time import perf_counter as _pc
-
+        from ragicamp.core.step_types import RERANK
         from ragicamp.core.types import Document, SearchResult
 
-        _t0 = _pc()
-        with self.reranker_provider.load() as reranker:
-            docs_lists: list[list[Document]] = [
-                [sr.document for sr in srs] for srs in retrievals
-            ]
-            reranked_docs = reranker.batch_rerank(
-                query_texts, docs_lists, top_k=self.top_k,
-            )
+        with StepTimer(RERANK, model=self.reranker_provider.config.model_name) as step:
+            with self.reranker_provider.load() as reranker:
+                docs_lists: list[list[Document]] = [
+                    [sr.document for sr in srs] for srs in retrievals
+                ]
+                reranked_docs = reranker.batch_rerank(
+                    query_texts, docs_lists, top_k=self.top_k,
+                )
 
         reranked_retrievals: list[list[SearchResult]] = []
         for docs in reranked_docs:
@@ -458,17 +458,12 @@ class SelfRAGAgent(Agent):
                 SearchResult(
                     document=doc,
                     score=getattr(doc, "score", 0.0),
-                    rank=rank,
+                    rank=rank + 1,
                 )
                 for rank, doc in enumerate(docs)
             ])
 
-        elapsed = _pc() - _t0
-        logger.info(
-            "Reranked %d queries (%d -> %d docs each) in %.1fs",
-            len(query_texts), self.fetch_k, self.top_k, elapsed,
-        )
-        return reranked_retrievals
+        return reranked_retrievals, step
 
     # ------------------------------------------------------------------
     # Result builder

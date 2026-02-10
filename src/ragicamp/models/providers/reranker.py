@@ -1,5 +1,6 @@
 """Reranker provider with lazy loading and lifecycle management."""
 
+import copy
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Iterator
@@ -116,11 +117,12 @@ class RerankerWrapper:
             show_progress_bar=False,
         )
 
-        # Attach scores and sort
-        for doc, score in zip(documents, scores):
+        # Copy documents to avoid mutating caller's objects
+        docs_copy = [copy.copy(doc) for doc in documents]
+        for doc, score in zip(docs_copy, scores):
             doc.score = float(score)
 
-        sorted_docs = sorted(documents, key=lambda d: d.score, reverse=True)
+        sorted_docs = sorted(docs_copy, key=lambda d: d.score, reverse=True)
         return sorted_docs[:top_k]
 
     def batch_rerank(
@@ -161,13 +163,14 @@ class RerankerWrapper:
             show_progress_bar=False,
         )
 
-        # Assign scores
+        # Copy documents to avoid mutating caller's objects, then assign scores
+        copied_lists = [[copy.copy(d) for d in docs] for docs in documents_list]
         for (q_idx, d_idx), score in zip(pair_indices, scores):
-            documents_list[q_idx][d_idx].score = float(score)
+            copied_lists[q_idx][d_idx].score = float(score)
 
         # Sort and return
         results = []
-        for docs in documents_list:
+        for docs in copied_lists:
             sorted_docs = sorted(docs, key=lambda d: d.score, reverse=True)
             results.append(sorted_docs[:top_k])
 

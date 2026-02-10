@@ -190,7 +190,7 @@ class IterativeRAGAgent(Agent):
         converged: dict[int, _QueryState] = {}
 
         # --- Iteration loop (batched) ---
-        for iteration in range(self.max_iterations + 1):
+        for iteration in range(self.max_iterations):
             if not active:
                 break
 
@@ -204,8 +204,8 @@ class IterativeRAGAgent(Agent):
             self._phase_embed_and_search(active, iteration)
             logger.info("Iteration %d embed+search completed in %.1fs", iteration, _pc() - _phase_t0)
 
-            # If this was the last allowed iteration, everyone goes to final gen
-            if iteration >= self.max_iterations:
+            # Last iteration: skip refinement, go straight to final generation
+            if iteration == self.max_iterations - 1:
                 for state in active.values():
                     state.iterations_info[-1]["stopped"] = "max_iterations"
                 break
@@ -261,17 +261,16 @@ class IterativeRAGAgent(Agent):
         texts = [active[idx].current_text for idx in idx_order]
 
         # When reranking, retrieve more docs (fetch_k) then trim after rerank.
-        # Only rerank on iteration 0 where original queries are used.
-        use_reranker = self.reranker_provider is not None and iteration == 0
+        use_reranker = self.reranker_provider is not None
         retrieve_k = self.fetch_k if use_reranker else self.top_k
 
         # Only use retrieval cache on iteration 0 (original queries).
-        # Subsequent iterations have LLM-refined queries that aren't cacheable.
+        # Subsequent iterations have LLM-refined queries that won't hit cache.
         use_cache = iteration == 0 and self.retrieval_store is not None
 
-        # Apply query transform only on iteration 0 (original queries).
-        # Subsequent iterations use LLM-refined queries which shouldn't be re-transformed.
-        use_transformer = self.query_transformer if iteration == 0 else None
+        # Apply query transform on every iteration so Optuna sees its true
+        # effect across the full iterative pipeline (no silent parameter disabling).
+        use_transformer = self.query_transformer
 
         retrievals, embed_search_steps = batch_transform_embed_and_search(
             query_transformer=use_transformer,
@@ -283,9 +282,10 @@ class IterativeRAGAgent(Agent):
             retrieval_store=self.retrieval_store if use_cache else None,
             retriever_name=self.retriever_name if use_cache else None,
         )
-        # Apply cross-encoder reranking if configured (iteration 0 only)
+        # Apply cross-encoder reranking if configured
         if use_reranker:
-            retrievals = self._apply_reranking(texts, retrievals)
+            retrievals, rerank_step = self._apply_reranking(texts, retrievals)
+            embed_search_steps.append(rerank_step)
 
         # Broadcast embed/search steps (and optional transform step) to each query
         for idx in idx_order:
@@ -366,8 +366,12 @@ class IterativeRAGAgent(Agent):
             suff_prompts = []
             for idx in idx_order:
                 state = active[idx]
+                # C2 fix: use best-scored docs, not insertion order
+                scored_docs = sorted(
+                    state.docs, key=lambda d: getattr(d, "score", 0.0), reverse=True
+                )
                 context = ContextFormatter.format_numbered_from_docs(
-                    state.docs[: self.top_k * 2]
+                    scored_docs[: self.top_k * 2]
                 )
                 suff_prompts.append(
                     SUFFICIENCY_PROMPT.format(context=context, query=state.query.text)
@@ -485,20 +489,19 @@ class IterativeRAGAgent(Agent):
         self,
         query_texts: list[str],
         retrievals: list[list],
-    ) -> list[list]:
+    ) -> tuple[list[list], Step]:
         """Load reranker, rerank documents, and rebuild SearchResult lists."""
-        from time import perf_counter as _pc
-
+        from ragicamp.core.step_types import RERANK
         from ragicamp.core.types import Document, SearchResult
 
-        _t0 = _pc()
-        with self.reranker_provider.load() as reranker:
-            docs_lists: list[list[Document]] = [
-                [sr.document for sr in srs] for srs in retrievals
-            ]
-            reranked_docs = reranker.batch_rerank(
-                query_texts, docs_lists, top_k=self.top_k,
-            )
+        with StepTimer(RERANK, model=self.reranker_provider.config.model_name) as step:
+            with self.reranker_provider.load() as reranker:
+                docs_lists: list[list[Document]] = [
+                    [sr.document for sr in srs] for srs in retrievals
+                ]
+                reranked_docs = reranker.batch_rerank(
+                    query_texts, docs_lists, top_k=self.top_k,
+                )
 
         reranked_retrievals: list[list[SearchResult]] = []
         for docs in reranked_docs:
@@ -506,17 +509,12 @@ class IterativeRAGAgent(Agent):
                 SearchResult(
                     document=doc,
                     score=getattr(doc, "score", 0.0),
-                    rank=rank,
+                    rank=rank + 1,
                 )
                 for rank, doc in enumerate(docs)
             ])
 
-        elapsed = _pc() - _t0
-        logger.info(
-            "Reranked %d queries (%d -> %d docs each) in %.1fs",
-            len(query_texts), self.fetch_k, self.top_k, elapsed,
-        )
-        return reranked_retrievals
+        return reranked_retrievals, step
 
     @staticmethod
     def _merge_documents(
@@ -528,7 +526,7 @@ class IterativeRAGAgent(Agent):
         merged: list[Document] = []
 
         for doc in existing + new_docs:
-            content_key = doc.text[:200] if doc.text else ""
+            content_key = hash(doc.text) if doc.text else ""
             if content_key not in seen_content:
                 seen_content.add(content_key)
                 merged.append(doc)

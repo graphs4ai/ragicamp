@@ -159,9 +159,9 @@ class VLLMModel(LanguageModel):
                 self.llm = None
 
             # Force GPU memory cleanup
+            gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            gc.collect()
 
             self._is_loaded = False
             logger.info("vLLM model %s unloaded from GPU", self.model_name)

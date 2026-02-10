@@ -75,12 +75,23 @@ class GenerationHandler(PhaseHandler):
             logger.info("All predictions complete")
             return state
 
-        # Callback to save results incrementally
+        # C1 fix: save every N results instead of every single one
+        _save_interval = 10
+        _unsaved_count = 0
+
+        # Callback to save results incrementally (with dedup guard)
         def on_result(result: AgentResult) -> None:
+            nonlocal _unsaved_count
+            if result.query.idx in completed_idx:
+                return  # B4 fix: skip duplicate on crash-resume
+            completed_idx.add(result.query.idx)
             pred = self._result_to_prediction(result)
             predictions_data["predictions"].append(pred)
             state.predictions_complete = len(predictions_data["predictions"])
-            self._save_predictions(predictions_data, predictions_path)
+            _unsaved_count += 1
+            if _unsaved_count >= _save_interval:
+                self._save_predictions(predictions_data, predictions_path)
+                _unsaved_count = 0
 
         # Run the agent - it manages its own resources
         logger.info("Running agent on %d queries", len(pending))

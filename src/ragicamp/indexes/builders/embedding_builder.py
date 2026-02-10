@@ -177,13 +177,13 @@ def build_embedding_index(
             cpu_index = faiss.IndexFlatIP(embedding_dim)
         elif index_type == "ivf":
             quantizer = faiss.IndexFlatIP(embedding_dim)
-            cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist)
+            cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist, faiss.METRIC_INNER_PRODUCT)
         elif index_type == "ivfpq":
             quantizer = faiss.IndexFlatIP(embedding_dim)
             m = min(32, embedding_dim // 4)
             cpu_index = faiss.IndexIVFPQ(quantizer, embedding_dim, nlist, m, 8)
         elif index_type == "hnsw":
-            cpu_index = faiss.IndexHNSWFlat(embedding_dim, 32)
+            cpu_index = faiss.IndexHNSWFlat(embedding_dim, 32, faiss.METRIC_INNER_PRODUCT)
             cpu_index.hnsw.efConstruction = 200
         else:
             raise ValueError(f"Unknown index type: {index_type}")
@@ -203,7 +203,7 @@ def build_embedding_index(
     chunker = DocumentChunker(chunk_config)
 
     doc_batch = []
-    batch_num = 0
+    batch_num = start_batch
     docs_to_skip = start_batch * doc_batch_size
 
     # ==========================================================================
@@ -301,12 +301,6 @@ def build_embedding_index(
 
             if len(doc_batch) >= doc_batch_size:
                 batch_num += 1
-
-                # Skip if already processed (resume case)
-                if batch_num <= start_batch:
-                    doc_batch = []
-                    continue
-
                 process_batch(doc_batch, batch_num, index)
                 doc_batch = []
 

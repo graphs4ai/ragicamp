@@ -324,6 +324,7 @@ def create_fixed_rag_agent(
     search_type: str = "dense",
     sparse_method: str = "tfidf",
     hybrid_alpha: float = 0.5,
+    rrf_k: int = 60,
 ) -> FixedRAGAgent:
     """Create a FixedRAGAgent with providers.
 
@@ -338,6 +339,7 @@ def create_fixed_rag_agent(
         search_type: "dense", "hybrid", or "hierarchical"
         sparse_method: For hybrid: "tfidf" or "bm25"
         hybrid_alpha: Weight for dense vs sparse (0=sparse, 1=dense)
+        rrf_k: RRF fusion constant for hybrid search (higher = more weight to lower ranks)
 
     Returns:
         Configured FixedRAGAgent
@@ -379,6 +381,7 @@ def create_fixed_rag_agent(
             vector_index=vector_index,
             sparse_index=sparse_index,
             alpha=hybrid_alpha,
+            rrf_k=rrf_k,
         )
     elif search_type == "hierarchical":
         from ragicamp.indexes.hierarchical import HierarchicalIndex

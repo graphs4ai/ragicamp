@@ -270,12 +270,12 @@ class IndexBuilder:
     def _create_faiss_index(self, dim: int) -> faiss.Index:
         """Create FAISS index based on type."""
         if self.index_type == "hnsw":
-            index = faiss.IndexHNSWFlat(dim, 32)
+            index = faiss.IndexHNSWFlat(dim, 32, faiss.METRIC_INNER_PRODUCT)
             index.hnsw.efConstruction = 200
             return index
         elif self.index_type == "ivf":
             quantizer = faiss.IndexFlatIP(dim)
-            return faiss.IndexIVFFlat(quantizer, dim, 4096)
+            return faiss.IndexIVFFlat(quantizer, dim, 4096, faiss.METRIC_INNER_PRODUCT)
         else:  # flat
             return faiss.IndexFlatIP(dim)
     

@@ -491,10 +491,11 @@ def run_study(
     # ===================================================================
     # 6. Optuna-driven RAG trials
     # ===================================================================
+    optuna_study = None
     if sampling_mode and rag_config.get("enabled"):
         from ragicamp.optimization.optuna_search import run_optuna_study as _optuna
 
-        _optuna(
+        optuna_study = _optuna(
             config=config,
             n_trials=effective_sampling.get("n_experiments", 50),
             output_dir=out,
@@ -511,9 +512,15 @@ def run_study(
     # ===================================================================
     _log_print(f"\n{'=' * 70}")
     _log_print(f"Study Complete: {study_name}")
-    _log_print(f"  Completed: {results['completed']}")
-    _log_print(f"  Failed: {results['failed']}")
-    _log_print(f"  Skipped: {results['skipped']}")
+    _log_print(f"  Baselines — Completed: {results['completed']}, "
+               f"Failed: {results['failed']}, Skipped: {results['skipped']}")
+    if optuna_study is not None:
+        n_complete = len(optuna_study.trials)
+        n_pruned = len([t for t in optuna_study.trials if t.state.name == "PRUNED"])
+        _log_print(f"  Optuna — Trials: {n_complete}, Pruned: {n_pruned}")
+        if optuna_study.best_trial:
+            _log_print(f"  Best trial: {optuna_study.best_value:.4f} "
+                       f"(trial #{optuna_study.best_trial.number})")
     _log_print(f"{'=' * 70}")
 
     meta = {
@@ -532,6 +539,14 @@ def compare(out: Path) -> None:
     Args:
         out: Path to study output directory
     """
-    from ragicamp.analysis.comparison import compare_experiments
+    from ragicamp.analysis.comparison import compare_results
+    from ragicamp.analysis.loader import ResultsLoader
 
-    compare_experiments(out)
+    loader = ResultsLoader(out)
+    results = loader.load_all()
+    if results:
+        grouped = compare_results(results)
+        for group_name, metrics in grouped.items():
+            _study_logger.info("%s: %s", group_name, metrics)
+    else:
+        _study_logger.warning("No experiment results found in %s", out)

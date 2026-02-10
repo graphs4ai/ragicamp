@@ -41,6 +41,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         skip_existing=args.skip_existing,
         validate_only=args.validate,
         sampling_override=sampling_override,
+        limit=getattr(args, "limit", None),
+        force=getattr(args, "force", False),
     )
     return 0
 
