@@ -161,6 +161,7 @@ def configure_logging(
         "httpx",
         "urllib3",
         "filelock",
+        "vllm",
     ]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 

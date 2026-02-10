@@ -87,7 +87,7 @@ def run_metrics_only(
             state.save(io.state_path)
 
     # Use shared metrics computation
-    aggregate_results, per_item_metrics, computed, failed = compute_metrics_batched(
+    aggregate_results, per_item_metrics, computed, failed, _timings = compute_metrics_batched(
         metrics=metric_objs,
         predictions=predictions,
         references=references,

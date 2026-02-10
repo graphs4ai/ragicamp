@@ -180,7 +180,15 @@ class VLLMGeneratorWrapper(Generator):
         return [output.outputs[0].text for output in outputs]
 
     def unload(self):
-        # vLLM doesn't have explicit unload, but we can delete the reference
+        # Destroy NCCL process group before deleting the engine to avoid
+        # "destroy_process_group() was not called" warning at exit.
+        try:
+            import torch.distributed as dist
+
+            if dist.is_initialized():
+                dist.destroy_process_group()
+        except Exception:
+            pass
         del self._llm
 
 

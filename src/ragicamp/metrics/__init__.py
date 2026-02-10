@@ -94,7 +94,7 @@ def compute_metrics_batched(
     questions: Optional[list[str]] = None,
     already_computed: Optional[list[str]] = None,
     on_metric_complete: Optional[callable] = None,
-) -> tuple[dict[str, float], dict[str, list[float]], list[str], list[str]]:
+) -> tuple[dict[str, float], dict[str, list[float]], list[str], list[str], dict[str, float]]:
     """Compute metrics with proper GPU memory management and multi-reference support.
 
     This is the shared implementation used by both Experiment._phase_compute_metrics()
@@ -119,7 +119,10 @@ def compute_metrics_batched(
         - per_item_metrics: Dict of per-item scores for each metric
         - computed: List of successfully computed metric names
         - failed: List of failed metric names
+        - timings: Dict of metric_name -> seconds for each computed metric
     """
+    import time as _time
+
     from ragicamp.utils.resource_manager import ResourceManager
 
     already_computed = already_computed or []
@@ -127,6 +130,7 @@ def compute_metrics_batched(
     per_item_metrics: dict[str, list[float]] = {}
     computed: list[str] = []
     failed: list[str] = []
+    timings: dict[str, float] = {}
 
     # Check if we need multi-reference handling
     has_multi = _has_multi_references(references)
@@ -155,6 +159,7 @@ def compute_metrics_batched(
         try:
             logger.info("Computing %s...", metric.name)
             ResourceManager.clear_gpu_memory()
+            _metric_t0 = _time.perf_counter()
 
             # Call metric with expanded inputs
             if metric.name in ("llm_judge", "llm_judge_qa"):
@@ -197,6 +202,10 @@ def compute_metrics_batched(
             elif expanded_per_item:
                 per_item_metrics[metric.name] = expanded_per_item
 
+            _metric_s = _time.perf_counter() - _metric_t0
+            timings[metric.name] = round(_metric_s, 2)
+            logger.info("  %s done in %.1fs", metric.name, _metric_s)
+
             aggregate_results.update(scores)
             computed.append(metric.name)
 
@@ -210,7 +219,7 @@ def compute_metrics_batched(
             failed.append(metric.name)
             ResourceManager.clear_gpu_memory()
 
-    return aggregate_results, per_item_metrics, computed, failed
+    return aggregate_results, per_item_metrics, computed, failed, timings
 
 
 # Import specific metrics (but handle import errors gracefully)

@@ -59,7 +59,7 @@ class MetricsHandler(PhaseHandler):
                 state.save(state_path)
 
         # Use shared metrics computation (handles batching, GPU cleanup, etc.)
-        aggregate_results, per_item_metrics, computed, failed = compute_metrics_batched(
+        aggregate_results, per_item_metrics, computed, failed, metric_timings = compute_metrics_batched(
             metrics=context.metrics,
             predictions=predictions,
             references=references,
@@ -81,6 +81,12 @@ class MetricsHandler(PhaseHandler):
         existing_agg.update(aggregate_results)
         data["aggregate_metrics"] = existing_agg
         data["predictions"] = preds
+
+        # Store per-metric timing for profiling
+        if metric_timings:
+            existing_timings = data.get("metric_timings", {})
+            existing_timings.update(metric_timings)
+            data["metric_timings"] = existing_timings
 
         self._save_predictions(data, predictions_path)
         logger.info("Computed metrics: %s", list(aggregate_results.keys()))

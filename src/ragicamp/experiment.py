@@ -154,6 +154,7 @@ class Experiment:
     _batch_size: int = field(default=8, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
+    _phase_timings: dict[str, float] = field(default_factory=dict, repr=False)
 
     # Phase handlers (lazy initialized)
     _handlers: Optional[dict[ExperimentPhase, PhaseHandler]] = field(default=None, repr=False)
@@ -346,6 +347,7 @@ class Experiment:
         self._state.save(self.state_path)
 
         _phase_s = time.perf_counter() - _phase_t0
+        self._phase_timings[phase.value] = round(_phase_s, 2)
         logger.info("--- Phase [%s] completed in %.1fs ---", phase.value, _phase_s)
 
         if self._callbacks.on_phase_end:
@@ -377,6 +379,13 @@ class Experiment:
             spec_data = self._spec.to_dict()
             # Spec fields as base, runtime fields override
             result_metadata = {**spec_data, **result_metadata}
+
+        # Collect timing profile
+        timing_profile = {"phases": dict(self._phase_timings)}
+        metric_timings = data.get("metric_timings")
+        if metric_timings:
+            timing_profile["metrics"] = metric_timings
+        result_metadata["timing"] = timing_profile
 
         result = ExperimentResult(
             name=self.name,
