@@ -1,16 +1,19 @@
 # RAGiCamp
 
-A modular framework for experimenting with RAG (Retrieval-Augmented Generation) approaches.
+A modular framework for benchmarking RAG (Retrieval-Augmented Generation) strategies across models, retrievers, and datasets. Designed for controlled experiments at scale with Optuna-powered hyperparameter optimization.
 
 ## Features
 
-- **Phased Experiment Execution** - INIT → GENERATING → GENERATED → COMPUTING_METRICS → COMPLETE
-- **Automatic Resume** - Experiments resume from last checkpoint after crashes
-- **Health Monitoring** - Check experiment status, detect incomplete runs
-- **Multiple Agents** - DirectLLM (no retrieval) and FixedRAG baselines
-- **Multiple Models** - HuggingFace and OpenAI model support
-- **Batch Processing** - Parallel answer generation for faster experiments
-- **Comprehensive Metrics** - F1, Exact Match, BERTScore, BLEURT, LLM-as-judge
+- **Phased Execution** — INIT → GENERATING → COMPUTING_METRICS → COMPLETE with automatic resume
+- **Subprocess Isolation** — Each experiment runs in its own process for CUDA crash safety
+- **Optuna TPE Search** — Bayesian optimization over the full RAG grid (models × retrievers × top_k × prompts × agents)
+- **Multiple Agents** — DirectLLM (baseline), FixedRAG, IterativeRAG (multi-iteration), SelfRAG (adaptive retrieval)
+- **Multiple Backends** — vLLM (primary), HuggingFace, OpenAI
+- **Advanced Retrieval** — Dense (FAISS), Hybrid (dense + BM25/TF-IDF), Hierarchical (parent-child chunks)
+- **Query Transforms** — HyDE (hypothetical document embeddings), MultiQuery expansion
+- **Cross-Encoder Reranking** — BGE reranker with configurable fetch_k
+- **SQLite Caching** — Embedding and retrieval result caching across experiments
+- **Comprehensive Metrics** — F1, Exact Match, BERTScore, BLEURT, LLM-as-Judge, Faithfulness, Hallucination
 
 ## Quick Start
 
@@ -18,206 +21,307 @@ A modular framework for experimenting with RAG (Retrieval-Augmented Generation) 
 # Install
 uv sync
 
-# Run a study (dry-run to check status)
-uv run ragicamp run conf/study/comprehensive_baseline.yaml --dry-run
+# Run a study (dry-run to preview)
+uv run ragicamp run conf/study/smart_retrieval_slm.yaml --dry-run
 
-# Run for real (skips completed experiments)
-uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
+# Run for real (resumes automatically on crash)
+uv run ragicamp run conf/study/smart_retrieval_slm.yaml
 
-# Check health of experiments
-uv run ragicamp health outputs/comprehensive_baseline
+# Check experiment health
+uv run ragicamp health outputs/smart_retrieval_slm
 ```
+
+## How It Works
+
+```
+YAML config
+  → cli/study.py:run_study()
+  → spec/builder.py:build_specs() → list[ExperimentSpec]
+  → execution/runner.py:run_spec() per spec (subprocess)
+  → experiment.py:Experiment.from_spec() → agent.run()
+```
+
+1. **Config validated** — Pydantic schemas at `config/schemas.py`
+2. **Indexes ensured** — Dense (FAISS HNSW) and sparse (BM25/TF-IDF) built if missing
+3. **Specs built** — Grid search, Optuna TPE sampling, or explicit singletons
+4. **Each spec executed** in a subprocess for CUDA crash isolation
+5. **Phases per experiment** — INIT → GENERATING → COMPUTING_METRICS → COMPLETE
+6. **Phase-aware resume** — Crashed in COMPUTING_METRICS? Skips model loading entirely
 
 ## Project Structure
 
 ```
 ragicamp/
-├── src/ragicamp/          # Core library
-│   ├── experiment.py      # Unified Experiment class (facade)
-│   ├── spec/              # Experiment specifications (immutable config)
-│   │   ├── experiment.py  # ExperimentSpec dataclass
-│   │   ├── builder.py     # build_specs() from YAML
-│   │   └── naming.py      # Naming conventions
-│   ├── state/             # State management (mutable, persistent)
-│   │   ├── experiment_state.py  # ExperimentState, ExperimentPhase
-│   │   └── health.py      # ExperimentHealth, check_health()
-│   ├── factory/           # Component factories
-│   │   ├── models.py      # ModelFactory
-│   │   ├── datasets.py    # DatasetFactory
-│   │   ├── metrics.py     # MetricFactory
-│   │   ├── retrievers.py  # RetrieverFactory
-│   │   └── agents.py      # AgentFactory
-│   ├── execution/         # Experiment execution
-│   │   ├── runner.py      # run_spec(), run_generation()
-│   │   ├── executor.py    # ResilientExecutor (batch processing)
-│   │   └── phases/        # Phase handlers (Init, Generation, Metrics)
-│   ├── indexes/           # Index management
-│   │   ├── builder.py     # ensure_indexes_exist() orchestration
-│   │   └── builders/      # Embedding & hierarchical index builders
-│   ├── agents/            # RAG agents (DirectLLM, FixedRAG)
-│   ├── models/            # LLM backends (HuggingFace, OpenAI)
-│   ├── retrievers/        # Dense retrieval (FAISS)
-│   ├── datasets/          # QA datasets (NQ, TriviaQA, HotpotQA)
-│   ├── metrics/           # Evaluation metrics
-│   ├── analysis/          # Results loading and comparison
-│   └── cli/               # Command-line interface
-├── conf/                  # Configuration files
-│   ├── study/             # Study configs (YAML)
-│   └── prompts/           # Few-shot examples
-├── scripts/               # Utility scripts
-├── artifacts/             # Saved indexes
-├── outputs/               # Experiment results
-└── notebooks/             # Analysis notebooks
+├── src/ragicamp/
+│   ├── agents/             # Agent implementations
+│   │   ├── base.py         # Base class, shared embed+search logic
+│   │   ├── fixed_rag.py    # Standard single-pass RAG
+│   │   ├── iterative_rag.py # Multi-iteration query refinement
+│   │   └── self_rag.py     # Adaptive retrieval (model decides when to retrieve)
+│   ├── cache/              # SQLite-backed caching
+│   │   ├── embedding_store.py   # (model, text_hash) → float32 vectors
+│   │   └── retrieval_store.py   # (retriever, query_hash, top_k) → search results
+│   ├── cli/                # CLI entry points
+│   │   ├── main.py         # Entry: ragicamp.cli.main:main
+│   │   ├── study.py        # run_study() orchestration
+│   │   ├── commands.py     # CLI command handlers
+│   │   └── trace.py        # Experiment step tracing
+│   ├── config/             # Pydantic schemas and validation
+│   ├── execution/          # Experiment execution pipeline
+│   │   ├── runner.py       # run_spec(), run_generation(), run_metrics_only()
+│   │   ├── executor.py     # ResilientExecutor for batch processing
+│   │   └── phases/         # Phase handlers (init, generation, metrics)
+│   ├── experiment.py       # Experiment class: from_spec() factory, run()
+│   ├── factory/            # Component factories (agents, providers, metrics)
+│   ├── indexes/            # FAISS vector indexes, BM25 sparse, hierarchical
+│   ├── metrics/            # Evaluation metrics
+│   ├── models/             # Model backends
+│   │   ├── vllm.py         # vLLM backend (primary)
+│   │   ├── huggingface.py  # HuggingFace transformers
+│   │   ├── openai.py       # OpenAI API
+│   │   └── providers/      # Lazy-loading providers with GPU lifecycle
+│   ├── optimization/       # Optuna hyperparameter search
+│   ├── rag/                # Query transforms, chunking, rerankers
+│   ├── retrievers/         # Dense, hybrid (RRF fusion), hierarchical
+│   ├── spec/               # Experiment specification (frozen dataclass)
+│   │   ├── experiment.py   # ExperimentSpec — single source of truth
+│   │   ├── builder.py      # build_specs() from YAML
+│   │   └── naming.py       # Hash-based experiment naming
+│   ├── state/              # Experiment state and health checks
+│   └── utils/              # Atomic IO, prompt builder, resource manager
+├── conf/study/             # Study YAML configs
+├── scripts/                # Utility and migration scripts
+├── notebooks/              # Analysis notebooks
+├── artifacts/              # Indexes and caches
+└── outputs/                # Experiment results
 ```
-
-## Experiment Lifecycle
-
-Each experiment goes through phases, with artifacts saved at each step:
-
-| Phase | Artifacts | Description |
-|-------|-----------|-------------|
-| `INIT` | `state.json`, `questions.json`, `metadata.json` | Config saved, questions exported |
-| `GENERATING` | `predictions.json` (partial) | Answers being generated |
-| `GENERATED` | `predictions.json` (complete) | All predictions done |
-| `COMPUTING_METRICS` | `predictions.json` + per-item metrics | Metrics computed |
-| `COMPLETE` | `results.json` | Final summary |
-
-If an experiment crashes, it resumes from the last saved state.
 
 ## CLI Commands
 
+### Run a Study
+
 ```bash
-# Run study from config
-ragicamp run <config.yaml> [--dry-run] [--skip-existing]
+ragicamp run <config.yaml> [OPTIONS]
+  --dry-run              Preview experiments and their status
+  --skip-existing        Skip completed experiments
+  --validate             Validate config only
+  --limit N              Max examples per experiment
+  --force                Force re-run even if complete/failed
+  --sample N             Sample N experiments (random or TPE)
+  --sample-mode          random | tpe (default: random)
+  --optimize-metric      Metric to optimize (default: f1)
+```
 
-# Check experiment health
+### Check Health
+
+```bash
 ragicamp health <output_dir> [--metrics f1,exact_match]
+```
 
-# Resume incomplete experiments
+### Resume Incomplete
+
+```bash
 ragicamp resume <output_dir> [--dry-run]
-
-# Recompute metrics for an experiment
-ragicamp metrics <exp_dir> -m f1,llm_judge
-
-# Build retrieval index
-ragicamp index --corpus simple --embedding minilm --chunk-size 512
-
-# Compare results
-ragicamp compare <output_dir> --metric f1 --group-by model
-
-# Compute metrics on predictions file
-ragicamp evaluate predictions.json --metrics f1 exact_match llm_judge_qa
 ```
 
-## Python API
+### Recompute Metrics
 
-```python
-from ragicamp import Experiment, ComponentFactory, check_health
-from ragicamp.metrics import F1Metric, ExactMatchMetric
-
-# Create components
-model = ComponentFactory.create_model({
-    "type": "huggingface",
-    "model_name": "google/gemma-2b-it",
-    "load_in_4bit": True,
-})
-
-agent = ComponentFactory.create_agent(
-    {"type": "direct_llm", "name": "baseline"},
-    model=model,
-)
-
-dataset = ComponentFactory.create_dataset({
-    "name": "natural_questions",
-    "split": "validation",
-    "num_examples": 100,
-})
-
-# Run experiment
-exp = Experiment(
-    name="my_experiment",
-    agent=agent,
-    dataset=dataset,
-    metrics=[F1Metric(), ExactMatchMetric()],
-)
-
-# Check health first
-health = exp.check_health()
-if health.is_complete:
-    print("Already done!")
-else:
-    result = exp.run(batch_size=8)
-    print(f"F1: {result.f1:.3f}, EM: {result.exact_match:.3f}")
+```bash
+ragicamp metrics <exp_dir> -m f1,bertscore,llm_judge
+  --judge-model          Model for LLM judge (default: gpt-4o-mini)
 ```
 
-## Study Config
+### Compare Results
+
+```bash
+ragicamp compare <output_dir> [OPTIONS]
+  --metric, -m           Metric to compare (default: f1)
+  --group-by, -g         model | dataset | prompt | retriever | type
+  --pivot ROWS COLS      Create pivot table
+  --top N                Show top N results (default: 10)
+```
+
+### Evaluate Predictions
+
+```bash
+ragicamp evaluate <predictions.json> --metrics f1 exact_match llm_judge_qa
+  --judge-model          Model for LLM judge
+  --output               Output file path
+```
+
+### Build Index
+
+```bash
+ragicamp index [OPTIONS]
+  --corpus               simple | en | full version string
+  --embedding            minilm | e5 | mpnet | full model name
+  --chunk-size           Chunk size in chars (default: 512)
+  --max-docs             Max documents to index
+```
+
+### Cache Management
+
+```bash
+ragicamp cache stats              # Show cache statistics
+ragicamp cache clear [--model X]  # Clear embeddings (optionally by model)
+```
+
+### Backup / Download (Backblaze B2)
+
+```bash
+ragicamp backup [path] --bucket masters-bucket --sync --dry-run
+ragicamp download --list                          # List available backups
+ragicamp download --backup <name> --artifacts-only
+```
+
+## Study Configuration
+
+Studies are defined in YAML configs that specify the full experimental grid:
 
 ```yaml
-# conf/study/my_study.yaml
 name: my_study
-description: "My experiment"
-num_questions: 100
-datasets: [nq, hotpotqa]
+description: "My RAG experiments"
+num_questions: 1000
+datasets: [nq, triviaqa, hotpotqa]
 
+metrics:
+  - f1
+  - exact_match
+  - bertscore
+
+# Direct baselines (no retrieval)
 direct:
   enabled: true
   models:
-    - hf:google/gemma-2b-it
-  prompts: [default, concise, fewshot]
-  quantization: [4bit, 8bit]
+    - vllm:Qwen/Qwen2.5-7B-Instruct
+    - vllm:meta-llama/Llama-3.2-3B-Instruct
+  prompts: [concise, fewshot_3]
 
+# RAG experiments
 rag:
   enabled: true
   models:
-    - hf:google/gemma-2b-it
-  retrievers:
-    - simple_minilm_recursive_512
-  top_k_values: [3, 5, 10]
-  prompts: [default, fewshot]
-  quantization: [4bit]
+    - vllm:Qwen/Qwen2.5-7B-Instruct
 
-metrics: [f1, exact_match, bertscore, llm_judge]
-llm_judge:
-  model: openai:gpt-4o-mini
-  type: binary
+  # Optuna TPE optimization
+  sampling:
+    mode: tpe
+    n_experiments: 1000
+    optimize_metric: f1
+    seed: 42
+    agent_types: [fixed_rag, iterative_rag, self_rag]
+    agent_params:
+      iterative_rag:
+        max_iterations: [1, 2, 3]
+      self_rag:
+        retrieval_threshold: [0.3, 0.5, 0.7]
+        verify_answer: [true, false]
+
+  # Retrievers
+  retrievers:
+    - type: dense
+      name: dense_bge_large_512
+      embedding_model: BAAI/bge-large-en-v1.5
+      # ...
+    - type: hybrid
+      name: hybrid_bge_large_bm25
+      sparse_method: bm25
+      alpha: 0.5  # Overridden by Optuna
+      # ...
+
+  retriever_names: [dense_bge_large_512, hybrid_bge_large_bm25]
+  top_k_values: [3, 5, 10, 15, 20]
+  query_transform: [none, hyde, multiquery]
+  alpha_values: [0.3, 0.5, 0.7, 0.9]  # Hybrid-only, explored by Optuna
+
+  reranker:
+    configs:
+      - enabled: false
+        name: none
+      - enabled: true
+        name: bge
+
+  prompts: [concise, extractive, cot, fewshot_3]
 
 output_dir: outputs/my_study
+batch_size: 128
 ```
 
-## Model Spec Format
+See `conf/study/smart_retrieval_slm.yaml` for a complete production example.
 
-- HuggingFace: `hf:google/gemma-2b-it`
-- OpenAI: `openai:gpt-4o-mini`
+### Model Spec Format
 
-## Quantization
+| Provider | Format | Example |
+|----------|--------|---------|
+| vLLM | `vllm:org/model` | `vllm:Qwen/Qwen2.5-7B-Instruct` |
+| HuggingFace | `hf:org/model` | `hf:google/gemma-2-2b-it` |
+| OpenAI | `openai:model` | `openai:gpt-4o-mini` |
 
-- `4bit` - 4-bit quantization (faster, less VRAM)
-- `8bit` - 8-bit quantization
-- `none` - Full precision
+## Experiment Output
 
-## Documentation
+Each experiment produces:
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Agents Guide](docs/guides/AGENTS.md)
-- [Metrics Guide](docs/guides/METRICS.md)
-- [Cheatsheet](CHEATSHEET.md)
+```
+outputs/my_study/rag_Qwen257BI_nq_a3f8c2d1/
+├── state.json          # Phase tracking
+├── questions.json      # Exported questions
+├── metadata.json       # Full experiment config
+├── predictions.json    # Answers + per-item metrics + timing
+├── results.json        # Aggregate metrics + timing profile
+└── experiment.log      # Subprocess stdout/stderr
+```
+
+Experiment names use a hash-based scheme: `{type}_{model_short}_{dataset}_{hash8}`.
+
+## Utility Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/validate_cache.py` | Validate cache integrity (structure, dimensions, cross-reference) |
+| `scripts/clean_study.py` | Diagnose and fix incorrectly named experiments |
+| `scripts/migrate_naming.py` | Migrate old long names to hash-based names |
+| `scripts/migrate_audit_fixes.py` | Apply audit fix migrations to existing results |
+| `scripts/repair_metadata.py` | Repair metadata.json files |
+| `scripts/quarantine_affected_exps.py` | Quarantine experiments affected by bugs |
+| `scripts/analyze_retrieval.py` | Analyze retrieval quality |
+
+## Analysis Notebooks
+
+| Notebook | Purpose |
+|----------|---------|
+| `01_data_overview.ipynb` | Dataset statistics and distributions |
+| `02_rag_effectiveness.ipynb` | RAG vs Direct LLM comparison |
+| `03_component_analysis.ipynb` | Ablation by retriever, prompt, model |
+| `04_next_experiments.ipynb` | Experiment planning from results |
+| `05_failure_analysis.ipynb` | Error patterns and failure modes |
+| `06_pipeline_profiling.ipynb` | Phase and metric timing analysis |
+| `rag_strategy_analysis.ipynb` | Agent strategy comparison |
+| `smart_retrieval_analysis.ipynb` | Smart retrieval study results |
 
 ## Development
 
 ```bash
-# Install dev dependencies
-uv sync --extra dev
+# Install
+uv sync
 
-# Format code
-uv run ruff format src/ tests/ scripts/
+# Tests (no GPU needed)
+uv run pytest tests/ -x -q
 
-# Run tests
-uv run pytest
+# Lint & format
+make lint       # ruff format --check + ruff check
+make format     # ruff format + ruff check --fix
 
-# Type check
-uv run mypy src/
+# Pre-push check
+make pre-push   # format + lint + test
 ```
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Agents Guide](docs/guides/AGENTS.md)
+- [Metrics Guide](docs/guides/METRICS.md)
+- [Optuna Study Design](docs/OPTUNA_STUDY_DESIGN.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ## License
 
