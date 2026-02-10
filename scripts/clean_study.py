@@ -90,6 +90,10 @@ def _strip_fake_tokens(name: str) -> tuple[str | None, list[str]]:
         (corrected_name, list_of_stripped_tokens)
         corrected_name is None if nothing to strip.
     """
+    # Skip hash-based names (new naming scheme: prefix_model_dataset_hash8)
+    if re.match(r"^(rag|direct|iterative|self)_\w+_\w+_[0-9a-f]{8}$", name):
+        return None, []
+
     parts = name.split("_")
 
     # Find _k{N}_ segment

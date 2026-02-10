@@ -205,34 +205,59 @@ class TestNamingFunctions:
     """Tests for experiment naming functions."""
 
     def test_name_direct(self):
-        """Test direct experiment naming."""
+        """Test direct experiment naming uses hash-based format."""
         name = name_direct("hf:meta-llama/Llama-3.2", "default", "nq")
 
-        assert "direct" in name
-        assert "nq" in name
-        # Should replace special chars
-        assert ":" not in name
-        assert "/" not in name
+        assert name.startswith("direct_")
+        assert "_nq_" in name
+        # Hash suffix: 8 hex chars at end
+        assert len(name.split("_")[-1]) == 8
+
+    def test_name_direct_deterministic(self):
+        """Same inputs produce same name."""
+        n1 = name_direct("hf:meta-llama/Llama-3.2", "default", "nq")
+        n2 = name_direct("hf:meta-llama/Llama-3.2", "default", "nq")
+        assert n1 == n2
+
+    def test_name_direct_different_params_different_hash(self):
+        """Different inputs produce different names."""
+        n1 = name_direct("hf:test", "default", "nq")
+        n2 = name_direct("hf:test", "concise", "nq")
+        assert n1 != n2
 
     def test_name_rag(self):
-        """Test RAG experiment naming."""
+        """Test RAG experiment naming uses hash-based format."""
         name = name_rag("hf:test", "default", "nq", "dense_bge", 5)
 
-        assert "rag" in name
-        assert "dense_bge" in name
-        assert "k5" in name
+        assert name.startswith("rag_")
+        assert "_nq_" in name
+        assert len(name.split("_")[-1]) == 8
+
+    def test_name_rag_deterministic(self):
+        """Same RAG params produce same name."""
+        n1 = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="hyde")
+        n2 = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="hyde")
+        assert n1 == n2
 
     def test_name_rag_with_query_transform(self):
-        """Test RAG naming with query transform."""
-        name = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="hyde")
-
-        assert "hyde" in name
+        """Different query transform produces different hash."""
+        n1 = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="none")
+        n2 = name_rag("hf:test", "default", "nq", "dense", 5, query_transform="hyde")
+        assert n1 != n2
 
     def test_name_rag_with_reranker(self):
-        """Test RAG naming with reranker."""
-        name = name_rag("hf:test", "default", "nq", "dense", 5, reranker="bge")
+        """Different reranker produces different hash."""
+        n1 = name_rag("hf:test", "default", "nq", "dense", 5, reranker="none")
+        n2 = name_rag("hf:test", "default", "nq", "dense", 5, reranker="bge")
+        assert n1 != n2
 
-        assert "bge" in name
+    def test_name_rag_agent_type_prefix(self):
+        """Non-fixed_rag agent types get different prefix."""
+        n1 = name_rag("hf:test", "default", "nq", "dense", 5, agent_type="iterative_rag")
+        assert n1.startswith("iterative_")
+
+        n2 = name_rag("hf:test", "default", "nq", "dense", 5, agent_type="self_rag")
+        assert n2.startswith("self_")
 
 
 if __name__ == "__main__":

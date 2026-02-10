@@ -159,12 +159,11 @@ def _apply_sampling(
     if n_experiments >= len(specs):
         return specs
 
-    if seed is not None:
-        random.seed(seed)
+    rng = random.Random(seed)
 
     if mode == "random":
         # Simple random sampling
-        sampled = random.sample(specs, n_experiments)
+        sampled = rng.sample(specs, n_experiments)
         logger.info("[%s] Random sampling: %d/%d experiments", spec_type, len(sampled), len(specs))
         return sampled
 
@@ -319,6 +318,9 @@ def _build_rag_specs(
     if not query_transforms:
         query_transforms = ["none"]
 
+    # RRF-K values for hybrid retrieval tuning
+    rrf_k_values = rag_config.get("rrf_k_values")
+
     # Reranker configs - support both old and new format
     reranker_config = rag_config.get("reranker", {})
     if isinstance(reranker_config, dict):
@@ -354,16 +356,6 @@ def _build_rag_specs(
                             rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
 
                             for dataset in datasets:
-                                name = name_rag(
-                                    model,
-                                    prompt,
-                                    dataset,
-                                    ret_name,
-                                    top_k,
-                                    qt,
-                                    rr_name,
-                                )
-
                                 # Compute fetch_k: explicit > multiplier (if reranking) > None
                                 has_reranker = rr_name != "none" and rr_cfg.get("enabled")
                                 if fetch_k_config is not None:
@@ -373,25 +365,43 @@ def _build_rag_specs(
                                 else:
                                     fetch_k = None
 
-                                specs.append(
-                                    ExperimentSpec(
-                                        name=name,
-                                        exp_type="rag",
-                                        model=model,
-                                        dataset=dataset,
-                                        prompt=prompt,
-                                        retriever=ret_name,
-                                        embedding_index=embedding_index,
-                                        sparse_index=sparse_index,
-                                        top_k=top_k,
-                                        fetch_k=fetch_k,
-                                        query_transform=qt if qt != "none" else None,
-                                        reranker=rr_name if rr_name != "none" else None,
-                                        reranker_model=rr_model,
-                                        batch_size=batch_size,
-                                        metrics=metrics,
+                                # Determine rrf_k values to iterate over
+                                # Only relevant for hybrid retrievers
+                                is_hybrid = ret_cfg.get("type") == "hybrid"
+                                rrf_k_list = rrf_k_values if (is_hybrid and rrf_k_values) else [None]
+
+                                for rrf_k in rrf_k_list:
+                                    name = name_rag(
+                                        model,
+                                        prompt,
+                                        dataset,
+                                        ret_name,
+                                        top_k,
+                                        qt,
+                                        rr_name,
+                                        rrf_k=rrf_k,
                                     )
-                                )
+
+                                    specs.append(
+                                        ExperimentSpec(
+                                            name=name,
+                                            exp_type="rag",
+                                            model=model,
+                                            dataset=dataset,
+                                            prompt=prompt,
+                                            retriever=ret_name,
+                                            embedding_index=embedding_index,
+                                            sparse_index=sparse_index,
+                                            top_k=top_k,
+                                            fetch_k=fetch_k,
+                                            query_transform=qt if qt != "none" else None,
+                                            reranker=rr_name if rr_name != "none" else None,
+                                            reranker_model=rr_model,
+                                            rrf_k=rrf_k,
+                                            batch_size=batch_size,
+                                            metrics=metrics,
+                                        )
+                                    )
 
     return specs
 
@@ -473,6 +483,7 @@ def _build_singleton_specs(
         query_transform = exp.get("query_transform")
         reranker = exp.get("reranker")
         reranker_model = exp.get("reranker_model")
+        rrf_k = exp.get("rrf_k")
 
         # Get embedding_index and sparse_index from retriever config
         ret_cfg = retriever_configs.get(retriever, {}) if retriever else {}
@@ -538,6 +549,7 @@ def _build_singleton_specs(
                     query_transform=query_transform,
                     reranker=reranker,
                     reranker_model=reranker_model,
+                    rrf_k=rrf_k,
                     batch_size=exp_batch_size,
                     metrics=exp_metrics,
                     agent_type=agent_type,

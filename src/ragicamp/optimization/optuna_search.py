@@ -84,6 +84,9 @@ def _extract_search_space(config: dict[str, Any]) -> dict[str, list[Any]]:
         "dataset": config.get("datasets", ["nq"]),
     }
 
+    # rrf_k and alpha are now conditional dimensions (hybrid-only),
+    # handled by _suggest_hybrid_params() instead of being in the global space.
+
     # Build unique reranker names from reranker configs
     reranker_config = rag.get("reranker", {})
     if isinstance(reranker_config, dict):
@@ -245,10 +248,7 @@ def _suggest_agent_params(
         return {}
 
     agent_params_config = (
-        config.get("rag", {})
-        .get("sampling", {})
-        .get("agent_params", {})
-        .get(agent_type, {})
+        config.get("rag", {}).get("sampling", {}).get("agent_params", {}).get(agent_type, {})
     )
 
     params: dict[str, Any] = {}
@@ -262,42 +262,38 @@ def _suggest_agent_params(
     return params
 
 
-def _build_agent_name(
-    base_name: str,
-    agent_type: str,
-    agent_params: dict[str, Any],
-) -> str:
-    """Build an experiment name that encodes the agent type and params.
+def _suggest_hybrid_params(
+    trial: optuna.Trial,
+    retriever_name: str,
+    retriever_lookup: dict[str, dict[str, Any]],
+    config: dict[str, Any],
+) -> tuple[Optional[int], Optional[float]]:
+    """Conditionally suggest rrf_k and alpha when retriever is hybrid.
 
-    For ``fixed_rag`` the standard ``rag_…`` name is returned unchanged.
-    For other agents the ``rag_`` prefix is replaced with the agent type
-    and any agent-specific parameters are appended:
+    These parameters only matter for hybrid retrievers (dense + sparse
+    fusion). For non-hybrid retrievers, returns (None, None) without
+    adding any dimensions to the Optuna trial.
 
-        ``iterative_rag_iter2_hf_gemma22bit_dense_minilm_k5_concise_nq``
+    Returns:
+        (rrf_k, alpha) — both None if retriever is not hybrid.
     """
-    if agent_type == "fixed_rag":
-        return base_name
+    ret_cfg = retriever_lookup.get(retriever_name, {})
+    if ret_cfg.get("type") != "hybrid":
+        return None, None
 
-    # Replace the leading "rag_" prefix with the agent type
-    if base_name.startswith("rag_"):
-        suffix = base_name[len("rag_"):]
-    else:
-        suffix = base_name
+    rag = config.get("rag", {})
 
-    parts = [agent_type]
+    rrf_k = None
+    rrf_k_values = rag.get("rrf_k_values")
+    if rrf_k_values:
+        rrf_k = trial.suggest_categorical("rrf_k", rrf_k_values)
 
-    # Append compact agent param tokens
-    for key, value in sorted(agent_params.items()):
-        if key == "max_iterations":
-            parts.append(f"iter{value}")
-        elif key == "stop_on_sufficient":
-            if value:
-                parts.append("stopok")
-        else:
-            parts.append(f"{key}{value}")
+    alpha = None
+    alpha_values = rag.get("alpha_values")
+    if alpha_values:
+        alpha = trial.suggest_categorical("alpha", alpha_values)
 
-    parts.append(suffix)
-    return "_".join(parts)
+    return rrf_k, alpha
 
 
 def _trial_to_spec(
@@ -328,6 +324,9 @@ def _trial_to_spec(
     qt = trial.suggest_categorical("query_transform", search_space["query_transform"])
     dataset = trial.suggest_categorical("dataset", search_space["dataset"])
     reranker = trial.suggest_categorical("reranker", search_space["reranker"])
+
+    # --- Hybrid-only params: rrf_k + alpha (conditional dimensions) ---
+    rrf_k, alpha = _suggest_hybrid_params(trial, retriever, retriever_lookup, config)
 
     # --- Agent type (conditional dimension) ---
     if "agent_type" in search_space:
@@ -363,7 +362,7 @@ def _trial_to_spec(
         fetch_k = None
 
     # --- Build canonical name ---
-    base_name = name_rag(
+    name = name_rag(
         model,
         prompt,
         dataset,
@@ -371,8 +370,11 @@ def _trial_to_spec(
         top_k,
         qt,
         reranker if has_reranker else "none",
+        rrf_k=rrf_k,
+        alpha=alpha,
+        agent_type=agent_type,
+        agent_params=agent_params or None,
     )
-    name = _build_agent_name(base_name, agent_type, agent_params)
 
     batch_size = config.get("batch_size", 8)
     metrics = config.get("metrics", ["f1", "exact_match"])
@@ -394,6 +396,8 @@ def _trial_to_spec(
         query_transform=qt if qt != "none" else None,
         reranker=rr_name,
         reranker_model=rr_model,
+        rrf_k=rrf_k,
+        alpha=alpha,
         batch_size=batch_size,
         metrics=metrics,
         agent_type=spec_agent_type,
@@ -452,9 +456,7 @@ def _get_experiment_metric(
 # ---------------------------------------------------------------------------
 
 
-def _create_sampler(
-    mode: str, seed: Optional[int] = None
-) -> optuna.samplers.BaseSampler:
+def _create_sampler(mode: str, seed: Optional[int] = None) -> optuna.samplers.BaseSampler:
     """Map a sampling mode name to an Optuna sampler instance.
 
     Args:
@@ -500,9 +502,9 @@ def _seed_from_existing(
     from optuna.distributions import CategoricalDistribution
 
     # Read agent_params config so we know valid choices for conditional dims
-    agent_params_config = (
-        config.get("rag", {}).get("sampling", {}).get("agent_params", {})
-    )
+    agent_params_config = config.get("rag", {}).get("sampling", {}).get("agent_params", {})
+    rag = config.get("rag", {})
+    retriever_lookup = _build_retriever_lookup(config)
 
     # Build a set of param fingerprints already in the study to avoid dupes
     existing_params: set[tuple] = set()
@@ -540,6 +542,29 @@ def _seed_from_existing(
             "dataset": meta.get("dataset"),
             "reranker": meta.get("reranker") or "none",
         }
+
+        # Handle conditional hybrid params (rrf_k, alpha)
+        ret_cfg = retriever_lookup.get(params.get("retriever", ""), {})
+        is_hybrid = ret_cfg.get("type") == "hybrid"
+
+        if is_hybrid:
+            # rrf_k: include if present in metadata and config has rrf_k_values
+            rrf_k_values = rag.get("rrf_k_values")
+            meta_rrf_k = meta.get("rrf_k")
+            if rrf_k_values and meta_rrf_k is not None:
+                if meta_rrf_k in rrf_k_values:
+                    params["rrf_k"] = meta_rrf_k
+                else:
+                    continue  # rrf_k value not in configured choices
+
+            # alpha: include if present in metadata and config has alpha_values
+            alpha_values = rag.get("alpha_values")
+            meta_alpha = meta.get("alpha")
+            if alpha_values and meta_alpha is not None:
+                if meta_alpha in alpha_values:
+                    params["alpha"] = meta_alpha
+                else:
+                    continue  # alpha value not in configured choices
 
         # Handle agent_type dimension
         meta_agent_type = meta.get("agent_type") or "fixed_rag"
@@ -589,11 +614,17 @@ def _seed_from_existing(
         distributions: dict[str, CategoricalDistribution] = {}
         for dim, value in params.items():
             if dim in search_space:
-                distributions[dim] = CategoricalDistribution(
-                    choices=search_space[dim]
-                )
+                distributions[dim] = CategoricalDistribution(choices=search_space[dim])
+            elif dim == "rrf_k":
+                # Conditional hybrid param
+                rrf_choices = rag.get("rrf_k_values", [value])
+                distributions[dim] = CategoricalDistribution(choices=rrf_choices)
+            elif dim == "alpha":
+                # Conditional hybrid param
+                alpha_choices = rag.get("alpha_values", [value])
+                distributions[dim] = CategoricalDistribution(choices=alpha_choices)
             else:
-                # Conditional param — distribution from agent_params config
+                # Conditional agent param — distribution from agent_params config
                 choices = agent_cfg.get(dim, [value])
                 if not isinstance(choices, list):
                     choices = [choices]
@@ -711,13 +742,13 @@ def run_optuna_study(
     for values in search_space.values():
         total_combos *= len(values)
 
-    completed_trials = len(
-        [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
-    )
+    completed_trials = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
     remaining = max(0, n_trials - completed_trials)
 
     mode_label = "TPE Optimization" if sampler_mode != "random" else "Random Search"
-    space_lines = "".join(f"\n    {dim}: {len(values)} values" for dim, values in search_space.items())
+    space_lines = "".join(
+        f"\n    {dim}: {len(values)} values" for dim, values in search_space.items()
+    )
     summary = (
         f"\n{'=' * 70}\n"
         f"{mode_label}: {study_name}\n"
@@ -728,6 +759,15 @@ def run_optuna_study(
         f"  Search space:{space_lines}\n"
         f"  Total possible combinations: {total_combos:,}"
     )
+    # Note conditional hybrid dimensions
+    rag_cfg = config.get("rag", {})
+    cond_dims = []
+    if rag_cfg.get("rrf_k_values"):
+        cond_dims.append(f"rrf_k: {len(rag_cfg['rrf_k_values'])} values")
+    if rag_cfg.get("alpha_values"):
+        cond_dims.append(f"alpha: {len(rag_cfg['alpha_values'])} values")
+    if cond_dims:
+        summary += f"\n  Conditional (hybrid-only): {', '.join(cond_dims)}"
     if completed_trials > 0:
         summary += (
             f"\n  Completed trials: {completed_trials} ({seeded} seeded from disk)"
@@ -765,7 +805,11 @@ def run_optuna_study(
     def objective(trial: optuna.Trial) -> float:
         """Run one experiment and return the target metric."""
         spec = _trial_to_spec(
-            trial, search_space, retriever_lookup, reranker_lookup, config,
+            trial,
+            search_space,
+            retriever_lookup,
+            reranker_lookup,
+            config,
         )
 
         trial_num = trial.number + 1
@@ -782,11 +826,17 @@ def run_optuna_study(
             "top_k=%s, prompt=%s, "
             "qt=%s, rr=%s, "
             "dataset=%s%s",
-            trial_num, n_trials, spec.name,
-            model_short, spec.retriever,
-            spec.top_k, spec.prompt,
-            spec.query_transform or "none", spec.reranker or "none",
-            spec.dataset, agent_info,
+            trial_num,
+            n_trials,
+            spec.name,
+            model_short,
+            spec.retriever,
+            spec.top_k,
+            spec.prompt,
+            spec.query_transform or "none",
+            spec.reranker or "none",
+            spec.dataset,
+            agent_info,
         )
 
         # --- Feasibility check: prune if prompt would exceed context ---
@@ -811,13 +861,15 @@ def run_optuna_study(
         exp_out = output_dir / spec.name
         if exp_out.exists():
             existing_metric = _get_experiment_metric(
-                spec.name, output_dir, optimize_metric,
+                spec.name,
+                output_dir,
+                optimize_metric,
             )
             if existing_metric is not None:
-                logger.info("  -> already complete on disk (f1=%.4f), pruning duplicate", existing_metric)
-                raise optuna.TrialPruned(
-                    f"experiment already complete: {spec.name}"
+                logger.info(
+                    "  -> already complete on disk (f1=%.4f), pruning duplicate", existing_metric
                 )
+                raise optuna.TrialPruned(f"experiment already complete: {spec.name}")
 
         # Run the experiment
         status = run_spec(
@@ -839,9 +891,10 @@ def run_optuna_study(
                 logger.info("  -> %s = %.4f", optimize_metric, value)
                 return value
 
-        # Failed/timeout experiments get 0 so Optuna avoids this region
-        logger.info("  -> experiment %s, reporting %s=0.0", status, optimize_metric)
-        return 0.0
+        # Failed/timeout experiments should be pruned so Optuna knows the
+        # trial was invalid, rather than treating 0.0 as a legitimate score.
+        logger.info("  -> experiment %s, pruning trial", status)
+        raise optuna.TrialPruned(f"Experiment {status}")
 
     # --- Run optimization ---
     if fixed_dims and fixed_combos:
@@ -860,7 +913,10 @@ def run_optuna_study(
         for i, fixed_params in enumerate(schedule):
             dims_str = ", ".join(f"{k}={v}" for k, v in fixed_params.items())
             logger.debug(
-                "Stratified trial %d/%d — fixed: %s", i + 1, remaining, dims_str,
+                "Stratified trial %d/%d — fixed: %s",
+                i + 1,
+                remaining,
+                dims_str,
             )
             study.sampler = PartialFixedSampler(
                 fixed_params=fixed_params,
@@ -883,9 +939,7 @@ def _print_study_summary(
     n_trials: int,
 ) -> None:
     """Print a summary of the Optuna study results."""
-    completed = [
-        t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE
-    ]
+    completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
 
     lines = [
         f"\n{'=' * 70}",

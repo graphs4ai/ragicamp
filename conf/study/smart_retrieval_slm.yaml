@@ -164,6 +164,10 @@ rag:
       iterative_rag:
         max_iterations: [1, 2, 3]
         stop_on_sufficient: [true]
+      self_rag:
+        retrieval_threshold: [0.3, 0.5, 0.7]
+        verify_answer: [true, false]
+        fallback_to_direct: [true]
   
   # --------------------------------------------------------------------------
   # Corpus: Wikipedia (filtered by importance)
@@ -250,55 +254,44 @@ rag:
     # =========================================================================
     # HYBRID RETRIEVERS (Dense + Sparse)
     # =========================================================================
-    # Hybrid retrievers reuse the dense index + add sparse index
-    
-    # Hybrid BM25 - 50/50 blend
+    # Hybrid retrievers reuse the dense index + add sparse index.
+    # Alpha (dense/sparse blend) is now an Optuna dimension — one retriever
+    # entry per unique (embedding + sparse) pair.  Optuna explores alpha_values.
+
+    # Hybrid BGE-large + BM25
     - type: hybrid
-      name: hybrid_bge_large_bm25_05
+      name: hybrid_bge_large_bm25
       embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
       sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       sparse_method: bm25
-      alpha: 0.5
+      alpha: 0.5  # Default — overridden by Optuna when alpha_values is set
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
-    
-    # Hybrid BM25 - 70/30 dense-heavy (typically best)
+
+    # Hybrid BGE-large + TF-IDF
     - type: hybrid
-      name: hybrid_bge_large_bm25_07
-      embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
-      sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_bm25
-      embedding_model: BAAI/bge-large-en-v1.5
-      embedding_backend: vllm
-      sparse_method: bm25
-      alpha: 0.7
-      chunk_size: 512
-      chunk_overlap: 50
-      index_type: hnsw
-    
-    # Hybrid TF-IDF - alternative sparse method
-    - type: hybrid
-      name: hybrid_bge_large_tfidf_07
+      name: hybrid_bge_large_tfidf
       embedding_index: en_bge_large_en_v1.5_c512_o50  # Reuses dense index
       sparse_index: en_bge_large_en_v1.5_c512_o50_sparse_tfidf
       embedding_model: BAAI/bge-large-en-v1.5
       embedding_backend: vllm
       sparse_method: tfidf
-      alpha: 0.7
+      alpha: 0.5  # Default — overridden by Optuna when alpha_values is set
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
-    
-    # Hybrid GTE-Qwen2 + BM25 - strong hybrid with fast embeddings
+
+    # Hybrid GTE-Qwen2 + BM25
     - type: hybrid
-      name: hybrid_gte_qwen2_bm25_07
+      name: hybrid_gte_qwen2_bm25
       embedding_index: en_gte_qwen2_1.5b_instruct_c512_o50  # Reuses GTE dense index
       embedding_model: Alibaba-NLP/gte-Qwen2-1.5B-instruct
       embedding_backend: vllm
       sparse_method: bm25
-      alpha: 0.7
+      alpha: 0.5  # Default — overridden by Optuna when alpha_values is set
       chunk_size: 512
       chunk_overlap: 50
       index_type: hnsw
@@ -335,8 +328,9 @@ rag:
     - dense_bge_m3_512              # Built - multilingual
     - dense_gte_qwen2_1.5b_512      # Built - fast, strong (1.5B params)
     # - dense_e5_mistral_512        # 7B decoder - too large for RAM
-    - hybrid_bge_large_bm25_07      # Built - uses BGE Large index + BM25
-    - hybrid_gte_qwen2_bm25_07      # Uses GTE index + BM25 (needs sparse)
+    - hybrid_bge_large_bm25         # Dense + BM25 (alpha explored by Optuna)
+    - hybrid_bge_large_tfidf        # Dense + TF-IDF (alpha explored by Optuna)
+    - hybrid_gte_qwen2_bm25         # GTE + BM25 (alpha explored by Optuna)
     - hier_bge_large_2048p_448c     # Hierarchical: search 448, return 2048
   
   top_k_values:
@@ -364,6 +358,22 @@ rag:
   
   # Fetch K multiplier (documents to retrieve before reranking)
   fetch_k_multiplier: 5  # fetch_k = top_k * 5 when reranking
+
+  # RRF fusion constant for hybrid retrievers (higher = more weight to lower ranks)
+  # Only used by hybrid retrievers; dense/hierarchical ignore this.
+  # These are conditional Optuna dimensions — suggested only for hybrid retrievers.
+  rrf_k_values:
+    - 20
+    - 40
+    - 60
+
+  # Alpha: dense/sparse blend for hybrid retrievers (0=sparse, 1=dense)
+  # Conditional Optuna dimension — suggested only for hybrid retrievers.
+  alpha_values:
+    - 0.3
+    - 0.5
+    - 0.7
+    - 0.9
   
   # --------------------------------------------------------------------------
   # Prompt Strategies

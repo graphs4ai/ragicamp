@@ -15,7 +15,6 @@ import pytest
 import optuna
 
 from ragicamp.optimization.optuna_search import (
-    _build_agent_name,
     _check_context_feasibility,
     _create_sampler,
     _extract_search_space,
@@ -186,56 +185,6 @@ class TestSuggestAgentParams:
         assert params == {}
 
 
-# ---------------------------------------------------------------------------
-# _build_agent_name
-# ---------------------------------------------------------------------------
-
-
-class TestBuildAgentName:
-    """Tests for experiment naming with agent types."""
-
-    def test_fixed_rag_unchanged(self):
-        """fixed_rag should return the base name as-is."""
-        base = "rag_vllm_test_model_dense_bge_k5_concise_nq"
-        assert _build_agent_name(base, "fixed_rag", {}) == base
-
-    def test_iterative_rag_with_params(self):
-        """iterative_rag should replace prefix and encode params."""
-        base = "rag_vllm_test_dense_k5_concise_nq"
-        name = _build_agent_name(
-            base, "iterative_rag", {"max_iterations": 2, "stop_on_sufficient": True}
-        )
-
-        assert name.startswith("iterative_rag_")
-        assert "iter2" in name
-        assert "stopok" in name
-        # Original suffix should be there
-        assert "vllm_test_dense_k5_concise_nq" in name
-
-    def test_self_rag_no_params(self):
-        """self_rag with no params should just replace the prefix."""
-        base = "rag_model_dense_k5_concise_nq"
-        name = _build_agent_name(base, "self_rag", {})
-
-        assert name == "self_rag_model_dense_k5_concise_nq"
-
-    def test_stop_on_sufficient_false_omitted(self):
-        """stop_on_sufficient=False should NOT appear in the name."""
-        base = "rag_model_dense_k5_concise_nq"
-        name = _build_agent_name(
-            base, "iterative_rag", {"max_iterations": 1, "stop_on_sufficient": False}
-        )
-
-        assert "stopok" not in name
-        assert "iter1" in name
-
-    def test_generic_param_encoding(self):
-        """Unknown params should be encoded as key+value."""
-        base = "rag_suffix"
-        name = _build_agent_name(base, "custom_agent", {"threshold": 0.5})
-
-        assert "threshold0.5" in name
-
 
 # ---------------------------------------------------------------------------
 # _trial_to_spec
@@ -313,8 +262,7 @@ class TestTrialToSpec:
             "max_iterations": 2,
             "stop_on_sufficient": True,
         }
-        assert spec.name.startswith("iterative_rag_")
-        assert "iter2" in spec.name
+        assert spec.name.startswith("iterative_")
 
     def test_spec_with_self_rag(self, agent_config):
         """Test self_rag agent has no agent_params."""
@@ -341,7 +289,7 @@ class TestTrialToSpec:
 
         assert spec.agent_type == "self_rag"
         assert spec.agent_params == ()
-        assert spec.name.startswith("self_rag_")
+        assert spec.name.startswith("self_")
 
     def test_fixed_rag_agent_type_is_none(self, agent_config):
         """Test that fixed_rag maps to agent_type=None in spec."""

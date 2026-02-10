@@ -30,6 +30,7 @@ class ExperimentSpec:
         query_transform: Query transformation type ('hyde', 'multiquery', None)
         reranker: Reranker type (e.g., 'bge', 'ms-marco')
         reranker_model: Full reranker model name
+        rrf_k: RRF fusion constant for hybrid retrievers (higher = more weight to lower ranks)
         batch_size: Batch size for generation
         metrics: List of metric names to compute
         agent_type: Explicit agent type (e.g., 'vanilla_rag', 'pipeline_rag', 'iterative_rag')
@@ -50,6 +51,8 @@ class ExperimentSpec:
     query_transform: Optional[str] = None
     reranker: Optional[str] = None
     reranker_model: Optional[str] = None
+    rrf_k: Optional[int] = None
+    alpha: Optional[float] = None  # Dense/sparse blend (0=sparse, 1=dense). None = use retriever default.
     batch_size: int = 8
     metrics: list[str] = field(default_factory=list)
     # Singleton experiment fields
@@ -68,6 +71,10 @@ class ExperimentSpec:
                 f"query_transform must be one of {self._VALID_QUERY_TRANSFORMS}, "
                 f"got '{self.query_transform}'"
             )
+        if self.alpha is not None and not (0.0 <= self.alpha <= 1.0):
+            raise ValueError(
+                f"alpha must be between 0.0 and 1.0, got {self.alpha}"
+            )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -85,6 +92,8 @@ class ExperimentSpec:
             "query_transform": self.query_transform,
             "reranker": self.reranker,
             "reranker_model": self.reranker_model,
+            "rrf_k": self.rrf_k,
+            "alpha": self.alpha,
             "batch_size": self.batch_size,
             "metrics": list(self.metrics),
         }
@@ -118,6 +127,8 @@ class ExperimentSpec:
             query_transform=data.get("query_transform"),
             reranker=data.get("reranker"),
             reranker_model=data.get("reranker_model"),
+            rrf_k=data.get("rrf_k"),
+            alpha=data.get("alpha"),
             batch_size=data.get("batch_size", 8),
             metrics=data.get("metrics", []),
             agent_type=data.get("agent_type"),

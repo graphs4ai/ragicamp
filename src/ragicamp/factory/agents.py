@@ -275,6 +275,9 @@ class AgentFactory:
 
             store = RetrievalStore.default()
             retriever_name = spec.retriever or "unknown"
+            # Include alpha in cache key for hybrid retrievers to avoid stale results
+            if spec.alpha is not None:
+                retriever_name = f"{retriever_name}_a{spec.alpha:.2f}"
             logger.info(
                 "Retrieval cache enabled (retriever=%s, db=%s)",
                 retriever_name, store.db_path,

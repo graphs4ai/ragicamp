@@ -464,11 +464,11 @@ class TestExperimentSpecCompleteness:
 class TestNamingReflectsConfig:
     """Ensure experiment names encode the config values they should."""
 
-    def test_reranker_appears_in_name(self):
-        """When reranker is set, it must appear in the generated name."""
+    def test_reranker_changes_hash(self):
+        """When reranker is set, it must produce a different hash."""
         from ragicamp.spec.naming import name_rag
 
-        name = name_rag(
+        name_with = name_rag(
             model="vllm:test/model",
             prompt="concise",
             dataset="nq",
@@ -476,14 +476,7 @@ class TestNamingReflectsConfig:
             top_k=5,
             reranker="bge",
         )
-
-        assert "_bge_" in name
-
-    def test_no_reranker_in_name_when_none(self):
-        """When reranker is 'none', it must NOT appear in the name."""
-        from ragicamp.spec.naming import name_rag
-
-        name = name_rag(
+        name_without = name_rag(
             model="vllm:test/model",
             prompt="concise",
             dataset="nq",
@@ -492,16 +485,16 @@ class TestNamingReflectsConfig:
             reranker="none",
         )
 
-        # The only _bge_ that should appear is from the retriever
-        # (dense_test doesn't contain bge, so none should be present)
-        parts = name.split("_")
-        assert "bge" not in parts[parts.index("k5") + 1:]  # After k5
+        # Same prefix/dataset but different hash
+        assert name_with != name_without
+        assert name_with.startswith("rag_")
+        assert name_without.startswith("rag_")
 
-    def test_query_transform_appears_in_name(self):
-        """When query_transform is set, it must appear in the name."""
+    def test_query_transform_changes_hash(self):
+        """When query_transform is set, it must produce a different hash."""
         from ragicamp.spec.naming import name_rag
 
-        name = name_rag(
+        name_with = name_rag(
             model="vllm:test/model",
             prompt="concise",
             dataset="nq",
@@ -509,8 +502,16 @@ class TestNamingReflectsConfig:
             top_k=5,
             query_transform="hyde",
         )
+        name_without = name_rag(
+            model="vllm:test/model",
+            prompt="concise",
+            dataset="nq",
+            retriever="dense_test",
+            top_k=5,
+            query_transform="none",
+        )
 
-        assert "_hyde_" in name
+        assert name_with != name_without
 
 
 # ---------------------------------------------------------------------------

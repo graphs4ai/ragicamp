@@ -103,6 +103,8 @@ def main():
         query_transform=spec_dict.get("query_transform"),
         reranker=spec_dict.get("reranker"),
         reranker_model=spec_dict.get("reranker_model"),
+        rrf_k=spec_dict.get("rrf_k"),
+        alpha=spec_dict.get("alpha"),
         batch_size=spec_dict.get("batch_size", 8),
         metrics=spec_metrics,
         agent_type=spec_dict.get("agent_type"),

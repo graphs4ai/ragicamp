@@ -388,8 +388,10 @@ class Experiment:
             metadata=result_metadata,
         )
 
-        with open(self.results_path, "w") as f:
+        temp_path = self.results_path.with_suffix(".tmp")
+        with open(temp_path, "w") as f:
             json.dump(result.to_dict(), f, indent=2)
+        temp_path.replace(self.results_path)
 
         metrics_str = format_metrics_summary(result.metrics)
         logger.info("Done! %s (%.1fs)", metrics_str, duration)
@@ -486,6 +488,8 @@ class Experiment:
         index_path: Path,
         retriever_config: dict | None = None,
         sparse_index_override: Optional[str] = None,
+        rrf_k: Optional[int] = None,
+        alpha_override: Optional[float] = None,
     ) -> "Callable[[], Any]":
         """Return a zero-arg callable that loads the search backend from disk.
 
@@ -495,6 +499,9 @@ class Experiment:
         Args:
             sparse_index_override: If provided, use this sparse index name
                 instead of the one in retriever_config.
+            rrf_k: RRF fusion constant for hybrid retrievers.
+            alpha_override: If provided, override the retriever config's alpha
+                for hybrid dense/sparse blending.
         """
 
         def _load():
@@ -520,6 +527,9 @@ class Experiment:
                 # Prefer explicit override (from spec) over on-disk config
                 sparse_name = sparse_index_override or cfg.get("sparse_index", f"{index_name}_sparse_bm25")
                 alpha = cfg.get("alpha", 0.5)
+                # Override with spec-level alpha if provided
+                if alpha_override is not None:
+                    alpha = alpha_override
 
                 mgr = get_artifact_manager()
                 sparse_path = mgr.get_sparse_index_path(sparse_name)
@@ -534,11 +544,14 @@ class Experiment:
                     documents=vector_index.documents,
                 )
 
-                backend = HybridSearcher(
-                    vector_index=vector_index,
-                    sparse_index=sparse_index,
-                    alpha=alpha,
-                )
+                hybrid_kwargs: dict[str, Any] = {
+                    "vector_index": vector_index,
+                    "sparse_index": sparse_index,
+                    "alpha": alpha,
+                }
+                if rrf_k is not None:
+                    hybrid_kwargs["rrf_k"] = rrf_k
+                backend = HybridSearcher(**hybrid_kwargs)
             else:
                 from ragicamp.indexes.vector_index import VectorIndex
 
@@ -622,6 +635,8 @@ class Experiment:
                         retriever_type, index_name, index_path,
                         retriever_config=retriever_config,
                         sparse_index_override=spec.sparse_index,
+                        rrf_k=spec.rrf_k,
+                        alpha_override=spec.alpha,
                     ),
                     is_hybrid=(retriever_type == "hybrid"),
                 )
