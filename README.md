@@ -317,11 +317,12 @@ make pre-push   # format + lint + test
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Agents Guide](docs/guides/AGENTS.md)
 - [Metrics Guide](docs/guides/METRICS.md)
 - [Optuna Study Design](docs/OPTUNA_STUDY_DESIGN.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Experiment Configurations](docs/EXPERIMENT_CONFIGURATIONS.md)
+- [Future Work](docs/FUTURE_WORK.md)
+- [Cheatsheet](CHEATSHEET.md)
 
 ## License
 
