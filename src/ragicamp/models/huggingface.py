@@ -1,7 +1,7 @@
 """HuggingFace model implementation with proper resource management."""
 
 import gc
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -21,7 +21,7 @@ class HuggingFaceModel(LanguageModel):
     def __init__(
         self,
         model_name: str,
-        device: Optional[str] = None,
+        device: str | None = None,
         load_in_8bit: bool = False,
         load_in_4bit: bool = False,
         **kwargs: Any,
@@ -76,10 +76,6 @@ class HuggingFaceModel(LanguageModel):
         if not self._use_quantization:
             self.model = self.model.to(self.device)
 
-        # Enable gradient checkpointing to save memory (trades compute for memory)
-        if hasattr(self.model, "gradient_checkpointing_enable"):
-            self.model.gradient_checkpointing_enable()
-
         self.model.eval()
         self._is_loaded = True
 
@@ -116,13 +112,13 @@ class HuggingFaceModel(LanguageModel):
 
     def generate(
         self,
-        prompt: Union[str, list[str]],
-        max_tokens: Optional[int] = None,
+        prompt: str | list[str],
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
+        stop: list[str] | None = None,
         **kwargs: Any,
-    ) -> Union[str, list[str]]:
+    ) -> str | list[str]:
         """Generate text using HuggingFace model."""
         is_batch = isinstance(prompt, list)
         prompts = prompt if is_batch else [prompt]

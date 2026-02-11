@@ -8,13 +8,11 @@ This package provides immutable experiment configuration objects:
 
 from ragicamp.spec.builder import build_specs
 from ragicamp.spec.experiment import ExperimentSpec
-from ragicamp.spec.naming import _model_short, _spec_hash, name_direct, name_rag
+from ragicamp.spec.naming import name_direct, name_rag
 
 __all__ = [
     "ExperimentSpec",
     "build_specs",
     "name_direct",
     "name_rag",
-    "_model_short",
-    "_spec_hash",
 ]

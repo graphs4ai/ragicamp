@@ -5,7 +5,7 @@ that auto-detects GPU capabilities.
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import ClassVar
 
 
 @dataclass(frozen=True)
@@ -18,12 +18,12 @@ class GPUProfile:
 
     tier: str  # "high", "mid", "low", "cpu"
     gpu_mem_gb: float
-    max_num_seqs: Optional[int]
-    max_num_batched_tokens: Optional[int]
+    max_num_seqs: int | None
+    max_num_batched_tokens: int | None
 
     # Tier thresholds (GB)
-    _HIGH_THRESHOLD: float = 160  # B200, A100-80GB×2, etc.
-    _MID_THRESHOLD: float = 80  # A100-80GB, H100, etc.
+    _HIGH_THRESHOLD: ClassVar[float] = 160  # B200, A100-80GB×2, etc.
+    _MID_THRESHOLD: ClassVar[float] = 80  # A100-80GB, H100, etc.
 
     @classmethod
     def detect(cls) -> "GPUProfile":

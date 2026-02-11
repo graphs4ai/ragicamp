@@ -1,6 +1,7 @@
 """Evaluation metrics for RAG systems."""
 
-from typing import Any, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.async_base import AsyncAPIMetric
@@ -11,9 +12,9 @@ logger = get_logger(__name__)
 
 def _expand_for_multi_reference(
     predictions: list[str],
-    references: list[Union[str, list[str]]],
-    questions: Optional[list[str]] = None,
-) -> tuple[list[str], list[str], Optional[list[str]], list[int], list[int]]:
+    references: list[str | list[str]],
+    questions: list[str] | None = None,
+) -> tuple[list[str], list[str], list[str] | None, list[int], list[int]]:
     """Expand predictions and references for multi-reference evaluation.
 
     For each prediction with multiple references, creates one (pred, ref) pair
@@ -91,9 +92,9 @@ def compute_metrics_batched(
     metrics: list[Metric],
     predictions: list[str],
     references: list[Any],
-    questions: Optional[list[str]] = None,
-    already_computed: Optional[list[str]] = None,
-    on_metric_complete: Optional[callable] = None,
+    questions: list[str] | None = None,
+    already_computed: list[str] | None = None,
+    on_metric_complete: Callable | None = None,
 ) -> tuple[dict[str, float], dict[str, list[float]], list[str], list[str], dict[str, float]]:
     """Compute metrics with proper GPU memory management and multi-reference support.
 
@@ -123,9 +124,8 @@ def compute_metrics_batched(
     """
     import time as _time
 
-    from ragicamp.utils.resource_manager import ResourceManager
-
     from ragicamp.core.constants import is_error_prediction
+    from ragicamp.utils.resource_manager import ResourceManager
 
     already_computed = already_computed or []
     aggregate_results: dict[str, float] = {}

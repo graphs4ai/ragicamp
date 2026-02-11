@@ -10,7 +10,8 @@ Supports three modes:
 """
 
 import random
-from typing import Any, Optional
+from itertools import product as cartesian
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.spec.experiment import ExperimentSpec
@@ -21,8 +22,8 @@ logger = get_logger(__name__)
 
 def build_specs(
     config: dict[str, Any],
-    sampling_override: Optional[dict[str, Any]] = None,
-    exclude_names: Optional[set[str]] = None,
+    sampling_override: dict[str, Any] | None = None,
+    exclude_names: set[str] | None = None,
 ) -> list[ExperimentSpec]:
     """Build experiment specs from YAML config.
 
@@ -129,7 +130,7 @@ def _apply_sampling(
     specs: list[ExperimentSpec],
     sampling_config: dict[str, Any],
     spec_type: str,
-    exclude_names: Optional[set[str]] = None,
+    exclude_names: set[str] | None = None,
 ) -> list[ExperimentSpec]:
     """Apply sampling to reduce experiment count.
 
@@ -351,71 +352,54 @@ def _build_rag_specs(
     if not reranker_cfgs:
         reranker_cfgs = [{"enabled": False, "name": "none"}]
 
-    for model in models:
-        for ret_name in retriever_names:
-            # Get embedding_index and sparse_index from retriever config
-            ret_cfg = retriever_configs.get(ret_name, {})
-            embedding_index = ret_cfg.get("embedding_index")
-            sparse_index = ret_cfg.get("sparse_index")
+    for model, ret_name, top_k, prompt, qt, rr_cfg, dataset in cartesian(
+        models, retriever_names, top_k_values, prompts, query_transforms, reranker_cfgs, datasets,
+    ):
+        ret_cfg = retriever_configs.get(ret_name, {})
+        embedding_index = ret_cfg.get("embedding_index")
+        sparse_index = ret_cfg.get("sparse_index")
 
-            for top_k in top_k_values:
-                for prompt in prompts:
-                    for qt in query_transforms:
-                        for rr_cfg in reranker_cfgs:
-                            rr_name = (
-                                rr_cfg.get("name", "none") if rr_cfg.get("enabled") else "none"
-                            )
-                            rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
+        rr_name = rr_cfg.get("name", "none") if rr_cfg.get("enabled") else "none"
+        rr_model = rr_cfg.get("model") if rr_cfg.get("enabled") else None
 
-                            for dataset in datasets:
-                                # Compute fetch_k: explicit > multiplier (if reranking) > None
-                                has_reranker = rr_name != "none" and rr_cfg.get("enabled")
-                                if fetch_k_config is not None:
-                                    fetch_k = fetch_k_config
-                                elif has_reranker:
-                                    fetch_k = top_k * fetch_k_multiplier
-                                else:
-                                    fetch_k = None
+        # Compute fetch_k: explicit > multiplier (if reranking) > None
+        has_reranker = rr_name != "none" and rr_cfg.get("enabled")
+        if fetch_k_config is not None:
+            fetch_k = fetch_k_config
+        elif has_reranker:
+            fetch_k = top_k * fetch_k_multiplier
+        else:
+            fetch_k = None
 
-                                # Determine rrf_k values to iterate over
-                                # Only relevant for hybrid retrievers
-                                is_hybrid = ret_cfg.get("type") == "hybrid"
-                                rrf_k_list = (
-                                    rrf_k_values if (is_hybrid and rrf_k_values) else [None]
-                                )
+        # RRF-K values — only relevant for hybrid retrievers
+        is_hybrid = ret_cfg.get("type") == "hybrid"
+        rrf_k_list = rrf_k_values if (is_hybrid and rrf_k_values) else [None]
 
-                                for rrf_k in rrf_k_list:
-                                    name = name_rag(
-                                        model,
-                                        prompt,
-                                        dataset,
-                                        ret_name,
-                                        top_k,
-                                        qt,
-                                        rr_name,
-                                        rrf_k=rrf_k,
-                                    )
+        for rrf_k in rrf_k_list:
+            name = name_rag(
+                model, prompt, dataset, ret_name, top_k, qt, rr_name, rrf_k=rrf_k,
+            )
 
-                                    specs.append(
-                                        ExperimentSpec(
-                                            name=name,
-                                            exp_type="rag",
-                                            model=model,
-                                            dataset=dataset,
-                                            prompt=prompt,
-                                            retriever=ret_name,
-                                            embedding_index=embedding_index,
-                                            sparse_index=sparse_index,
-                                            top_k=top_k,
-                                            fetch_k=fetch_k,
-                                            query_transform=qt if qt != "none" else None,
-                                            reranker=rr_name if rr_name != "none" else None,
-                                            reranker_model=rr_model,
-                                            rrf_k=rrf_k,
-                                            batch_size=batch_size,
-                                            metrics=metrics,
-                                        )
-                                    )
+            specs.append(
+                ExperimentSpec(
+                    name=name,
+                    exp_type="rag",
+                    model=model,
+                    dataset=dataset,
+                    prompt=prompt,
+                    retriever=ret_name,
+                    embedding_index=embedding_index,
+                    sparse_index=sparse_index,
+                    top_k=top_k,
+                    fetch_k=fetch_k,
+                    query_transform=qt if qt != "none" else None,
+                    reranker=rr_name if rr_name != "none" else None,
+                    reranker_model=rr_model,
+                    rrf_k=rrf_k,
+                    batch_size=batch_size,
+                    metrics=metrics,
+                )
+            )
 
     return specs
 

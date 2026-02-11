@@ -5,7 +5,7 @@ Handles Flash Attention 2 and torch.compile optimizations.
 """
 
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 # Disable tokenizers parallelism to avoid fork warnings with multiprocessing
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -47,8 +47,8 @@ class SentenceTransformerEmbedder:
         self.use_compile = use_compile
         self.trust_remote_code = trust_remote_code
 
-        self._model: Optional[SentenceTransformer] = None
-        self._embedding_dim: Optional[int] = None
+        self._model: SentenceTransformer | None = None
+        self._embedding_dim: int | None = None
 
     @property
     def model(self) -> "SentenceTransformer":
@@ -134,9 +134,12 @@ class SentenceTransformerEmbedder:
     def unload(self) -> None:
         """Unload the model from GPU memory."""
         if self._model is not None:
+            import gc
+
             del self._model
             self._model = None
             self._embedding_dim = None
+            gc.collect()
 
             # Clear CUDA cache
             try:

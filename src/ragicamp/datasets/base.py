@@ -2,9 +2,9 @@
 
 import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 
@@ -26,12 +26,8 @@ class QAExample:
     id: str
     question: str
     answers: list[str]
-    context: Optional[str] = None
-    metadata: dict[str, Any] = None
-
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
+    context: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class QADataset(ABC):
@@ -42,7 +38,7 @@ class QADataset(ABC):
     """
 
     def __init__(
-        self, name: str, split: str = "train", cache_dir: Optional[Path] = None, **kwargs: Any
+        self, name: str, split: str = "train", cache_dir: Path | None = None, **kwargs: Any
     ):
         """Initialize the dataset.
 
@@ -75,7 +71,7 @@ class QADataset(ABC):
         """Iterate over examples."""
         return iter(self.examples)
 
-    def get_subset(self, n: int, seed: Optional[int] = None) -> list[QAExample]:
+    def get_subset(self, n: int, seed: int | None = None) -> list[QAExample]:
         """Get a random subset of examples.
 
         Args:
@@ -108,7 +104,7 @@ class QADataset(ABC):
             logger.info("Filtered out %d examples without explicit answers", filtered_count)
             logger.info("Remaining: %d examples", len(self.examples))
 
-    def get_examples_with_answers(self, n: Optional[int] = None) -> list[QAExample]:
+    def get_examples_with_answers(self, n: int | None = None) -> list[QAExample]:
         """Get examples that have explicit answers.
 
         Args:
@@ -144,7 +140,7 @@ class QADataset(ABC):
         """
         return self.cache_dir / f"{self.name}_{self.split}.json"
 
-    def save_to_cache(self, info: Optional[dict[str, Any]] = None) -> Path:
+    def save_to_cache(self, info: dict[str, Any] | None = None) -> Path:
         """Save dataset to cache file.
 
         Args:
@@ -216,8 +212,8 @@ class QADataset(ABC):
     def download_and_cache(
         cls,
         split: str = "validation",
-        cache_dir: Optional[Path] = None,
-        max_examples: Optional[int] = None,
+        cache_dir: Path | None = None,
+        max_examples: int | None = None,
         filter_no_answer: bool = True,
         force_download: bool = False,
         **kwargs: Any,
