@@ -621,7 +621,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.20 Widespread ruff lint violations (30+ errors across codebase)
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** 60 files flagged by `ruff format --check`; 30 `ruff check` errors across agents, providers, factory
 - **Problem:** Pre-existing violations include:
   - **UP035** — `from typing import Iterator/Callable` → should use `collections.abc` (Python 3.10+)
@@ -671,5 +671,5 @@ These are not issues per se but architectural improvements for when the project 
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
 | P3 — Interface/Design | 14 | 8 | 6 |
-| P4 — Polish | 21 | 12 | 9 |
-| **Total** | **68** | **49** | **19** |
+| P4 — Polish | 21 | 13 | 8 |
+| **Total** | **68** | **50** | **18** |
