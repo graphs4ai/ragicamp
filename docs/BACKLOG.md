@@ -390,7 +390,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.2 Searcher protocol doesn't match HybridSearcher.batch_search
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `core/types.py:76-102`, `retrievers/hybrid.py:118-123`
 - **Problem:** `Searcher` protocol requires `(query_embeddings, top_k)` but `HybridSearcher` requires extra `query_texts`. The formal type contract is broken. `is_hybrid_searcher()` duck-typing at `agents/base.py:208` works around it.
 - **Fix options:**
@@ -408,7 +408,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.4 Pervasive `Any` typing in agents
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `agents/base.py:217-226`, `agents/fixed_rag.py:68-71`, `agents/iterative_rag.py:110-114`, `agents/self_rag.py:131-135`
 - **Problem:** Nearly every parameter in `batch_transform_embed_and_search` and RAG agent constructors is typed `Any`. Typos in keyword arguments silently swallowed. No IDE autocompletion or type checking benefit.
 - **Fix:** Use `TYPE_CHECKING` imports:
@@ -439,7 +439,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.7 MetricFactory and DatasetFactory use long if-elif chains
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11 (MetricFactory converted to registry; DatasetFactory deferred)
 - **Files:** `factory/metrics.py:29-149`, `factory/datasets.py:64-116`
 - **Problem:** 120-line method with 7 try/except import blocks and 8 if-elif branches. Adding a new metric/dataset requires modifying the factory method. `_custom_metrics` registry exists but is unused.
 - **Fix:** Use a registry dictionary pattern:
@@ -488,7 +488,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.14 `SentenceChunker` misuses `chunk_size` as sentence count
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `corpus/chunking.py:142-143`
 - **Problem:** `ChunkConfig.chunk_size` is documented as "target size in characters" but `SentenceChunker` uses it as number of sentences. `chunk_size=512` (characters) → 512-sentence chunks.
 - **Fix:** Use a separate config field for sentence count, or convert character size to approximate sentence count.
@@ -582,7 +582,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.14 Duplicate GPU tier detection logic
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `models/providers/gpu_profile.py:29-71`, `models/vllm_embedder.py:82-121`
 - **Fix:** Consolidate into `GPUProfile` by adding embedder-specific profiles.
 - **Effort:** Medium
@@ -670,6 +670,6 @@ These are not issues per se but architectural improvements for when the project 
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
-| P3 — Interface/Design | 14 | 8 | 6 |
-| P4 — Polish | 21 | 20 | 1 |
-| **Total** | **68** | **57** | **11** |
+| P3 — Interface/Design | 14 | 12 | 2 |
+| P4 — Polish | 21 | 21 | 0 |
+| **Total** | **68** | **62** | **6** |
