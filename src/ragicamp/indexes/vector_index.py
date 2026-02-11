@@ -428,8 +428,11 @@ class VectorIndex:
         io_flags = faiss.IO_FLAG_MMAP if use_mmap else 0
         faiss_index = faiss.read_index(str(path / "index.faiss"), io_flags)
 
+        # SECURITY: pickle.load executes arbitrary code. These files are only
+        # loaded from locally-built artifacts (artifacts/ directory). Do NOT load
+        # pickles from untrusted / user-uploaded sources without verification.
         with open(path / "documents.pkl", "rb") as f:
-            documents = pickle.load(f)
+            documents = pickle.load(f)  # noqa: S301
 
         # Convert old Document format if needed
         documents = cls._ensure_document_type(documents)

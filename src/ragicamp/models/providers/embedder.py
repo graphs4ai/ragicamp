@@ -173,7 +173,6 @@ class SentenceTransformerWrapper(Embedder):
 
         if hasattr(self._model, "to"):
             self._model.to("cpu")
-        del self._model
         self._model = None
         gc.collect()
         if torch.cuda.is_available():

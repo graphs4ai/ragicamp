@@ -219,7 +219,14 @@ def is_hybrid_searcher(index: Any) -> bool:
     Used by all RAG agents to decide whether to pass query texts
     alongside embeddings during search.
     """
-    return hasattr(index, "sparse_index")
+    from ragicamp.retrievers.hybrid import HybridSearcher
+    from ragicamp.retrievers.lazy import LazySearchBackend
+
+    if isinstance(index, HybridSearcher):
+        return True
+    if isinstance(index, LazySearchBackend):
+        return getattr(index, "_is_hybrid", False)
+    return False
 
 
 def batch_transform_embed_and_search(

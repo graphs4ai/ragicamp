@@ -13,6 +13,7 @@ Use cross-encoders as a second stage after initial retrieval:
 import copy
 from typing import TYPE_CHECKING
 
+from ragicamp.core.constants import RERANKER_MODELS
 from ragicamp.core.logging import get_logger
 from ragicamp.rag.rerankers.base import Reranker
 
@@ -37,13 +38,7 @@ class CrossEncoderReranker(Reranker):
     - "ms-marco-large": cross-encoder/ms-marco-MiniLM-L-12-v2 (balanced)
     """
 
-    MODELS = {
-        "bge": "BAAI/bge-reranker-large",
-        "bge-base": "BAAI/bge-reranker-base",
-        "bge-v2": "BAAI/bge-reranker-v2-m3",
-        "ms-marco": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "ms-marco-large": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-    }
+    MODELS = RERANKER_MODELS
 
     def __init__(
         self,

@@ -158,9 +158,7 @@ class SparseIndex:
 
         top_indices = np.argsort(similarities)[-top_k:][::-1]
         return [
-            (int(idx), float(similarities[idx]))
-            for idx in top_indices
-            if similarities[idx] > 0.0
+            (int(idx), float(similarities[idx])) for idx in top_indices if similarities[idx] > 0.0
         ]
 
     def _search_bm25(self, query: str, top_k: int) -> list[tuple[int, float]]:
@@ -172,11 +170,7 @@ class SparseIndex:
         scores = self._bm25.get_scores(tokenized_query)
 
         top_indices = np.argsort(scores)[-top_k:][::-1]
-        return [
-            (int(idx), float(scores[idx]))
-            for idx in top_indices
-            if scores[idx] > 0.0
-        ]
+        return [(int(idx), float(scores[idx])) for idx in top_indices if scores[idx] > 0.0]
 
     def batch_search(self, queries: list[str], top_k: int = 10) -> list[list[tuple[int, float]]]:
         """Batch search for multiple queries.
@@ -207,11 +201,13 @@ class SparseIndex:
         results = []
         for similarities in all_similarities:
             top_indices = np.argsort(similarities)[-top_k:][::-1]
-            results.append([
-                (int(idx), float(similarities[idx]))
-                for idx in top_indices
-                if similarities[idx] > 0.0
-            ])
+            results.append(
+                [
+                    (int(idx), float(similarities[idx]))
+                    for idx in top_indices
+                    if similarities[idx] > 0.0
+                ]
+            )
 
         return results
 
@@ -310,7 +306,8 @@ class SparseIndex:
             # Create placeholder documents (will be linked later)
             index.documents = [Document(id=doc_id, text="") for doc_id in doc_ids]
 
-        # Load method-specific components
+        # SECURITY: pickle.load executes arbitrary code. These files are only
+        # loaded from locally-built artifacts. Do NOT load from untrusted sources.
         if index.method == SparseMethod.TFIDF:
             with open(path / "vectorizer.pkl", "rb") as f:
                 index._vectorizer = pickle.load(f)

@@ -17,9 +17,13 @@ Usage:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
+
+# Module-level cache for fewshot examples loaded from YAML.
+# Loaded once per process, never invalidated (static file).
+_fewshot_cache: dict[str, Any] | None = None
 
 
 @dataclass
@@ -55,7 +59,7 @@ class PromptBuilder:
     3. Clear transition to the actual question
     4. Consistent formatting throughout
     5. Last instruction = most important (LLMs follow it better)
-    
+
     Prompt types:
     - concise: Minimal, just answer
     - structured: Clear delimiters, explicit format
@@ -63,8 +67,6 @@ class PromptBuilder:
     - cot: Chain-of-thought for complex questions
     - cited: Answers with [1], [2] citations
     """
-
-    _fewshot_cache: Optional[dict[str, Any]] = None
 
     def __init__(self, config: PromptConfig):
         self.config = config
@@ -111,7 +113,7 @@ class PromptBuilder:
 
     def build_rag(self, query: str, context: str) -> str:
         """Build prompt for RAG (with retrieved context).
-        
+
         Dispatches to specialized builders based on config.
         """
         if self.config.use_delimiters:
@@ -241,11 +243,12 @@ Answer:"""
             lines.append("")  # blank line between examples
         return "\n".join(lines).rstrip()
 
-    @classmethod
-    def _load_fewshot_file(cls) -> dict[str, Any]:
-        """Load fewshot examples from YAML file (cached)."""
-        if cls._fewshot_cache is not None:
-            return cls._fewshot_cache
+    @staticmethod
+    def _load_fewshot_file() -> dict[str, Any]:
+        """Load fewshot examples from YAML file (cached at module level)."""
+        global _fewshot_cache
+        if _fewshot_cache is not None:
+            return _fewshot_cache
 
         from ragicamp.utils.paths import get_project_root
 
@@ -257,11 +260,11 @@ Answer:"""
         for path in paths:
             if path.exists():
                 with open(path) as f:
-                    cls._fewshot_cache = yaml.safe_load(f) or {}
-                    return cls._fewshot_cache
+                    _fewshot_cache = yaml.safe_load(f) or {}
+                    return _fewshot_cache
 
-        cls._fewshot_cache = {}
-        return cls._fewshot_cache
+        _fewshot_cache = {}
+        return _fewshot_cache
 
     @classmethod
     def from_config(cls, prompt_type: str = "default", dataset: str = "nq") -> "PromptBuilder":

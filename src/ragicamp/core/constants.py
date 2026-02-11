@@ -86,6 +86,18 @@ class MetricType(str, Enum):
         return metric_type in context_metrics
 
 
+# === Reranker Model Registry ===
+# Single source of truth for reranker short names → HuggingFace model paths.
+# Referenced by both RerankerProvider and CrossEncoderReranker.
+RERANKER_MODELS: dict[str, str] = {
+    "bge": "BAAI/bge-reranker-large",
+    "bge-base": "BAAI/bge-reranker-base",
+    "bge-v2": "BAAI/bge-reranker-v2-m3",
+    "ms-marco": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "ms-marco-large": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+}
+
+
 # === Error Markers ===
 
 # Prefix used by model backends when an API call fails.

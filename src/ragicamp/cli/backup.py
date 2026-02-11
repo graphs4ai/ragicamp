@@ -119,11 +119,18 @@ def should_skip_file(path: Path) -> bool:
     name = path.name
     if name.startswith("."):
         return True
+    parts = path.parts
     for pattern in SKIP_PATTERNS:
         if pattern.startswith("*"):
+            # Glob-like: *.log matches any file ending in .log
             if name.endswith(pattern[1:]):
                 return True
-        elif name == pattern or pattern in str(path):
+        elif pattern.startswith("."):
+            # Extension/suffix: .tmp matches files ending with .tmp
+            if name.endswith(pattern):
+                return True
+        elif pattern in parts or name == pattern:
+            # Exact match on path component or filename
             return True
     return False
 
