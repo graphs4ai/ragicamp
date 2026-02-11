@@ -349,7 +349,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.8 Execution phases — generation and metrics untested
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `execution/phases/generation.py`, `execution/phases/metrics_phase.py`
 - **Gap:** Generation phase handler and metrics phase handler have zero tests. Only `init_phase.py` is tested.
 - **Effort:** Medium
@@ -369,7 +369,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.10 Consolidate duplicate mocks across test files
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `tests/test_agents.py`, `tests/test_cache.py`, `tests/test_config_wiring.py`, `tests/conftest.py`
 - **Gap:** Each test file defines its own `MockGenerator`, `MockEmbedder`, `MockGeneratorProvider`, `MockEmbedderProvider`, `MockVectorIndex` — duplicating what `conftest.py` already provides. Inconsistent mock behavior across files.
 - **Fix:** Consolidate into `conftest.py`. Ensure shared mocks match real interfaces.
@@ -669,7 +669,7 @@ These are not issues per se but architectural improvements for when the project 
 |-------|-------|------|-----------|
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
-| P2 — Test Coverage | 10 | 8 | 2 |
+| P2 — Test Coverage | 10 | 10 | 0 |
 | P3 — Interface/Design | 14 | 12 | 2 |
 | P4 — Polish | 21 | 21 | 0 |
-| **Total** | **68** | **62** | **6** |
+| **Total** | **68** | **64** | **4** |
