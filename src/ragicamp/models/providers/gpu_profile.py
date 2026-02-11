@@ -25,6 +25,23 @@ class GPUProfile:
     _HIGH_THRESHOLD: ClassVar[float] = 160  # B200, A100-80GB×2, etc.
     _MID_THRESHOLD: ClassVar[float] = 80  # A100-80GB, H100, etc.
 
+    def embedder_batch_params(self) -> tuple[int, int]:
+        """Get recommended (max_num_seqs, max_num_batched_tokens) for vLLM embedder.
+
+        Embedders need much larger batch params than generators since embeddings
+        are smaller and don't generate tokens.
+        """
+        if self.gpu_mem_gb >= 160:
+            return 16384, 262144  # 256k tokens
+        elif self.gpu_mem_gb >= 80:
+            return 8192, 131072  # 128k tokens
+        elif self.gpu_mem_gb >= 40:
+            return 4096, 65536  # 64k tokens
+        elif self.gpu_mem_gb >= 16:
+            return 1024, 16384  # 16k tokens
+        else:
+            return 256, 4096  # 4k tokens (CPU/small GPU)
+
     @classmethod
     def detect(cls) -> "GPUProfile":
         """Detect GPU and return an appropriate profile.

@@ -24,7 +24,7 @@ Check vLLM model compatibility before using.
 """
 
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 # Disable tokenizers parallelism to avoid fork warnings with multiprocessing
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -53,9 +53,9 @@ class VLLMEmbedder:
         gpu_memory_fraction: float = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL,  # Use almost all VRAM
         enforce_eager: bool = False,  # CUDA graphs improve throughput
         trust_remote_code: bool = True,
-        max_num_seqs: Optional[int] = None,  # Auto-detect based on GPU memory
-        max_num_batched_tokens: Optional[int] = None,  # Auto-detect based on GPU memory
-        max_model_len: Optional[int] = None,  # None = use model default
+        max_num_seqs: int | None = None,  # Auto-detect based on GPU memory
+        max_num_batched_tokens: int | None = None,  # Auto-detect based on GPU memory
+        max_model_len: int | None = None,  # None = use model default
     ):
         """Initialize vLLM embedder optimized for maximum throughput.
 
@@ -76,47 +76,27 @@ class VLLMEmbedder:
         self._max_num_batched_tokens = max_num_batched_tokens
         self._max_model_len = max_model_len
 
-        self._llm: Optional[vllm.LLM] = None
-        self._embedding_dim: Optional[int] = None
+        self._llm: vllm.LLM | None = None
+        self._embedding_dim: int | None = None
 
     def _auto_detect_batch_params(self) -> tuple[int, int]:
         """Auto-detect optimal batch parameters based on GPU memory.
-        
+
         Returns:
             (max_num_seqs, max_num_batched_tokens) tuned for the GPU
         """
-        import torch
-        
-        if not torch.cuda.is_available():
-            return 256, 8192  # Conservative CPU defaults
-        
-        gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-        
-        # Scale batch params based on GPU memory
-        # B200 (192GB): maximum throughput - can handle massive batches
-        # H100/A100-80GB (80GB): high throughput
-        # A100-40GB (40GB): moderate throughput
-        # Consumer GPUs (8-24GB): conservative
-        if gpu_mem_gb >= 160:
-            # B200 with 192GB - push to the max
-            max_num_seqs = 16384
-            max_num_batched_tokens = 262144  # 256k tokens
-        elif gpu_mem_gb >= 80:
-            max_num_seqs = 8192
-            max_num_batched_tokens = 131072  # 128k tokens
-        elif gpu_mem_gb >= 40:
-            max_num_seqs = 4096
-            max_num_batched_tokens = 65536  # 64k tokens
-        elif gpu_mem_gb >= 16:
-            max_num_seqs = 1024
-            max_num_batched_tokens = 16384  # 16k tokens
-        else:
-            max_num_seqs = 256
-            max_num_batched_tokens = 4096  # 4k tokens
-        
+        from ragicamp.models.providers.gpu_profile import GPUProfile
+
+        profile = GPUProfile.detect()
+        max_num_seqs, max_num_batched_tokens = profile.embedder_batch_params()
+
         logger.info(
-            "Auto-detected batch params for %.0fGB GPU: max_num_seqs=%d, max_batched_tokens=%d",
-            gpu_mem_gb, max_num_seqs, max_num_batched_tokens
+            "Auto-detected batch params for %.0fGB GPU (%s): "
+            "max_num_seqs=%d, max_batched_tokens=%d",
+            profile.gpu_mem_gb,
+            profile.tier,
+            max_num_seqs,
+            max_num_batched_tokens,
         )
         return max_num_seqs, max_num_batched_tokens
 
@@ -124,16 +104,20 @@ class VLLMEmbedder:
     def llm(self):
         """Lazy load the vLLM model."""
         if self._llm is None:
-            from vllm import LLM
-
             # Check GPU availability before loading
             import torch
+            from vllm import LLM
+
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
                 gpu_mem_allocated = torch.cuda.memory_allocated(0) / 1e9
-                logger.info("GPU detected: %s (%.1f GB total, %.2f GB allocated)", 
-                           gpu_name, gpu_mem, gpu_mem_allocated)
+                logger.info(
+                    "GPU detected: %s (%.1f GB total, %.2f GB allocated)",
+                    gpu_name,
+                    gpu_mem,
+                    gpu_mem_allocated,
+                )
             else:
                 logger.warning("No GPU detected! vLLM will be slow on CPU.")
 
@@ -150,14 +134,14 @@ class VLLMEmbedder:
             # - Auto-detect batch params based on GPU memory
             # - enforce_eager=False: CUDA graphs reduce kernel launch overhead
             # - gpu_memory_utilization=0.95: Use all available VRAM
-            
+
             # Auto-detect or use provided batch parameters
             max_num_seqs, max_num_batched_tokens = self._auto_detect_batch_params()
             if self._max_num_seqs is not None:
                 max_num_seqs = self._max_num_seqs
             if self._max_num_batched_tokens is not None:
                 max_num_batched_tokens = self._max_num_batched_tokens
-            
+
             llm_kwargs = {
                 "model": self.model_name,
                 "runner": "pooling",  # vLLM 0.15+ pooling mode
@@ -168,24 +152,28 @@ class VLLMEmbedder:
                 "max_num_seqs": max_num_seqs,
                 "max_num_batched_tokens": max_num_batched_tokens,
             }
-            
+
             # Only set max_model_len if explicitly provided (otherwise use model default)
             if self._max_model_len is not None:
                 llm_kwargs["max_model_len"] = self._max_model_len
                 logger.info("Using custom max_model_len=%d", self._max_model_len)
-            
+
             logger.info(
                 "Throughput config: max_num_seqs=%d, max_batched_tokens=%d",
-                max_num_seqs, max_num_batched_tokens,
+                max_num_seqs,
+                max_num_batched_tokens,
             )
-            
+
             self._llm = LLM(**llm_kwargs)
 
             # Log actual GPU memory after loading
             if torch.cuda.is_available():
                 gpu_mem_after = torch.cuda.memory_allocated(0) / 1e9
-                logger.info("vLLM embedding model loaded: %s (GPU memory: %.2f GB)", 
-                           self.model_name, gpu_mem_after)
+                logger.info(
+                    "vLLM embedding model loaded: %s (GPU memory: %.2f GB)",
+                    self.model_name,
+                    gpu_mem_after,
+                )
 
         return self._llm
 
@@ -223,6 +211,7 @@ class VLLMEmbedder:
         # Log first encode to verify GPU is being used
         if not hasattr(self, "_first_encode_logged"):
             import torch
+
             if torch.cuda.is_available():
                 gpu_mem_before = torch.cuda.memory_allocated(0) / 1e9
                 logger.debug("GPU memory before encode: %.2f GB", gpu_mem_before)
