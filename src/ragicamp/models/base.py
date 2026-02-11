@@ -13,7 +13,7 @@ See ragicamp.models.providers for the new architecture.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union
+from typing import Any
 
 
 class LanguageModel(ABC):
@@ -23,7 +23,7 @@ class LanguageModel(ABC):
     - Lazy loading (model not loaded until needed)
     - Context manager for automatic cleanup
     - Sequential resource management (one model at a time)
-    
+
     This class is still appropriate for:
     - OpenAI/Anthropic API calls (no local GPU)
     - LLM-as-judge evaluation
@@ -42,13 +42,13 @@ class LanguageModel(ABC):
     @abstractmethod
     def generate(
         self,
-        prompt: Union[str, list[str]],
-        max_tokens: Optional[int] = None,
+        prompt: str | list[str],
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
+        stop: list[str] | None = None,
         **kwargs: Any,
-    ) -> Union[str, list[str]]:
+    ) -> str | list[str]:
         """Generate text from a prompt.
 
         Args:
@@ -64,9 +64,11 @@ class LanguageModel(ABC):
         """
         pass
 
-    @abstractmethod
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for a list of texts.
+
+        Override in subclasses that support embeddings (e.g. OpenAIModel).
+        Generator-only models can leave the default which raises.
 
         Args:
             texts: List of texts to embed
@@ -74,7 +76,7 @@ class LanguageModel(ABC):
         Returns:
             List of embedding vectors
         """
-        pass
+        raise NotImplementedError(f"{self.__class__.__name__} does not support embeddings")
 
     def count_tokens(self, text: str) -> int:
         """Count tokens in a text string.

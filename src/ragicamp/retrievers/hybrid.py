@@ -4,11 +4,10 @@ Uses Reciprocal Rank Fusion (RRF) to merge results.
 Works with the clean VectorIndex architecture.
 """
 
-from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document, SearchResult
-from ragicamp.indexes.sparse import SparseIndex, SparseMethod
+from ragicamp.indexes.sparse import SparseIndex
 from ragicamp.indexes.vector_index import VectorIndex
 
 logger = get_logger(__name__)
@@ -16,21 +15,21 @@ logger = get_logger(__name__)
 
 class HybridSearcher:
     """Combines dense (VectorIndex) and sparse (BM25/TF-IDF) search.
-    
+
     Uses Reciprocal Rank Fusion (RRF) to merge results from both methods.
     RRF is robust and doesn't require score normalization.
-    
+
     Usage:
         searcher = HybridSearcher(
             vector_index=index,
             sparse_index=sparse_index,
             alpha=0.7,  # Weight toward dense
         )
-        
+
         # Search requires external embeddings (from EmbedderProvider)
         results = searcher.search(query_embedding, query_text, top_k=5)
     """
-    
+
     def __init__(
         self,
         vector_index: VectorIndex,
@@ -39,7 +38,7 @@ class HybridSearcher:
         rrf_k: int = 60,
     ):
         """Initialize hybrid searcher.
-        
+
         Args:
             vector_index: Dense vector index
             sparse_index: Sparse (TF-IDF/BM25) index
@@ -50,7 +49,7 @@ class HybridSearcher:
         self.sparse_index = sparse_index
         self.alpha = alpha
         self.rrf_k = rrf_k
-    
+
     def search(
         self,
         query_embedding,
@@ -58,63 +57,22 @@ class HybridSearcher:
         top_k: int = 10,
     ) -> list[SearchResult]:
         """Hybrid search with RRF fusion.
-        
+
         Args:
             query_embedding: Pre-computed query embedding
             query_text: Query text for sparse search
             top_k: Number of results
-        
+
         Returns:
             List of SearchResult sorted by RRF score
         """
         candidates = top_k * 3
-        
-        # Dense search
+
         dense_results = self.vector_index.search(query_embedding, top_k=candidates)
-        
-        # Sparse search
         sparse_hits = self.sparse_index.search(query_text, top_k=candidates)
-        sparse_results = []
-        for idx, score in sparse_hits:
-            if 0 <= idx < len(self.vector_index.documents):
-                doc = self.vector_index.documents[idx]
-                sparse_results.append(SearchResult(
-                    document=Document(
-                        id=doc.id,
-                        text=doc.text,
-                        metadata=doc.metadata.copy(),
-                        score=score,
-                    ),
-                    score=score,
-                    rank=len(sparse_results),
-                ))
-        
-        # Compute RRF scores
-        rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
-        
-        # Sort by RRF score
-        sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        # Build final results
-        results = []
-        doc_map = {r.document.id: r.document for r in dense_results + sparse_results}
-        
-        for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
-            if doc_id in doc_map:
-                doc = doc_map[doc_id]
-                results.append(SearchResult(
-                    document=Document(
-                        id=doc.id,
-                        text=doc.text,
-                        metadata=doc.metadata.copy(),
-                        score=score,
-                    ),
-                    score=score,
-                    rank=rank,
-                ))
-        
-        return results
-    
+
+        return self._rrf_merge(dense_results, sparse_hits, top_k)
+
     def batch_search(
         self,
         query_embeddings,
@@ -122,33 +80,48 @@ class HybridSearcher:
         top_k: int = 10,
     ) -> list[list[SearchResult]]:
         """Batch hybrid search.
-        
+
         Args:
             query_embeddings: Pre-computed query embeddings, shape (n, dim)
             query_texts: Query texts for sparse search
             top_k: Number of results per query
-        
+
         Returns:
             List of SearchResult lists
         """
         candidates = top_k * 3
-        
-        # Batch dense search
+
         all_dense = self.vector_index.batch_search(query_embeddings, top_k=candidates)
-        
-        # Batch sparse search
         all_sparse_hits = self.sparse_index.batch_search(query_texts, top_k=candidates)
-        
-        results = []
-        for i in range(len(query_texts)):
-            dense_results = all_dense[i]
-            
-            # Convert sparse hits to SearchResult
-            sparse_results = []
-            for idx, score in all_sparse_hits[i]:
-                if 0 <= idx < len(self.vector_index.documents):
-                    doc = self.vector_index.documents[idx]
-                    sparse_results.append(SearchResult(
+
+        return [
+            self._rrf_merge(all_dense[i], all_sparse_hits[i], top_k)
+            for i in range(len(query_texts))
+        ]
+
+    def _rrf_merge(
+        self,
+        dense_results: list[SearchResult],
+        sparse_hits: list[tuple[int, float]],
+        top_k: int,
+    ) -> list[SearchResult]:
+        """Merge dense SearchResults and sparse (index, score) hits via RRF.
+
+        Args:
+            dense_results: Dense search results.
+            sparse_hits: Sparse hits as (doc_index, score) tuples.
+            top_k: Number of results to return.
+
+        Returns:
+            Merged SearchResult list sorted by RRF score.
+        """
+        # Convert sparse hits to SearchResult
+        sparse_results: list[SearchResult] = []
+        for idx, score in sparse_hits:
+            if 0 <= idx < len(self.vector_index.documents):
+                doc = self.vector_index.documents[idx]
+                sparse_results.append(
+                    SearchResult(
                         document=Document(
                             id=doc.id,
                             text=doc.text,
@@ -157,19 +130,22 @@ class HybridSearcher:
                         ),
                         score=score,
                         rank=len(sparse_results),
-                    ))
-            
-            # RRF fusion
-            rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
-            sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-            
-            doc_map = {r.document.id: r.document for r in dense_results + sparse_results}
-            query_results = []
-            
-            for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
-                if doc_id in doc_map:
-                    doc = doc_map[doc_id]
-                    query_results.append(SearchResult(
+                    )
+                )
+
+        # Compute RRF scores
+        rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
+        sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+
+        # Build final results
+        doc_map = {r.document.id: r.document for r in dense_results + sparse_results}
+        results: list[SearchResult] = []
+
+        for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
+            if doc_id in doc_map:
+                doc = doc_map[doc_id]
+                results.append(
+                    SearchResult(
                         document=Document(
                             id=doc.id,
                             text=doc.text,
@@ -178,31 +154,30 @@ class HybridSearcher:
                         ),
                         score=score,
                         rank=rank,
-                    ))
-            
-            results.append(query_results)
-        
+                    )
+                )
+
         return results
-    
+
     def _reciprocal_rank_fusion(
         self,
         dense_results: list[SearchResult],
         sparse_results: list[SearchResult],
     ) -> dict[str, float]:
         """Compute RRF scores.
-        
+
         RRF formula: score(d) = Σ 1/(k + rank(d))
         """
         rrf_scores: dict[str, float] = {}
-        
+
         # Add dense scores (with alpha weight)
         for rank, result in enumerate(dense_results, start=1):
             score = self.alpha / (self.rrf_k + rank)
             rrf_scores[result.document.id] = rrf_scores.get(result.document.id, 0) + score
-        
+
         # Add sparse scores (with 1-alpha weight)
         for rank, result in enumerate(sparse_results, start=1):
             score = (1 - self.alpha) / (self.rrf_k + rank)
             rrf_scores[result.document.id] = rrf_scores.get(result.document.id, 0) + score
-        
+
         return rrf_scores

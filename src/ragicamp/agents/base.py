@@ -9,13 +9,14 @@ Clean Architecture Design:
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 
 from ragicamp.core.logging import get_logger
-from ragicamp.core.step_types import BATCH_ENCODE, BATCH_SEARCH, QUERY_TRANSFORM
+from ragicamp.core.step_types import BATCH_ENCODE, BATCH_SEARCH, QUERY_TRANSFORM, RERANK
 
 logger = get_logger(__name__)
 
@@ -24,27 +25,30 @@ logger = get_logger(__name__)
 # Core Data Types
 # =============================================================================
 
+
 @dataclass
 class Query:
     """Input query for agent processing.
-    
+
     Attributes:
         idx: Unique index for ordering and checkpointing
         text: The query text
         expected: Expected answers for evaluation (optional)
     """
+
     idx: int
     text: str
     expected: list[str] | None = None
 
 
-@dataclass 
+@dataclass
 class Step:
     """Intermediate step in agent processing.
-    
+
     Every operation (retrieval, generation, reranking, etc.) is logged
     for later analysis.
     """
+
     type: str  # "retrieve", "generate", "rerank", "hyde", "encode", etc.
     input: Any = None
     output: Any = None
@@ -55,38 +59,41 @@ class Step:
 
 class StepTimer:
     """Context manager for timing steps.
-    
+
     Usage:
         with StepTimer("retrieve", model="bge-large") as step:
             docs = retriever.retrieve(query)
             step.output = docs
-    
+
     Automatically logs the step type and elapsed time on exit.
     """
-    
+
     def __init__(self, step_type: str, model: str | None = None, **metadata):
         self.step = Step(type=step_type, model=model, metadata=metadata)
         self._start: float = 0.0
-    
+
     def __enter__(self) -> Step:
         self._start = perf_counter()
         return self.step
-    
+
     def __exit__(self, *args):
         self.step.timing_ms = (perf_counter() - self._start) * 1000
         model_str = f" ({self.step.model})" if self.step.model else ""
         logger.info(
             "Step [%s]%s completed in %.1fs",
-            self.step.type, model_str, self.step.timing_ms / 1000,
+            self.step.type,
+            model_str,
+            self.step.timing_ms / 1000,
         )
 
 
 @dataclass
 class RetrievedDocInfo:
     """Retrieved document info for logging.
-    
+
     Captures all stages of retrieval pipeline for analysis.
     """
+
     rank: int  # Final rank (1-indexed)
     doc_id: str | None = None
     content: str | None = None  # Can be truncated for disk space
@@ -94,7 +101,7 @@ class RetrievedDocInfo:
     retrieval_score: float | None = None  # Before reranking
     retrieval_rank: int | None = None  # Before reranking
     rerank_score: float | None = None  # Cross-encoder score
-    
+
     def to_dict(self) -> dict[str, Any]:
         d = {"rank": self.rank}
         if self.doc_id is not None:
@@ -140,9 +147,9 @@ class RetrievedDocInfo:
 @dataclass
 class AgentResult:
     """Result from processing a single query.
-    
+
     Contains the answer and all intermediate steps for analysis.
-    
+
     Attributes:
         query: The input query
         answer: Generated answer
@@ -151,16 +158,17 @@ class AgentResult:
         retrieved_docs: Structured retrieved doc info (RAG only)
         metadata: Additional metadata (flexible)
     """
+
     query: Query
     answer: str
     steps: list[Step] = field(default_factory=list)
     prompt: str | None = None
     retrieved_docs: list[RetrievedDocInfo] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self, include_content: bool = True, max_content_len: int = 500) -> dict[str, Any]:
         """Serialize for checkpointing/storage.
-        
+
         Args:
             include_content: Whether to include document content (disk space tradeoff)
             max_content_len: Max chars per doc content (0 = full)
@@ -182,7 +190,7 @@ class AgentResult:
             ],
             "metadata": self.metadata,
         }
-        
+
         # Add retrieved docs if present
         if self.retrieved_docs:
             docs_list = []
@@ -196,7 +204,7 @@ class AgentResult:
                     doc_dict.pop("content", None)
                 docs_list.append(doc_dict)
             d["retrieved_docs"] = docs_list
-        
+
         return d
 
 
@@ -283,7 +291,8 @@ def batch_transform_embed_and_search(
 
     logger.info(
         "Query transform: %d queries -> %d expanded queries",
-        len(query_texts), len(flat_queries),
+        len(query_texts),
+        len(flat_queries),
     )
 
     # --- Embed + search expanded queries (no cache — transformed) --------
@@ -361,19 +370,25 @@ def batch_embed_and_search(
     if retrieval_store is not None and retriever_name:
         _cache_t0 = _pc()
         cached_batch, hit_mask = retrieval_store.get_batch(
-            retriever_name, query_texts, top_k,
+            retriever_name,
+            query_texts,
+            top_k,
         )
         _cache_lookup_s = _pc() - _cache_t0
         n_hits = sum(hit_mask)
         logger.info(
-            "Retrieval cache lookup: %.2fs (%d queries)", _cache_lookup_s, len(query_texts),
+            "Retrieval cache lookup: %.2fs (%d queries)",
+            _cache_lookup_s,
+            len(query_texts),
         )
 
         if n_hits == len(query_texts):
             # 100% cache hit — skip embedding and search entirely
             logger.info(
                 "Retrieval cache: 100%% hit (%d queries, retriever=%s, k=%d)",
-                len(query_texts), retriever_name, top_k,
+                len(query_texts),
+                retriever_name,
+                top_k,
             )
             retrievals = [
                 [
@@ -408,13 +423,19 @@ def batch_embed_and_search(
             miss_indices = [i for i, hit in enumerate(hit_mask) if not hit]
             logger.info(
                 "Retrieval cache: %d/%d hits, searching %d misses (retriever=%s, k=%d)",
-                n_hits, len(query_texts), len(miss_indices), retriever_name, top_k,
+                n_hits,
+                len(query_texts),
+                len(miss_indices),
+                retriever_name,
+                top_k,
             )
         else:
             miss_indices = None  # Treat as full miss (simpler code path)
             logger.info(
                 "Retrieval cache: 0/%d hits, searching all (retriever=%s, k=%d)",
-                len(query_texts), retriever_name, top_k,
+                len(query_texts),
+                retriever_name,
+                top_k,
             )
 
     # --- Determine which queries need embedding+search -------------------
@@ -426,7 +447,8 @@ def batch_embed_and_search(
     # --- Embed -----------------------------------------------------------
     logger.info(
         "Embedding %d queries (model=%s)...",
-        len(texts_to_search), embedder_provider.model_name,
+        len(texts_to_search),
+        embedder_provider.model_name,
     )
     with embedder_provider.load() as embedder:
         with StepTimer(BATCH_ENCODE, model=embedder_provider.model_name) as encode_step:
@@ -440,7 +462,8 @@ def batch_embed_and_search(
     # --- Search ----------------------------------------------------------
     logger.info(
         "Searching index (%d queries, top_k=%d)...",
-        len(texts_to_search), top_k,
+        len(texts_to_search),
+        top_k,
     )
     with StepTimer(BATCH_SEARCH) as search_step:
         search_step.input = {"n_queries": len(texts_to_search), "top_k": top_k}
@@ -463,14 +486,16 @@ def batch_embed_and_search(
         for i in range(len(query_texts)):
             if cached_results[i] is not None:
                 # Deserialize cached result
-                retrievals.append([
-                    SearchResult(
-                        document=Document.from_dict(sr["document"]),
-                        score=sr["score"],
-                        rank=sr.get("rank", 0),
-                    )
-                    for sr in cached_results[i]
-                ])
+                retrievals.append(
+                    [
+                        SearchResult(
+                            document=Document.from_dict(sr["document"]),
+                            score=sr["score"],
+                            rank=sr.get("rank", 0),
+                        )
+                        for sr in cached_results[i]
+                    ]
+                )
             else:
                 retrievals.append(next(miss_iter))
     else:
@@ -482,25 +507,87 @@ def batch_embed_and_search(
         if miss_indices is not None:
             # Only store the misses
             miss_queries = [query_texts[i] for i in miss_indices]
-            miss_results_dicts = [
-                [sr.to_dict() for sr in results]
-                for results in search_results
-            ]
+            miss_results_dicts = [[sr.to_dict() for sr in results] for results in search_results]
         else:
             # Store everything
             miss_queries = query_texts
-            miss_results_dicts = [
-                [sr.to_dict() for sr in results]
-                for results in retrievals
-            ]
+            miss_results_dicts = [[sr.to_dict() for sr in results] for results in retrievals]
         retrieval_store.put_batch(
-            retriever_name, miss_queries, miss_results_dicts, top_k,
+            retriever_name,
+            miss_queries,
+            miss_results_dicts,
+            top_k,
         )
         logger.info(
-            "Retrieval cache store: %.2fs (%d queries)", _pc() - _store_t0, len(miss_queries),
+            "Retrieval cache store: %.2fs (%d queries)",
+            _pc() - _store_t0,
+            len(miss_queries),
         )
 
     return retrievals, encode_step, search_step
+
+
+def apply_reranking(
+    reranker_provider: Any,
+    query_texts: list[str],
+    retrievals: list[list],
+    top_k: int,
+    fetch_k: int | None = None,
+) -> tuple[list[list], "Step"]:
+    """Shared reranking logic for all RAG agents.
+
+    Loads the reranker (via ref-counted provider), reranks documents per query,
+    and rebuilds SearchResult lists with reranker scores.
+
+    Args:
+        reranker_provider: RerankerProvider instance.
+        query_texts: List of query strings (one per retrieval list).
+        retrievals: Per-query lists of SearchResult objects.
+        top_k: Number of documents to keep after reranking.
+        fetch_k: Original fetch count (for logging). Defaults to top_k.
+
+    Returns:
+        Tuple of (reranked_retrievals, rerank_step).
+    """
+    from ragicamp.core.types import Document, SearchResult
+
+    if fetch_k is None:
+        fetch_k = top_k
+
+    with StepTimer(RERANK, model=reranker_provider.config.model_name) as step:
+        with reranker_provider.load() as reranker:
+            docs_lists: list[list[Document]] = [[sr.document for sr in srs] for srs in retrievals]
+            reranked_docs = reranker.batch_rerank(
+                query_texts,
+                docs_lists,
+                top_k=top_k,
+            )
+
+    reranked_retrievals: list[list[SearchResult]] = []
+    for docs in reranked_docs:
+        reranked_retrievals.append(
+            [
+                SearchResult(
+                    document=doc,
+                    score=getattr(doc, "score", 0.0),
+                    rank=rank + 1,
+                )
+                for rank, doc in enumerate(docs)
+            ]
+        )
+
+    step.input = {"n_queries": len(query_texts), "fetch_k": fetch_k}
+    step.output = {"top_k": top_k}
+
+    logger.info(
+        "Reranked %d queries (%d -> %d docs each) in %.1fs",
+        len(query_texts),
+        fetch_k,
+        top_k,
+        step.timing_ms / 1000,
+    )
+
+    return reranked_retrievals, step
 
 
 # =============================================================================
@@ -510,19 +597,18 @@ def batch_embed_and_search(
 
 class Agent(ABC):
     """Base class for all agents.
-    
+
     Agents receive all queries and manage their own resources.
     Each agent type implements its optimal strategy:
-    
+
     - FixedRAGAgent: batch_retrieve → unload_embedder → batch_generate
     - IterativeRAGAgent: per-query with multiple rounds
     - SelfRAGAgent: per-query with conditional retrieval
     - DirectLLMAgent: batch_generate only (no retrieval)
     """
 
-    def __init__(self, name: str, **config):
+    def __init__(self, name: str):
         self.name = name
-        self.config = config
 
     @abstractmethod
     def run(
@@ -534,19 +620,19 @@ class Agent(ABC):
         show_progress: bool = True,
     ) -> list[AgentResult]:
         """Process all queries with agent-specific optimization.
-        
+
         This is THE interface for running agents. Each agent type
         implements its own optimal strategy for:
         - Model loading/unloading (GPU optimization)
         - Batching strategy (throughput)
         - Checkpointing (resume capability)
-        
+
         Args:
             queries: All queries to process
             on_result: Called after each result (for streaming/incremental save)
             checkpoint_path: Enables resume from crashes
             show_progress: Show progress bar
-            
+
         Returns:
             Results with answers and all intermediate steps
         """
@@ -555,13 +641,13 @@ class Agent(ABC):
     def _load_checkpoint(self, path: Path) -> tuple[list[AgentResult], set[int]]:
         """Load checkpoint and return completed results."""
         import json
-        
+
         if not path.exists():
             return [], set()
-        
+
         with open(path) as f:
             data = json.load(f)
-        
+
         results = []
         for r in data.get("results", []):
             # to_dict() writes "question"; accept both for robustness
@@ -585,7 +671,7 @@ class Agent(ABC):
                 metadata=r.get("metadata", {}),
             )
             results.append(result)
-        
+
         completed_idx = {r.query.idx for r in results}
         logger.info("Loaded checkpoint: %d completed", len(completed_idx))
         return results, completed_idx
@@ -593,7 +679,7 @@ class Agent(ABC):
     def _save_checkpoint(self, results: list[AgentResult], path: Path) -> None:
         """Save checkpoint atomically."""
         import json
-        
+
         data = {"results": [r.to_dict() for r in results]}
         temp_path = path.with_suffix(".tmp")
         with open(temp_path, "w") as f:

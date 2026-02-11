@@ -10,9 +10,10 @@ Batched architecture (three clean phases, minimal model loads):
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from ragicamp.agents.base import (
     Agent,
@@ -21,7 +22,7 @@ from ragicamp.agents.base import (
     RetrievedDocInfo,
     Step,
     StepTimer,
-    batch_embed_and_search,
+    apply_reranking,
     batch_transform_embed_and_search,
     is_hybrid_searcher,
 )
@@ -134,7 +135,6 @@ class SelfRAGAgent(Agent):
         reranker_provider: Any | None = None,
         fetch_k: int | None = None,
         query_transformer: Any | None = None,
-        **config,
     ):
         """Initialize agent with providers.
 
@@ -154,7 +154,7 @@ class SelfRAGAgent(Agent):
             fetch_k: Documents to retrieve before reranking (None = same as top_k)
             query_transformer: Optional QueryTransformer for query expansion
         """
-        super().__init__(name, **config)
+        super().__init__(name)
 
         self.embedder_provider = embedder_provider
         self.generator_provider = generator_provider
@@ -324,7 +324,13 @@ class SelfRAGAgent(Agent):
 
         # Apply cross-encoder reranking if configured
         if self.reranker_provider is not None:
-            retrievals, rerank_step = self._apply_reranking(texts, retrievals)
+            retrievals, rerank_step = apply_reranking(
+                self.reranker_provider,
+                texts,
+                retrievals,
+                top_k=self.top_k,
+                fetch_k=self.fetch_k,
+            )
             embed_search_steps.append(rerank_step)
 
         # Broadcast all embed/search steps (and optional transform step) to each query
@@ -450,45 +456,6 @@ class SelfRAGAgent(Agent):
                         model=self.generator_provider.model_name,
                     )
                 )
-
-    # ------------------------------------------------------------------
-    # Reranking
-    # ------------------------------------------------------------------
-
-    def _apply_reranking(
-        self,
-        query_texts: list[str],
-        retrievals: list[list],
-    ) -> tuple[list[list], Step]:
-        """Load reranker, rerank documents, and rebuild SearchResult lists."""
-        from ragicamp.core.step_types import RERANK
-        from ragicamp.core.types import Document, SearchResult
-
-        with StepTimer(RERANK, model=self.reranker_provider.config.model_name) as step:
-            with self.reranker_provider.load() as reranker:
-                docs_lists: list[list[Document]] = [
-                    [sr.document for sr in srs] for srs in retrievals
-                ]
-                reranked_docs = reranker.batch_rerank(
-                    query_texts,
-                    docs_lists,
-                    top_k=self.top_k,
-                )
-
-        reranked_retrievals: list[list[SearchResult]] = []
-        for docs in reranked_docs:
-            reranked_retrievals.append(
-                [
-                    SearchResult(
-                        document=doc,
-                        score=getattr(doc, "score", 0.0),
-                        rank=rank + 1,
-                    )
-                    for rank, doc in enumerate(docs)
-                ]
-            )
-
-        return reranked_retrievals, step
 
     # ------------------------------------------------------------------
     # Result builder

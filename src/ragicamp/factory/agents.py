@@ -96,7 +96,6 @@ class AgentFactory:
             name=name,
             generator_provider=generator_provider,
             prompt_builder=prompt_builder,
-            **kwargs,
         )
 
     @classmethod

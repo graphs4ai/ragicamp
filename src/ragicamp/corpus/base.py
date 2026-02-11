@@ -4,9 +4,10 @@ A DocumentCorpus provides documents for retrieval WITHOUT answer information.
 This is distinct from QADatasets which contain question-answer pairs for evaluation.
 """
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.types import Document
 
@@ -26,14 +27,14 @@ class CorpusConfig:
     name: str
     source: str
     version: str = "latest"
-    max_docs: Optional[int] = None
+    max_docs: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"{self.name} ({self.source}:{self.version})"
 
 
-class DocumentCorpus:
+class DocumentCorpus(ABC):
     """Base class for document corpora.
 
     A corpus provides documents for retrieval. Critically, corpora should NOT
@@ -61,7 +62,8 @@ class DocumentCorpus:
         """
         self.config = config
 
-    def load(self, max_docs: Optional[int] = None) -> Iterator[Document]:
+    @abstractmethod
+    def load(self, max_docs: int | None = None) -> Iterator[Document]:
         """Load documents from corpus.
 
         Args:
@@ -70,11 +72,8 @@ class DocumentCorpus:
 
         Yields:
             Document objects WITHOUT answer information
-
-        Raises:
-            NotImplementedError: If subclass doesn't implement this method
         """
-        raise NotImplementedError("Subclasses must implement load()")
+        ...
 
     def get_info(self) -> dict[str, Any]:
         """Get corpus metadata.

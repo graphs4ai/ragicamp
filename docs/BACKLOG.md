@@ -384,13 +384,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.1 Triplicated `_apply_reranking` across three agents
 
-- **Status:** `[ ]`
-- **Files:** `agents/fixed_rag.py:196-243`, `agents/iterative_rag.py:488-517`, `agents/self_rag.py:437-466`
-- **Problem:** Three nearly-identical copies with subtle inconsistencies. `FixedRAGAgent` accesses `self.reranker_provider.model_name` directly and uses manual `perf_counter`; others access `.config.model_name` and use `StepTimer`. Bug in one copy won't be fixed in others.
-- **Fix:** Extract shared `apply_reranking()` function into `agents/base.py` alongside `batch_embed_and_search`.
-- **Impact:** ~90 lines of duplication removed. Eliminates divergence risk.
-- **Effort:** Small–Medium
-- **Depends on:** 3.1, 3.2 (tests for the agents first)
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `agents/fixed_rag.py`, `agents/iterative_rag.py`, `agents/self_rag.py`, `agents/base.py`
+- **Fix:** Extracted shared `apply_reranking()` into `agents/base.py`. All three agents now call the shared function. Unified to StepTimer-based implementation. ~90 lines of duplication removed.
 
 ### 4.2 Searcher protocol doesn't match HybridSearcher.batch_search
 
@@ -407,12 +403,8 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.3 Remove stale `core/schemas.py`
 
-- **Status:** `[ ]`
-- **File:** `core/schemas.py` (entire file)
-- **Problem:** Contains `RetrievedDoc`, `PredictionRecord`, `RAGResponseMeta`, `PipelineLog`, `QueryTransformStep`, `RetrievalStep`, `RerankStep` — a complete duplicate tracing system unused by any agent. Agents use `Step`/`AgentResult`/`RetrievedDocInfo` from `agents/base.py` exclusively. Exported from `core/__init__.py`, creating confusion about canonical types.
-- **Fix:** Remove the file and clean up imports from `core/__init__.py`.
-- **Impact:** Eliminates confusion about canonical data types. Reduces cognitive load.
-- **Effort:** Small (verify no imports, delete)
+- **Status:** `[x]` Fixed 2026-02-11
+- **Fix:** Deleted `core/schemas.py` and cleaned up `core/__init__.py` exports. No src/ or test code imported these types.
 
 ### 4.4 Pervasive `Any` typing in agents
 
@@ -433,12 +425,8 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.5 `Agent.__init__` accepts **config kwargs — dead storage
 
-- **Status:** `[ ]`
-- **File:** `agents/base.py:523-525`
-- **Problem:** `self.config = config` stores kwargs but never reads them. `FixedRAGAgent(name="test", top_kk=5)` (typo) silently succeeds.
-- **Fix:** Remove `**config`. If extensibility is needed, use explicit `extra_config: dict | None = None`.
-- **Impact:** Catches typos at construction time.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Fix:** Removed `**config` from `Agent.__init__` and all 4 subclasses. Typos in kwargs now raise TypeError at construction time.
 
 ### 4.6 Duplicate Embedder interface definitions
 
@@ -478,12 +466,8 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.9 HybridSearcher duplicates logic between search and batch_search
 
-- **Status:** `[ ]`
-- **File:** `retrievers/hybrid.py`
-- **Problem:** Entire sparse-to-SearchResult conversion and RRF merge logic is copy-pasted between `search()` and `batch_search()`.
-- **Fix:** Have `batch_search` call `search` per query, or extract shared `_rrf_merge()`.
-- **Impact:** Single implementation of RRF merge logic.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Fix:** Extracted `_rrf_merge()` method. Both `search()` and `batch_search()` now delegate to it.
 
 ### 4.10 Migrate `@validator` to `@field_validator` (Pydantic v2)
 
@@ -495,19 +479,13 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.11 `DocumentCorpus.load` uses `raise NotImplementedError` instead of `@abstractmethod`
 
-- **Status:** `[ ]`
-- **File:** `corpus/base.py:77`
-- **Problem:** Allows creating instances of `DocumentCorpus` directly (fails at runtime instead of instantiation time).
-- **Fix:** Make `load` an `@abstractmethod`.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Fix:** Made `DocumentCorpus` extend `ABC` and `load()` an `@abstractmethod`.
 
 ### 4.12 `LanguageModel.get_embeddings` is abstract but not applicable to all backends
 
-- **Status:** `[ ]`
-- **File:** `models/base.py:67-77`
-- **Problem:** Required as abstract method, but `VLLMModel` (the primary backend) raises `NotImplementedError`.
-- **Fix:** Make non-abstract with default `NotImplementedError`, or split into separate generator/embedder ABCs.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Fix:** Made `get_embeddings` non-abstract with default `NotImplementedError`. Generator-only subclasses no longer need to stub it.
 
 ### 4.13 Metric per-item scores stored as mutable instance state
 
@@ -715,6 +693,6 @@ These are not issues per se but architectural improvements for when the project 
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
-| P3 — Interface/Design | 14 | 0 | 14 |
+| P3 — Interface/Design | 14 | 6 | 8 |
 | P4 — Polish | 21 | 0 | 21 |
-| **Total** | **68** | **29** | **39** |
+| **Total** | **68** | **35** | **33** |
