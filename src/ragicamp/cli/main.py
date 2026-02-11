@@ -2,13 +2,14 @@
 """RAGiCamp CLI - Unified command-line interface.
 
 Commands:
-    run       Run a study from config
-    index     Build retrieval indexes
-    compare   Compare experiment results
-    evaluate  Compute metrics on predictions
-    backup    Backup artifacts to Backblaze B2
-    download  Download artifacts from Backblaze B2
-    prune     Remove orphaned remote files not present locally
+    run              Run a study from config
+    index            Build retrieval indexes
+    compare          Compare experiment results
+    evaluate         Compute metrics on predictions
+    compute-metrics  Compute metrics for all experiments in a study
+    backup           Backup artifacts to Backblaze B2
+    download         Download artifacts from Backblaze B2
+    prune            Remove orphaned remote files not present locally
 """
 
 # ============================================================================
@@ -35,6 +36,7 @@ from ragicamp.cli.commands import (
     cmd_backup,
     cmd_cache,
     cmd_compare,
+    cmd_compute_metrics,
     cmd_download,
     cmd_evaluate,
     cmd_health,
@@ -145,6 +147,24 @@ def _add_metrics_parser(subparsers) -> None:
     p.set_defaults(func=cmd_metrics)
 
 
+def _add_compute_metrics_parser(subparsers) -> None:
+    """Add 'compute-metrics' subcommand."""
+    p = subparsers.add_parser(
+        "compute-metrics", help="Compute metrics for all experiments in a study"
+    )
+    p.add_argument("output_dir", type=Path, help="Study output directory")
+    p.add_argument("--metrics", "-m", required=True, help="Comma-separated metrics to compute")
+    p.add_argument("--dry-run", action="store_true", help="Preview only, list experiments")
+    p.add_argument("--judge-model", default="gpt-4o-mini", help="Model for LLM judge")
+    p.add_argument(
+        "--judge-base-url",
+        default=None,
+        help="Base URL for OpenAI-compatible API (auto-detected from DEEPINFRA_API_KEY)",
+    )
+    p.add_argument("--force", action="store_true", help="Recompute even if metric already exists")
+    p.set_defaults(func=cmd_compute_metrics)
+
+
 def _add_backup_parser(subparsers) -> None:
     """Add 'backup' subcommand."""
     p = subparsers.add_parser("backup", help="Backup artifacts and outputs to Backblaze B2")
@@ -233,6 +253,7 @@ def create_parser() -> argparse.ArgumentParser:
     _add_health_parser(subparsers)
     _add_resume_parser(subparsers)
     _add_metrics_parser(subparsers)
+    _add_compute_metrics_parser(subparsers)
     _add_backup_parser(subparsers)
     _add_download_parser(subparsers)
     _add_prune_parser(subparsers)

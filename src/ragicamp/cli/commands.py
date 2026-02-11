@@ -659,6 +659,103 @@ def cmd_migrate_indexes(args: argparse.Namespace) -> int:
 
 
 # =============================================================================
+# Batch metric computation
+# =============================================================================
+
+
+def cmd_compute_metrics(args: argparse.Namespace) -> int:
+    """Compute metrics across all experiments in a study output directory."""
+    from ragicamp.execution.runner import run_metrics_only
+    from ragicamp.state import check_health
+
+    output_dir = args.output_dir
+    if not output_dir.exists():
+        print(f"Directory not found: {output_dir}")
+        return 1
+
+    metric_names = [m.strip() for m in args.metrics.split(",")]
+    force = getattr(args, "force", False)
+
+    # Find experiment directories (same pattern as cmd_health)
+    exp_dirs = [
+        d
+        for d in output_dir.iterdir()
+        if d.is_dir()
+        and (
+            (d / "state.json").exists()
+            or (d / "predictions.json").exists()
+            or (d / "results.json").exists()
+        )
+    ]
+
+    if not exp_dirs:
+        print(f"No experiments found in {output_dir}")
+        return 1
+
+    # Filter to experiments that need the metric
+    to_compute = []
+    skipped = 0
+    for exp_dir in sorted(exp_dirs):
+        health = check_health(exp_dir, metric_names)
+        if health.predictions_complete == 0:
+            skipped += 1
+            continue
+        if force or health.metrics_missing:
+            to_compute.append(exp_dir)
+        else:
+            skipped += 1
+
+    print(f"Found {len(exp_dirs)} experiments, {len(to_compute)} need metrics, {skipped} skipped")
+
+    if not to_compute:
+        print("Nothing to compute.")
+        return 0
+
+    if args.dry_run:
+        print(f"\n[DRY RUN] Would compute {metric_names} for:")
+        for exp_dir in to_compute:
+            print(f"  {exp_dir.name}")
+        return 0
+
+    # Build judge model if needed
+    judge_model = None
+    if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
+        from ragicamp.models.openai import OpenAIModel
+
+        judge_base_url = getattr(args, "judge_base_url", None)
+        api_key, base_url, provider = _resolve_judge_config(args.judge_model, judge_base_url)
+        print(f"Using judge model: {args.judge_model} via {provider}")
+        judge_model = OpenAIModel(
+            args.judge_model, api_key=api_key, base_url=base_url, temperature=0.0
+        )
+
+    # Compute metrics for each experiment
+    computed = 0
+    failed = 0
+    for i, exp_dir in enumerate(to_compute, 1):
+        print(f"\n[{i}/{len(to_compute)}] {exp_dir.name}")
+        try:
+            status = run_metrics_only(
+                exp_name=exp_dir.name,
+                output_path=exp_dir,
+                metrics=metric_names,
+                judge_model=judge_model,
+            )
+            if status == "failed":
+                print("  FAILED")
+                failed += 1
+            else:
+                print("  OK")
+                computed += 1
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            failed += 1
+
+    print(f"\nDone: {computed} computed, {failed} failed, {skipped} skipped")
+    return 0 if failed == 0 else 1
+
+
+# =============================================================================
 # Cache management
 # =============================================================================
 

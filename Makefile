@@ -1,6 +1,6 @@
 # RAGiCamp Makefile
 
-.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full evaluate compare
+.PHONY: help install index-simple index-full run-baseline-simple run-baseline-full evaluate compute-metrics compare
 
 # ============================================================================
 # HELP
@@ -116,6 +116,11 @@ run-comprehensive-safe:
 evaluate:
 	@echo "📊 Re-evaluating predictions..."
 	uv run ragicamp evaluate $(DIR) --metrics $(or $(METRICS),all)
+
+# Batch compute metrics: make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa
+# Dry run:               make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa DRY_RUN=1
+compute-metrics:
+	uv run ragicamp compute-metrics $(DIR) --metrics $(METRICS) $(if $(DRY_RUN),--dry-run)
 
 # Compare results in a table: make compare DIR=outputs/simple
 compare:
