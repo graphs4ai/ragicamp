@@ -73,6 +73,7 @@ Refined Query:"""
 # Per-query state tracker used during the batched iteration loop
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _QueryState:
     """Mutable state for a single query across iterations."""
@@ -173,6 +174,7 @@ class IterativeRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from contextlib import ExitStack
         from time import perf_counter as _pc
 
         logger.info(
@@ -184,56 +186,73 @@ class IterativeRAGAgent(Agent):
 
         # --- Initialise per-query state ---
         active: dict[int, _QueryState] = {
-            q.idx: _QueryState(query=q, current_text=q.text)
-            for q in pending
+            q.idx: _QueryState(query=q, current_text=q.text) for q in pending
         }
         converged: dict[int, _QueryState] = {}
 
-        # --- Iteration loop (batched) ---
-        for iteration in range(self.max_iterations):
-            if not active:
-                break
+        # Open provider sessions so that embedder, generator and reranker are
+        # loaded once and reused across iterations (ref-counting prevents
+        # unload until the outermost context exits).
+        with ExitStack() as stack:
+            stack.enter_context(self.embedder_provider.load())
+            stack.enter_context(self.generator_provider.load())
+            if self.reranker_provider is not None:
+                stack.enter_context(self.reranker_provider.load())
 
-            logger.info(
-                "=== Iteration %d: %d active queries ===", iteration, len(active),
-            )
-            _iter_t0 = _pc()
+            # --- Iteration loop (batched) ---
+            for iteration in range(self.max_iterations):
+                if not active:
+                    break
 
-            # Phase 1: Batch embed + search  (1 embedder load)
-            _phase_t0 = _pc()
-            self._phase_embed_and_search(active, iteration)
-            logger.info("Iteration %d embed+search completed in %.1fs", iteration, _pc() - _phase_t0)
-
-            # Last iteration: skip refinement, go straight to final generation
-            if iteration == self.max_iterations - 1:
-                for state in active.values():
-                    state.iterations_info[-1]["stopped"] = "max_iterations"
-                break
-
-            # Phase 2: Batch sufficiency check + refine  (1 generator load)
-            _phase_t0 = _pc()
-            if self.stop_on_sufficient:
-                newly_sufficient = self._phase_evaluate_and_refine(
-                    active, iteration,
+                logger.info(
+                    "=== Iteration %d: %d active queries ===",
+                    iteration,
+                    len(active),
                 )
-                # Move converged queries out of the active set
-                for idx in newly_sufficient:
-                    converged[idx] = active.pop(idx)
-            else:
-                # No sufficiency check -- just refine all
-                self._phase_refine_only(active, iteration)
-            logger.info("Iteration %d evaluate+refine completed in %.1fs", iteration, _pc() - _phase_t0)
+                _iter_t0 = _pc()
 
-            logger.info("Iteration %d total: %.1fs", iteration, _pc() - _iter_t0)
+                # Phase 1: Batch embed + search  (1 embedder load)
+                _phase_t0 = _pc()
+                self._phase_embed_and_search(active, iteration)
+                logger.info(
+                    "Iteration %d embed+search completed in %.1fs", iteration, _pc() - _phase_t0
+                )
 
-        # Merge remaining active into converged
-        converged.update(active)
+                # Last iteration: skip refinement, go straight to final generation
+                if iteration == self.max_iterations - 1:
+                    for state in active.values():
+                        state.iterations_info[-1]["stopped"] = "max_iterations"
+                    break
 
-        # Phase 3: Batch generate ALL final answers  (1 generator load)
-        logger.info("=== Final generation: %d queries ===", len(converged))
-        _phase_t0 = _pc()
-        new_results = self._phase_generate_answers(converged, pending)
-        logger.info("Final generation completed in %.1fs", _pc() - _phase_t0)
+                # Phase 2: Batch sufficiency check + refine  (1 generator load)
+                _phase_t0 = _pc()
+                if self.stop_on_sufficient:
+                    newly_sufficient = self._phase_evaluate_and_refine(
+                        active,
+                        iteration,
+                    )
+                    # Move converged queries out of the active set
+                    for idx in newly_sufficient:
+                        converged[idx] = active.pop(idx)
+                else:
+                    # No sufficiency check -- just refine all
+                    self._phase_refine_only(active, iteration)
+                logger.info(
+                    "Iteration %d evaluate+refine completed in %.1fs",
+                    iteration,
+                    _pc() - _phase_t0,
+                )
+
+                logger.info("Iteration %d total: %.1fs", iteration, _pc() - _iter_t0)
+
+            # Merge remaining active into converged
+            converged.update(active)
+
+            # Phase 3: Batch generate ALL final answers  (1 generator load)
+            logger.info("=== Final generation: %d queries ===", len(converged))
+            _phase_t0 = _pc()
+            new_results = self._phase_generate_answers(converged, pending)
+            logger.info("Final generation completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:
@@ -268,9 +287,10 @@ class IterativeRAGAgent(Agent):
         # Subsequent iterations have LLM-refined queries that won't hit cache.
         use_cache = iteration == 0 and self.retrieval_store is not None
 
-        # Apply query transform on every iteration so Optuna sees its true
-        # effect across the full iterative pipeline (no silent parameter disabling).
-        use_transformer = self.query_transformer
+        # Only apply query transform on iteration 0.  On later iterations the
+        # queries have been LLM-refined and are already document-like, making
+        # HyDE redundant and expensive (extra generator load per iteration).
+        use_transformer = self.query_transformer if iteration == 0 else None
 
         retrievals, embed_search_steps = batch_transform_embed_and_search(
             query_transformer=use_transformer,
@@ -297,12 +317,14 @@ class IterativeRAGAgent(Agent):
             new_docs = [r.document for r in results]
             state.docs = self._merge_documents(state.docs, new_docs)
 
-            state.iterations_info.append({
-                "iteration": iteration,
-                "query": state.current_text,
-                "docs_retrieved": len(new_docs),
-                "total_docs": len(state.docs),
-            })
+            state.iterations_info.append(
+                {
+                    "iteration": iteration,
+                    "query": state.current_text,
+                    "docs_retrieved": len(new_docs),
+                    "total_docs": len(state.docs),
+                }
+            )
 
     def _batch_refine(
         self,
@@ -318,9 +340,7 @@ class IterativeRAGAgent(Agent):
         refine_prompts = []
         for idx in idx_list:
             state = active[idx]
-            context = ContextFormatter.format_numbered_from_docs(
-                state.docs[: self.top_k * 2]
-            )
+            context = ContextFormatter.format_numbered_from_docs(state.docs[: self.top_k * 2])
             refine_prompts.append(
                 REFINEMENT_PROMPT.format(
                     query=state.query.text,
@@ -339,12 +359,14 @@ class IterativeRAGAgent(Agent):
                 new_text = new_text[1:-1]
             state = active[idx]
             state.current_text = new_text
-            state.steps.append(Step(
-                type=REFINE_QUERY,
-                input={"original_query": state.query.text, "iteration": iteration},
-                output={"refined_query": new_text},
-                model=self.generator_provider.model_name,
-            ))
+            state.steps.append(
+                Step(
+                    type=REFINE_QUERY,
+                    input={"original_query": state.query.text, "iteration": iteration},
+                    output={"refined_query": new_text},
+                    model=self.generator_provider.model_name,
+                )
+            )
 
     def _phase_evaluate_and_refine(
         self,
@@ -370,9 +392,7 @@ class IterativeRAGAgent(Agent):
                 scored_docs = sorted(
                     state.docs, key=lambda d: getattr(d, "score", 0.0), reverse=True
                 )
-                context = ContextFormatter.format_numbered_from_docs(
-                    scored_docs[: self.top_k * 2]
-                )
+                context = ContextFormatter.format_numbered_from_docs(scored_docs[: self.top_k * 2])
                 suff_prompts.append(
                     SUFFICIENCY_PROMPT.format(context=context, query=state.query.text)
                 )
@@ -387,12 +407,14 @@ class IterativeRAGAgent(Agent):
                 is_sufficient = "SUFFICIENT" in resp_upper and "INSUFFICIENT" not in resp_upper
                 state = active[idx]
                 state.iterations_info[-1]["sufficient"] = is_sufficient
-                state.steps.append(Step(
-                    type=EVALUATE_SUFFICIENCY,
-                    input={"query": state.query.text, "iteration": iteration},
-                    output={"sufficient": is_sufficient},
-                    model=self.generator_provider.model_name,
-                ))
+                state.steps.append(
+                    Step(
+                        type=EVALUATE_SUFFICIENCY,
+                        input={"query": state.query.text, "iteration": iteration},
+                        output={"sufficient": is_sufficient},
+                        model=self.generator_provider.model_name,
+                    )
+                )
 
                 if is_sufficient:
                     state.iterations_info[-1]["stopped"] = "sufficient"
@@ -446,14 +468,18 @@ class IterativeRAGAgent(Agent):
 
         # Build AgentResult list in original query order
         result_map: dict[int, AgentResult] = {}
-        for idx, answer, prompt, final_docs in zip(idx_order, answers, prompts, final_docs_per_query):
+        for idx, answer, prompt, final_docs in zip(
+            idx_order, answers, prompts, final_docs_per_query
+        ):
             state = all_states[idx]
-            state.steps.append(Step(
-                type=GENERATE,
-                input={"query": state.query.text},
-                output=answer,
-                model=self.generator_provider.model_name,
-            ))
+            state.steps.append(
+                Step(
+                    type=GENERATE,
+                    input={"query": state.query.text},
+                    output=answer,
+                    model=self.generator_provider.model_name,
+                )
+            )
 
             retrieved_docs_info = [
                 RetrievedDocInfo(
@@ -500,19 +526,23 @@ class IterativeRAGAgent(Agent):
                     [sr.document for sr in srs] for srs in retrievals
                 ]
                 reranked_docs = reranker.batch_rerank(
-                    query_texts, docs_lists, top_k=self.top_k,
+                    query_texts,
+                    docs_lists,
+                    top_k=self.top_k,
                 )
 
         reranked_retrievals: list[list[SearchResult]] = []
         for docs in reranked_docs:
-            reranked_retrievals.append([
-                SearchResult(
-                    document=doc,
-                    score=getattr(doc, "score", 0.0),
-                    rank=rank + 1,
-                )
-                for rank, doc in enumerate(docs)
-            ])
+            reranked_retrievals.append(
+                [
+                    SearchResult(
+                        document=doc,
+                        score=getattr(doc, "score", 0.0),
+                        rank=rank + 1,
+                    )
+                    for rank, doc in enumerate(docs)
+                ]
+            )
 
         return reranked_retrievals, step
 

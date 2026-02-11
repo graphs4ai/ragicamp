@@ -37,6 +37,7 @@ class EmbedderProvider(ModelProvider):
     def __init__(self, config: EmbedderConfig):
         self.config = config
         self._embedder = None
+        self._refcount: int = 0
 
     @property
     def model_name(self) -> str:
@@ -44,34 +45,50 @@ class EmbedderProvider(ModelProvider):
 
     @contextmanager
     def load(self, gpu_fraction: float | None = None) -> Iterator["Embedder"]:
-        """Load embedder, yield it, then unload."""
-        from time import perf_counter as _pc
+        """Load embedder, yield it, then unload.
 
-        if gpu_fraction is None:
-            gpu_fraction = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL
-
-        logger.info("Loading embedder: %s (gpu=%.0f%%)", self.model_name, gpu_fraction * 100)
-        _t0 = _pc()
-
+        Supports ref-counting: nested ``with provider.load()`` calls reuse
+        the already-loaded model and only unload when the outermost context
+        exits.
+        """
+        self._refcount += 1
         try:
-            if self.config.backend == "vllm":
-                embedder = self._load_vllm(gpu_fraction)
-            elif self.config.backend == "sentence_transformers":
-                embedder = self._load_sentence_transformers()
+            if self._refcount == 1:
+                # First caller — actually load the model
+                from time import perf_counter as _pc
+
+                if gpu_fraction is None:
+                    gpu_fraction = Defaults.VLLM_GPU_MEMORY_FRACTION_FULL
+
+                logger.info(
+                    "Loading embedder: %s (gpu=%.0f%%)", self.model_name, gpu_fraction * 100
+                )
+                _t0 = _pc()
+
+                if self.config.backend == "vllm":
+                    embedder = self._load_vllm(gpu_fraction)
+                elif self.config.backend == "sentence_transformers":
+                    embedder = self._load_sentence_transformers()
+                else:
+                    raise ValueError(
+                        f"Unknown embedder backend: '{self.config.backend}'. "
+                        f"Supported: 'vllm', 'sentence_transformers'"
+                    )
+
+                _load_s = _pc() - _t0
+                logger.info("Embedder loaded in %.1fs: %s", _load_s, self.model_name)
+                self._embedder = embedder
             else:
-                raise ValueError(
-                    f"Unknown embedder backend: '{self.config.backend}'. "
-                    f"Supported: 'vllm', 'sentence_transformers'"
+                logger.debug(
+                    "Embedder already loaded (refcount=%d): %s", self._refcount, self.model_name
                 )
 
-            _load_s = _pc() - _t0
-            logger.info("Embedder loaded in %.1fs: %s", _load_s, self.model_name)
-
-            self._embedder = embedder
-            yield embedder
+            yield self._embedder
 
         finally:
-            self._unload()
+            self._refcount -= 1
+            if self._refcount == 0:
+                self._unload()
 
     def _load_vllm(self, gpu_fraction: float) -> "Embedder":
         """Load vLLM embedder."""

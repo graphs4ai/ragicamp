@@ -43,6 +43,7 @@ class RerankerProvider(ModelProvider):
     def __init__(self, config: RerankerConfig):
         self.config = config
         self._reranker = None
+        self._refcount: int = 0
 
     @property
     def model_name(self) -> str:
@@ -50,26 +51,43 @@ class RerankerProvider(ModelProvider):
 
     @contextmanager
     def load(self, gpu_fraction: float | None = None) -> Iterator["RerankerWrapper"]:
-        """Load reranker, yield it, then unload."""
-        import torch
-        from sentence_transformers import CrossEncoder
+        """Load reranker, yield it, then unload.
 
-        logger.info("Loading reranker: %s", self.model_name)
-
+        Supports ref-counting: nested ``with provider.load()`` calls reuse
+        the already-loaded model and only unload when the outermost context
+        exits.
+        """
+        self._refcount += 1
         try:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if self._refcount == 1:
+                # First caller — actually load the model
+                import torch
+                from sentence_transformers import CrossEncoder
 
-            model = CrossEncoder(
-                self.model_name,
-                device=device,
-                trust_remote_code=True,
-            )
+                logger.info("Loading reranker: %s", self.model_name)
 
-            self._reranker = RerankerWrapper(model, self.config.batch_size)
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+
+                model = CrossEncoder(
+                    self.model_name,
+                    device=device,
+                    trust_remote_code=True,
+                )
+
+                self._reranker = RerankerWrapper(model, self.config.batch_size)
+            else:
+                logger.debug(
+                    "Reranker already loaded (refcount=%d): %s",
+                    self._refcount,
+                    self.model_name,
+                )
+
             yield self._reranker
 
         finally:
-            self._unload()
+            self._refcount -= 1
+            if self._refcount == 0:
+                self._unload()
 
     def _unload(self):
         """Unload reranker and free GPU memory."""

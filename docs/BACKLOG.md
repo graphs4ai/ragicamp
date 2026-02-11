@@ -4,7 +4,7 @@
 > in the 2026-02-10 comprehensive review. Living document — update status as issues are resolved.
 >
 > **Created**: 2026-02-10
-> **Last updated**: 2026-02-10
+> **Last updated**: 2026-02-11
 > **Review scope**: Full codebase — abstractions, tests, execution pipeline, models/metrics/RAG
 
 ## Status Key
@@ -157,12 +157,63 @@ Issues that degrade robustness under failure or waste resources.
 
 ### 2.4 HyDE/MultiQuery transformers load/unload model on every call
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11 (provider ref-counting + agent session wrapping)
 - **Files:** `rag/query_transform/hyde.py:86,119`, `rag/query_transform/multiquery.py:82,155`
 - **Bug:** Each call to `transform()` or `batch_transform()` does `with self.generator_provider.load() as generator:`, loading and unloading the model every time. In IterativeRAG, the transformer is called per iteration — the model is loaded/unloaded multiple times per question. Extremely expensive on GPU.
-- **Fix:** Accept an already-loaded generator instance, or cache the loaded generator across calls within a single experiment run.
-- **Impact:** Significant performance improvement for IterativeRAG with query transforms. Could save minutes per experiment.
-- **Effort:** Medium (requires interface change)
+- **Fix:** Added ref-counting to all 3 providers (`GeneratorProvider`, `EmbedderProvider`, `RerankerProvider`). Nested `load()` calls now reuse the already-loaded model. Agent `run()` methods open outer provider sessions so all inner calls (HyDE, reranking, generation) hit the refcount path. Additionally, HyDE is now only applied on iteration 0 in IterativeRAG, and retrieval cache is enabled for transformed queries.
+- **Impact:** Saves 2-8 minutes per Optuna trial. See `docs/AGENT_PERFORMANCE_ANALYSIS.md` for full analysis.
+- **Effort:** Medium (completed)
+
+### 2.4a Provider ref-counting for model reuse
+
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `models/providers/generator.py`, `models/providers/embedder.py`, `models/providers/reranker.py`
+- **Fix:** Added `_refcount: int` to all providers. First `load()` actually loads; nested calls increment refcount and yield existing model. Unload only at refcount 0.
+- **Impact:** Eliminates redundant model loads across all agent types.
+- **Effort:** Small
+
+### 2.4b HyDE iteration guard in IterativeRAG
+
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `agents/iterative_rag.py:273`
+- **Fix:** Query transform only applied on iteration 0. Refined queries are already document-like, making HyDE on them wasteful.
+- **Impact:** Saves 1 generator load per additional iteration.
+- **Effort:** Small
+
+### 2.4c Retrieval cache enabled for transformed queries
+
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `factory/agents.py:212-215`
+- **Fix:** Removed conditional that disabled retrieval cache when `query_transform != "none"`. Cache keys on query text, so transformed queries get unique entries naturally.
+- **Impact:** Cache hits on repeat Optuna trials with same retriever+transform+top_k.
+- **Effort:** Small
+
+### 2.4d HybridSearcher sequential RRF fusion per query
+
+- **Status:** `[ ]`
+- **File:** `retrievers/hybrid.py:143-183`
+- **Bug:** After batch dense and batch sparse search complete, RRF fusion loops through each query sequentially in Python: document-to-SearchResult conversion, score computation, dict sorting. For 100 queries x 30 candidates = 3,000 object creations + sorts in Python loops.
+- **Fix:** Vectorize RRF score computation using numpy arrays across all queries at once; use numpy argsort for batched sorting.
+- **Impact:** Seconds-level improvement for large query batches with hybrid search.
+- **Effort:** Medium
+
+### 2.4e BM25 sequential search fallback
+
+- **Status:** `[ ]`
+- **File:** `indexes/sparse.py:181-195`
+- **Bug:** `batch_search` for BM25 falls back to `[self._search_bm25(q, top_k) for q in queries]` — 100% sequential. TF-IDF path uses sklearn's vectorized `cosine_similarity`, but BM25 has no equivalent.
+- **Fix:** Implement manual batched BM25 scoring with numpy, or accept as a library limitation.
+- **Impact:** Seconds-level for large batches. Low priority since TF-IDF path is already vectorized.
+- **Effort:** High (requires reimplementing BM25 scoring)
+
+### 2.4f Cache stores use sequential `execute()` instead of `executemany()`
+
+- **Status:** `[ ]`
+- **Files:** `cache/embedding_store.py:202-215`, `cache/retrieval_store.py:199-215`
+- **Bug:** Batch insertion loops with individual `cursor.execute()` calls inside a transaction. SQLite's `executemany()` is significantly faster for bulk inserts.
+- **Fix:** Pre-build parameter tuples, use `cursor.executemany()`. Loses per-row `rowcount` tracking (minor).
+- **Impact:** Minor — only affects cache-miss writes, and SQLite is not the bottleneck.
+- **Effort:** Small
 
 ### 2.5 ResourceManager.clear_gpu_memory() called every batch iteration in executor
 
@@ -303,7 +354,20 @@ Missing tests that block safe refactoring of Phase 4+ items.
 - **Gap:** Generation phase handler and metrics phase handler have zero tests. Only `init_phase.py` is tested.
 - **Effort:** Medium
 
-### 3.9 Consolidate duplicate mocks across test files
+### 3.9 Provider ref-counting — zero tests
+
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `models/providers/generator.py`, `models/providers/embedder.py`, `models/providers/reranker.py`
+- **Gap:** The ref-counting mechanism added in 2026-02-11 (2.4a) has no unit tests. Nested `load()` should reuse the model; only the outermost exit should unload. Edge cases: exception during first load with refcount>0, concurrent-like interleaving.
+- **Tests needed:**
+  - Single `load()` → model loaded, exit → model unloaded (backward compat)
+  - Nested `load()` → model loaded once, inner exit → model still loaded, outer exit → unloaded
+  - Exception during first `load()` → refcount reset to 0, no stale state
+  - `_refcount` never goes negative
+- **Impact:** Validates the foundation that all agent session wrapping depends on.
+- **Effort:** Small–Medium
+
+### 3.10 Consolidate duplicate mocks across test files
 
 - **Status:** `[ ]`
 - **Files:** `tests/test_agents.py`, `tests/test_cache.py`, `tests/test_config_wiring.py`, `tests/conftest.py`
@@ -600,7 +664,21 @@ Structural issues that hurt maintainability and extensibility.
 - **Fix:** Return `np.empty((0, dim), dtype=np.float32)` or guard in caller to skip `faiss_index.add` when empty.
 - **Effort:** Small
 
-### 5.20 Pickle security boundary undocumented
+### 5.20 Widespread ruff lint violations (30+ errors across codebase)
+
+- **Status:** `[ ]`
+- **Files:** 60 files flagged by `ruff format --check`; 30 `ruff check` errors across agents, providers, factory
+- **Problem:** Pre-existing violations include:
+  - **UP035** — `from typing import Iterator/Callable` → should use `collections.abc` (Python 3.10+)
+  - **B905** — `zip()` without `strict=` parameter (20+ occurrences)
+  - **F401** — Unused imports (`batch_embed_and_search`, `Optional`, `Any`)
+  - **B027** — Empty method in ABC without `@abstractmethod` (`Generator.unload`, `Embedder.unload`)
+  - **I001** — Unsorted import blocks
+- **Fix:** Run `ruff check --fix --unsafe-fixes` for auto-fixable issues; manually review B905 (add `strict=True` where lengths are guaranteed equal).
+- **Impact:** Clean CI, consistent code style, catches real bugs (unused imports, unsafe zip).
+- **Effort:** Small–Medium (mostly auto-fixable)
+
+### 5.21 Pickle security boundary undocumented
 
 - **Status:** `[ ]`
 - **Files:** `indexes/sparse.py:315`, `indexes/vector_index.py:418`, `indexes/hierarchical.py:496`
@@ -625,6 +703,8 @@ These are not issues per se but architectural improvements for when the project 
 | F8 | Add `__all__` exports to `rag/__init__.py` and sub-packages | Cleaner public API surface |
 | F9 | `ExperimentSpec.to_dict` always include all fields for predictable round-trips | Symmetric serialization |
 | F10 | Property-based tests (hypothesis) for ExperimentSpec round-trip, parsing functions | Stronger correctness guarantees |
+| F11 | Vectorized RRF merge in HybridSearcher using numpy arrays | Faster hybrid search for large batches |
+| F12 | Batched BM25 scoring (replace `rank_bm25` sequential calls) | Faster sparse search, hard due to library limitation |
 
 ---
 
@@ -633,8 +713,8 @@ These are not issues per se but architectural improvements for when the project 
 | Phase | Total | Done | Remaining |
 |-------|-------|------|-----------|
 | P0 — Data Integrity | 8 | 8 | 0 |
-| P1 — Reliability | 8 | 0 | 8 |
-| P2 — Test Coverage | 9 | 0 | 9 |
+| P1 — Reliability | 14 | 4 | 10 |
+| P2 — Test Coverage | 10 | 1 | 9 |
 | P3 — Interface/Design | 14 | 0 | 14 |
-| P4 — Polish | 20 | 0 | 20 |
-| **Total** | **59** | **8** | **51** |
+| P4 — Polish | 21 | 0 | 21 |
+| **Total** | **67** | **13** | **54** |

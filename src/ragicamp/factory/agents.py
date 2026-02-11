@@ -28,16 +28,16 @@ logger = get_logger(__name__)
 
 class AgentFactory:
     """Factory for creating RAG agents from configuration.
-    
+
     Creates agents with provider-based architecture:
-    
+
         # Create providers
         embedder = ProviderFactory.create_embedder("BAAI/bge-large-en")
         generator = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
-        
+
         # Load index
         index = VectorIndex.load("my_index")
-        
+
         # Create agent
         agent = AgentFactory.create_rag(
             agent_type="fixed_rag",
@@ -45,30 +45,32 @@ class AgentFactory:
             generator_provider=generator,
             index=index,
         )
-        
+
         # Run (agent manages GPU internally)
         results = agent.run(queries)
     """
-    
+
     # Custom agent registry
     _custom_agents: dict[str, type] = {}
-    
+
     # Agent type aliases
     _aliases: dict[str, str] = {
         "pipeline_rag": "fixed_rag",
         "direct": "direct_llm",
         "rag": "fixed_rag",
     }
-    
+
     @classmethod
     def register(cls, name: str):
         """Register a custom agent type."""
+
         def decorator(agent_class: type) -> type:
             cls._custom_agents[name] = agent_class
             logger.debug("Registered agent type: %s", name)
             return agent_class
+
         return decorator
-    
+
     @classmethod
     def create_direct(
         cls,
@@ -77,26 +79,26 @@ class AgentFactory:
         **kwargs: Any,
     ) -> DirectLLMAgent:
         """Create a DirectLLMAgent (no retrieval).
-        
+
         Args:
             name: Agent name
             generator_provider: Generator provider
             **kwargs: Additional agent config
-        
+
         Returns:
             DirectLLMAgent
         """
         from ragicamp.utils.prompts import PromptBuilder, PromptConfig
-        
+
         prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder(PromptConfig())
-        
+
         return DirectLLMAgent(
             name=name,
             generator_provider=generator_provider,
             prompt_builder=prompt_builder,
             **kwargs,
         )
-    
+
     @classmethod
     def create_rag(
         cls,
@@ -109,7 +111,7 @@ class AgentFactory:
         **kwargs: Any,
     ) -> Agent:
         """Create a RAG agent.
-        
+
         Args:
             agent_type: Type of agent (fixed_rag, iterative_rag, self_rag)
             name: Agent name
@@ -118,17 +120,17 @@ class AgentFactory:
             index: Vector index
             top_k: Number of documents to retrieve
             **kwargs: Additional agent config
-        
+
         Returns:
             Agent instance
         """
         from ragicamp.utils.prompts import PromptBuilder, PromptConfig
-        
+
         # Resolve aliases
         agent_type = cls._aliases.get(agent_type, agent_type)
-        
+
         prompt_builder = kwargs.pop("prompt_builder", None) or PromptBuilder(PromptConfig())
-        
+
         common_kwargs = {
             "name": name,
             "embedder_provider": embedder_provider,
@@ -138,7 +140,7 @@ class AgentFactory:
             "prompt_builder": prompt_builder,
         }
         common_kwargs.update(kwargs)
-        
+
         if agent_type == "fixed_rag":
             return FixedRAGAgent(**common_kwargs)
         elif agent_type == "iterative_rag":
@@ -150,7 +152,7 @@ class AgentFactory:
         else:
             available = ["fixed_rag", "iterative_rag", "self_rag"] + list(cls._custom_agents.keys())
             raise ValueError(f"Unknown agent type: {agent_type}. Available: {available}")
-    
+
     @classmethod
     def from_spec(
         cls,
@@ -161,37 +163,37 @@ class AgentFactory:
         reranker_provider: Any | None = None,
     ) -> Agent:
         """Create an agent from an ExperimentSpec.
-        
+
         Args:
             spec: Experiment specification
             embedder_provider: Embedder provider
             generator_provider: Generator provider
             index: Vector index (required for RAG agents)
             reranker_provider: Optional RerankerProvider for cross-encoder reranking
-        
+
         Returns:
             Configured Agent
         """
         from ragicamp.utils.prompts import PromptBuilder
-        
+
         # Determine agent type
         agent_type = spec.agent_type
         if not agent_type:
             agent_type = "direct_llm" if spec.exp_type == "direct" else "fixed_rag"
-        
+
         agent_type = cls._aliases.get(agent_type, agent_type)
-        
+
         # Build prompt builder
         prompt_builder = PromptBuilder.from_config(spec.prompt, dataset=spec.dataset)
-        
+
         kwargs: dict[str, Any] = {
             "prompt_builder": prompt_builder,
         }
-        
+
         # Add agent-specific params from spec
         if spec.agent_params:
             kwargs.update(dict(spec.agent_params))
-        
+
         if agent_type == "direct_llm":
             return cls.create_direct(
                 name=spec.name,
@@ -209,10 +211,9 @@ class AgentFactory:
                 kwargs["query_transformer"] = transformer
                 logger.info("Query transform enabled: %s", qt)
 
-            # Enable retrieval cache when query_transform is none
-            # (retrieval results are independent of LLM model/prompt)
-            if not qt or qt == "none":
-                kwargs.update(cls._get_retrieval_cache_kwargs(spec))
+            # Always enable retrieval cache — the cache keys on query text,
+            # so transformed queries get unique cache entries naturally.
+            kwargs.update(cls._get_retrieval_cache_kwargs(spec))
 
             # Pass reranker if configured
             if reranker_provider is not None:
@@ -231,7 +232,7 @@ class AgentFactory:
                 top_k=spec.top_k,
                 **kwargs,
             )
-    
+
     @staticmethod
     def _create_query_transformer(
         qt_name: str,
@@ -254,8 +255,7 @@ class AgentFactory:
             return MultiQueryTransformer(generator_provider)
         else:
             raise ValueError(
-                f"Unknown query_transform: '{qt_name}'. "
-                f"Available: 'hyde', 'multiquery', 'none'"
+                f"Unknown query_transform: '{qt_name}'. Available: 'hyde', 'multiquery', 'none'"
             )
 
     @staticmethod
@@ -280,7 +280,8 @@ class AgentFactory:
                 retriever_name = f"{retriever_name}_a{spec.alpha:.2f}"
             logger.info(
                 "Retrieval cache enabled (retriever=%s, db=%s)",
-                retriever_name, store.db_path,
+                retriever_name,
+                store.db_path,
             )
             return {
                 "retrieval_store": store,

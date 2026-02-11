@@ -88,6 +88,7 @@ Verification:"""
 # Per-query state tracker
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _QueryState:
     """Mutable state for a single query through the three phases."""
@@ -192,6 +193,7 @@ class SelfRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from contextlib import ExitStack
         from time import perf_counter as _pc
 
         logger.info(
@@ -202,41 +204,47 @@ class SelfRAGAgent(Agent):
         _run_t0 = _pc()
 
         # Initialise per-query state
-        states: dict[int, _QueryState] = {
-            q.idx: _QueryState(query=q) for q in pending
-        }
+        states: dict[int, _QueryState] = {q.idx: _QueryState(query=q) for q in pending}
 
-        # Phase 1: Batch assess  (1 generator load)
-        _phase_t0 = _pc()
-        self._phase_assess(states)
-        logger.info("Phase 1 (assess) completed in %.1fs", _pc() - _phase_t0)
+        # Open provider sessions so assess → HyDE → generate → verify all
+        # reuse the already-loaded models (ref-counting prevents unload until
+        # the outermost context exits).
+        with ExitStack() as stack:
+            stack.enter_context(self.generator_provider.load())
+            if self.reranker_provider is not None:
+                stack.enter_context(self.reranker_provider.load())
 
-        # Split into retrieval / direct groups
-        retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
-        direct_group = {idx: s for idx, s in states.items() if not s.needs_retrieval}
-
-        logger.info(
-            "SelfRAG split: %d retrieval, %d direct",
-            len(retrieval_group),
-            len(direct_group),
-        )
-
-        # Phase 2: Batch retrieve  (1 embedder load, only for retrieval group)
-        if retrieval_group:
+            # Phase 1: Batch assess  (1 generator load)
             _phase_t0 = _pc()
-            self._phase_retrieve(retrieval_group)
-            logger.info("Phase 2 (retrieve) completed in %.1fs", _pc() - _phase_t0)
+            self._phase_assess(states)
+            logger.info("Phase 1 (assess) completed in %.1fs", _pc() - _phase_t0)
 
-        # Build prompts for all queries
-        for state in retrieval_group.values():
-            state.prompt = self.prompt_builder.build_rag(state.query.text, state.context_text)
-        for state in direct_group.values():
-            state.prompt = self.prompt_builder.build_direct(state.query.text)
+            # Split into retrieval / direct groups
+            retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
+            direct_group = {idx: s for idx, s in states.items() if not s.needs_retrieval}
 
-        # Phase 3: Batch generate + verify + fallback  (1 generator load)
-        _phase_t0 = _pc()
-        self._phase_generate_and_verify(states, retrieval_group, direct_group)
-        logger.info("Phase 3 (generate+verify) completed in %.1fs", _pc() - _phase_t0)
+            logger.info(
+                "SelfRAG split: %d retrieval, %d direct",
+                len(retrieval_group),
+                len(direct_group),
+            )
+
+            # Phase 2: Batch retrieve  (1 embedder load, only for retrieval group)
+            if retrieval_group:
+                _phase_t0 = _pc()
+                self._phase_retrieve(retrieval_group)
+                logger.info("Phase 2 (retrieve) completed in %.1fs", _pc() - _phase_t0)
+
+            # Build prompts for all queries
+            for state in retrieval_group.values():
+                state.prompt = self.prompt_builder.build_rag(state.query.text, state.context_text)
+            for state in direct_group.values():
+                state.prompt = self.prompt_builder.build_direct(state.query.text)
+
+            # Phase 3: Batch generate + verify + fallback  (1 generator load)
+            _phase_t0 = _pc()
+            self._phase_generate_and_verify(states, retrieval_group, direct_group)
+            logger.info("Phase 3 (generate+verify) completed in %.1fs", _pc() - _phase_t0)
 
         # Build results in original query order
         new_results = self._build_results(states, pending)
@@ -260,8 +268,7 @@ class SelfRAGAgent(Agent):
         """Batch assess retrieval need for all queries."""
         idx_order = list(states.keys())
         prompts = [
-            RETRIEVAL_DECISION_PROMPT.format(query=states[idx].query.text)
-            for idx in idx_order
+            RETRIEVAL_DECISION_PROMPT.format(query=states[idx].query.text) for idx in idx_order
         ]
 
         with self.generator_provider.load() as generator:
@@ -276,16 +283,20 @@ class SelfRAGAgent(Agent):
             state.confidence = confidence
             state.needs_retrieval = confidence <= self.retrieval_threshold
 
-            state.steps.append(Step(
-                type=ASSESS_RETRIEVAL,
-                input={"query": state.query.text},
-                output={"confidence": confidence},
-                model=self.generator_provider.model_name,
-            ))
+            state.steps.append(
+                Step(
+                    type=ASSESS_RETRIEVAL,
+                    input={"query": state.query.text},
+                    output={"confidence": confidence},
+                    model=self.generator_provider.model_name,
+                )
+            )
 
             logger.debug(
                 "SelfRAG: q=%d confidence=%.2f -> %s",
-                idx, confidence, "retrieve" if state.needs_retrieval else "direct",
+                idx,
+                confidence,
+                "retrieve" if state.needs_retrieval else "direct",
             )
 
     # ------------------------------------------------------------------
@@ -350,15 +361,17 @@ class SelfRAGAgent(Agent):
             for idx, answer in zip(idx_order, answers):
                 state = all_states[idx]
                 state.answer = answer
-                state.steps.append(Step(
-                    type=GENERATE,
-                    input={
-                        "query": state.query.text,
-                        "with_context": state.needs_retrieval,
-                    },
-                    output=answer,
-                    model=self.generator_provider.model_name,
-                ))
+                state.steps.append(
+                    Step(
+                        type=GENERATE,
+                        input={
+                            "query": state.query.text,
+                            "with_context": state.needs_retrieval,
+                        },
+                        output=answer,
+                        model=self.generator_provider.model_name,
+                    )
+                )
 
             # Batch verify RAG answers (only retrieval group, if enabled)
             if self.verify_answer and retrieval_group:
@@ -394,25 +407,31 @@ class SelfRAGAgent(Agent):
             verdict = self._parse_verification(response)
             state = retrieval_group[idx]
             state.verification = verdict
-            state.steps.append(Step(
-                type=VERIFY,
-                input={"answer": state.answer[:100]},
-                output={"verification": verdict},
-                model=self.generator_provider.model_name,
-            ))
+            state.steps.append(
+                Step(
+                    type=VERIFY,
+                    input={"answer": state.answer[:100]},
+                    output={"verification": verdict},
+                    model=self.generator_provider.model_name,
+                )
+            )
 
             if verdict == "NOT_SUPPORTED" and self.fallback_to_direct:
                 fallback_ids.append(idx)
 
         # Batch regenerate fallbacks as direct (same generator load)
         if fallback_ids:
-            logger.debug("SelfRAG: %d answers not supported, falling back to direct", len(fallback_ids))
+            logger.debug(
+                "SelfRAG: %d answers not supported, falling back to direct", len(fallback_ids)
+            )
             fallback_prompts = [
                 self.prompt_builder.build_direct(retrieval_group[idx].query.text)
                 for idx in fallback_ids
             ]
 
-            with StepTimer(BATCH_FALLBACK_GENERATE, model=self.generator_provider.model_name) as step:
+            with StepTimer(
+                BATCH_FALLBACK_GENERATE, model=self.generator_provider.model_name
+            ) as step:
                 fallback_answers = generator.batch_generate(fallback_prompts)
                 step.input = {"n_queries": len(fallback_prompts)}
 
@@ -423,12 +442,14 @@ class SelfRAGAgent(Agent):
                 state.docs = []
                 state.docs_info = []
                 state.context_text = ""
-                state.steps.append(Step(
-                    type=FALLBACK_GENERATE,
-                    input={"query": state.query.text, "fallback": True},
-                    output=answer,
-                    model=self.generator_provider.model_name,
-                ))
+                state.steps.append(
+                    Step(
+                        type=FALLBACK_GENERATE,
+                        input={"query": state.query.text, "fallback": True},
+                        output=answer,
+                        model=self.generator_provider.model_name,
+                    )
+                )
 
     # ------------------------------------------------------------------
     # Reranking
@@ -449,19 +470,23 @@ class SelfRAGAgent(Agent):
                     [sr.document for sr in srs] for srs in retrievals
                 ]
                 reranked_docs = reranker.batch_rerank(
-                    query_texts, docs_lists, top_k=self.top_k,
+                    query_texts,
+                    docs_lists,
+                    top_k=self.top_k,
                 )
 
         reranked_retrievals: list[list[SearchResult]] = []
         for docs in reranked_docs:
-            reranked_retrievals.append([
-                SearchResult(
-                    document=doc,
-                    score=getattr(doc, "score", 0.0),
-                    rank=rank + 1,
-                )
-                for rank, doc in enumerate(docs)
-            ])
+            reranked_retrievals.append(
+                [
+                    SearchResult(
+                        document=doc,
+                        score=getattr(doc, "score", 0.0),
+                        rank=rank + 1,
+                    )
+                    for rank, doc in enumerate(docs)
+                ]
+            )
 
         return reranked_retrievals, step
 

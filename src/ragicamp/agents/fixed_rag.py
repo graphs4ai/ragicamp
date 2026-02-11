@@ -128,23 +128,33 @@ class FixedRAGAgent(Agent):
             logger.info("All queries already completed")
             return results
 
+        from contextlib import ExitStack
         from time import perf_counter as _pc
 
         logger.info("Processing %d queries with phase-based execution", len(pending))
         _run_t0 = _pc()
 
-        # Phase 1 & 2: Encode and search (embedder loaded)
-        logger.info("=== Phase 1: Encoding & Searching ===")
-        _phase_t0 = _pc()
-        query_texts = [q.text for q in pending]
-        retrievals, embed_steps = self._phase_retrieve(query_texts, show_progress)
-        logger.info("Phase 1 (retrieve) completed in %.1fs", _pc() - _phase_t0)
+        # Open provider sessions so that HyDE (which calls generator_provider.load()
+        # internally) and reranking reuse the already-loaded models instead of
+        # doing a full load/unload cycle each time.
+        with ExitStack() as stack:
+            if self.query_transformer is not None:
+                stack.enter_context(self.generator_provider.load())
+            if self.reranker_provider is not None:
+                stack.enter_context(self.reranker_provider.load())
 
-        # Phase 3: Generate (generator loaded)
-        logger.info("=== Phase 2: Generating ===")
-        _phase_t0 = _pc()
-        new_results = self._phase_generate(pending, retrievals, embed_steps, show_progress)
-        logger.info("Phase 2 (generate) completed in %.1fs", _pc() - _phase_t0)
+            # Phase 1 & 2: Encode and search (embedder loaded)
+            logger.info("=== Phase 1: Encoding & Searching ===")
+            _phase_t0 = _pc()
+            query_texts = [q.text for q in pending]
+            retrievals, embed_steps = self._phase_retrieve(query_texts, show_progress)
+            logger.info("Phase 1 (retrieve) completed in %.1fs", _pc() - _phase_t0)
+
+            # Phase 3: Generate (generator loaded)
+            logger.info("=== Phase 2: Generating ===")
+            _phase_t0 = _pc()
+            new_results = self._phase_generate(pending, retrievals, embed_steps, show_progress)
+            logger.info("Phase 2 (generate) completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:
@@ -186,7 +196,8 @@ class FixedRAGAgent(Agent):
         # Apply cross-encoder reranking if configured
         if self.reranker_provider is not None:
             retrievals, rerank_step = self._apply_reranking(
-                query_texts, retrievals,
+                query_texts,
+                retrievals,
             )
             steps.append(rerank_step)
 
@@ -206,30 +217,35 @@ class FixedRAGAgent(Agent):
         _t0 = _pc()
         with self.reranker_provider.load() as reranker:
             # Extract Document lists from SearchResult lists
-            docs_lists: list[list[Document]] = [
-                [sr.document for sr in srs] for srs in retrievals
-            ]
+            docs_lists: list[list[Document]] = [[sr.document for sr in srs] for srs in retrievals]
 
             reranked_docs = reranker.batch_rerank(
-                query_texts, docs_lists, top_k=self.top_k,
+                query_texts,
+                docs_lists,
+                top_k=self.top_k,
             )
 
         # Rebuild SearchResult wrappers with reranker scores
         reranked_retrievals: list[list[SearchResult]] = []
         for docs in reranked_docs:
-            reranked_retrievals.append([
-                SearchResult(
-                    document=doc,
-                    score=getattr(doc, "score", 0.0),
-                    rank=rank,
-                )
-                for rank, doc in enumerate(docs)
-            ])
+            reranked_retrievals.append(
+                [
+                    SearchResult(
+                        document=doc,
+                        score=getattr(doc, "score", 0.0),
+                        rank=rank,
+                    )
+                    for rank, doc in enumerate(docs)
+                ]
+            )
 
         elapsed = _pc() - _t0
         logger.info(
             "Reranked %d queries (%d -> %d docs each) in %.1fs",
-            len(query_texts), self.fetch_k, self.top_k, elapsed,
+            len(query_texts),
+            self.fetch_k,
+            self.top_k,
+            elapsed,
         )
 
         rerank_step = Step(
