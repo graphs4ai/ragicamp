@@ -9,11 +9,18 @@ Batched architecture (three clean phases, minimal model loads):
                        → batch regenerate fallbacks → unload
 """
 
+from __future__ import annotations
+
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ragicamp.cache.retrieval_store import RetrievalStore
+    from ragicamp.models.providers.reranker import RerankerProvider
+    from ragicamp.rag.query_transform.base import QueryTransformer
 
 from ragicamp.agents.base import (
     Agent,
@@ -131,11 +138,11 @@ class SelfRAGAgent(Agent):
         verify_answer: bool = False,
         fallback_to_direct: bool = True,
         prompt_builder: PromptBuilder | None = None,
-        retrieval_store: Any | None = None,
+        retrieval_store: RetrievalStore | None = None,
         retriever_name: str | None = None,
-        reranker_provider: Any | None = None,
+        reranker_provider: RerankerProvider | None = None,
         fetch_k: int | None = None,
-        query_transformer: Any | None = None,
+        query_transformer: QueryTransformer | None = None,
     ):
         """Initialize agent with providers.
 

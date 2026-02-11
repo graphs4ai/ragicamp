@@ -8,14 +8,20 @@ Clean Architecture Design:
 - Simple interface: agent.run(queries) → results
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ragicamp.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from ragicamp.cache.retrieval_store import RetrievalStore
+    from ragicamp.rag.query_transform.base import QueryTransformer
 from ragicamp.core.step_types import BATCH_ENCODE, BATCH_SEARCH, QUERY_TRANSFORM, RERANK
 
 logger = get_logger(__name__)
@@ -119,7 +125,7 @@ class RetrievedDocInfo:
         return d
 
     @classmethod
-    def from_search_results(cls, search_results: list) -> list["RetrievedDocInfo"]:
+    def from_search_results(cls, search_results: list) -> list[RetrievedDocInfo]:
         """Build a list of RetrievedDocInfo from SearchResult objects.
 
         This is the shared factory for all RAG agents, eliminating the
@@ -230,15 +236,15 @@ def is_hybrid_searcher(index: Any) -> bool:
 
 
 def batch_transform_embed_and_search(
-    query_transformer: Any | None,
+    query_transformer: QueryTransformer | None,
     embedder_provider: Any,
     index: Any,
     query_texts: list[str],
     top_k: int,
     is_hybrid: bool,
-    retrieval_store: Any = None,
+    retrieval_store: RetrievalStore | None = None,
     retriever_name: str | None = None,
-) -> tuple[list[list], list["Step"]]:
+) -> tuple[list[list], list[Step]]:
     """Query-transform-aware wrapper around :func:`batch_embed_and_search`.
 
     If *query_transformer* is ``None`` this simply delegates to
@@ -340,7 +346,7 @@ def batch_embed_and_search(
     is_hybrid: bool,
     retrieval_store: Any = None,
     retriever_name: str | None = None,
-) -> tuple[list[list], "Step", "Step"]:
+) -> tuple[list[list], Step, Step]:
     """Shared embed + search logic for all RAG agents.
 
     Loads the embedder, encodes queries, then searches the index.
@@ -540,7 +546,7 @@ def apply_reranking(
     retrievals: list[list],
     top_k: int,
     fetch_k: int | None = None,
-) -> tuple[list[list], "Step"]:
+) -> tuple[list[list], Step]:
     """Shared reranking logic for all RAG agents.
 
     Loads the reranker (via ref-counted provider), reranks documents per query,

@@ -1,6 +1,12 @@
-"""Metric factory for creating evaluation metrics from configuration."""
+"""Metric factory for creating evaluation metrics from configuration.
 
-from typing import Any, Optional, Union
+Uses a registry pattern for clean extensibility. Adding a new metric requires
+only a single entry in ``_METRIC_REGISTRY``.
+"""
+
+from __future__ import annotations
+
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics import Metric
@@ -9,10 +15,38 @@ from ragicamp.models.base import LanguageModel
 logger = get_logger(__name__)
 
 
+# Registry: metric name → (module_path, class_name)
+# Lazy-imported on first use so optional dependencies don't block startup.
+_METRIC_REGISTRY: dict[str, tuple[str, str]] = {
+    "exact_match": ("ragicamp.metrics.exact_match", "ExactMatchMetric"),
+    "f1": ("ragicamp.metrics.exact_match", "F1Metric"),
+    "bertscore": ("ragicamp.metrics.bertscore", "BERTScoreMetric"),
+    "bleurt": ("ragicamp.metrics.bleurt", "BLEURTMetric"),
+    "llm_judge": ("ragicamp.metrics.llm_judge_qa", "LLMJudgeQAMetric"),
+    "llm_judge_qa": ("ragicamp.metrics.llm_judge_qa", "LLMJudgeQAMetric"),
+    "faithfulness": ("ragicamp.metrics.faithfulness", "FaithfulnessMetric"),
+    "hallucination": ("ragicamp.metrics.hallucination", "HallucinationMetric"),
+}
+
+# Metrics that require a judge_model to be provided.
+_JUDGE_METRICS = {"llm_judge", "llm_judge_qa"}
+
+
+def _import_metric_class(module_path: str, class_name: str) -> type | None:
+    """Lazy-import a metric class, returning None if the dependency is missing."""
+    import importlib
+
+    try:
+        module = importlib.import_module(module_path)
+        return getattr(module, class_name)
+    except (ImportError, AttributeError):
+        return None
+
+
 class MetricFactory:
     """Factory for creating evaluation metrics from configuration."""
 
-    # Custom metric registry
+    # Custom metric registry (user-registered at runtime)
     _custom_metrics: dict[str, type] = {}
 
     @classmethod
@@ -28,8 +62,8 @@ class MetricFactory:
     @classmethod
     def create(
         cls,
-        config: list[Union[str, dict[str, Any]]],
-        judge_model: Optional[LanguageModel] = None,
+        config: list[str | dict[str, Any]],
+        judge_model: LanguageModel | None = None,
     ) -> list[Metric]:
         """Create metrics from configuration.
 
@@ -44,106 +78,55 @@ class MetricFactory:
             >>> config = ["exact_match", "f1", {"name": "bertscore", "params": {...}}]
             >>> metrics = MetricFactory.create(config)
         """
-        from ragicamp.metrics.exact_match import ExactMatchMetric, F1Metric
-
-        # Import optional metrics with guards
-        try:
-            from ragicamp.metrics.bertscore import BERTScoreMetric
-
-            BERTSCORE_AVAILABLE = True
-        except ImportError:
-            BERTSCORE_AVAILABLE = False
-
-        try:
-            from ragicamp.metrics.bleurt import BLEURTMetric
-
-            BLEURT_AVAILABLE = True
-        except ImportError:
-            BLEURT_AVAILABLE = False
-
-        try:
-            from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
-
-            LLM_JUDGE_AVAILABLE = True
-        except ImportError:
-            LLM_JUDGE_AVAILABLE = False
-
-        try:
-            from ragicamp.metrics.faithfulness import FaithfulnessMetric
-
-            FAITHFULNESS_AVAILABLE = True
-        except ImportError:
-            FAITHFULNESS_AVAILABLE = False
-
-        try:
-            from ragicamp.metrics.hallucination import HallucinationMetric
-
-            HALLUCINATION_AVAILABLE = True
-        except ImportError:
-            HALLUCINATION_AVAILABLE = False
-
-        metrics = []
+        metrics: list[Metric] = []
 
         for metric_config in config:
-            # Handle both string and dict formats
             if isinstance(metric_config, str):
                 metric_name = metric_config
-                metric_params = {}
+                metric_params: dict[str, Any] = {}
             else:
                 metric_name = metric_config["name"]
                 metric_params = metric_config.get("params", {})
 
-            # Create metric based on name
-            if metric_name == "exact_match":
-                metrics.append(ExactMatchMetric())
+            # Check custom registry first
+            if metric_name in cls._custom_metrics:
+                metrics.append(cls._custom_metrics[metric_name](**metric_params))
+                continue
 
-            elif metric_name == "f1":
-                metrics.append(F1Metric())
+            # Check built-in registry
+            if metric_name not in _METRIC_REGISTRY:
+                logger.warning("Unknown metric: %s, skipping", metric_name)
+                continue
 
-            elif metric_name == "bertscore":
-                if not BERTSCORE_AVAILABLE:
-                    logger.warning("Skipping BERTScore (not installed)")
-                    continue
-                metrics.append(BERTScoreMetric(**metric_params))
-
-            elif metric_name == "bleurt":
-                if not BLEURT_AVAILABLE:
-                    logger.warning("Skipping BLEURT (not installed)")
-                    continue
-                metrics.append(BLEURTMetric(**metric_params))
-
-            elif metric_name in ("llm_judge_qa", "llm_judge"):
-                if not LLM_JUDGE_AVAILABLE:
-                    logger.warning("Skipping LLM Judge (not available)")
-                    continue
+            # Judge metrics need special handling
+            if metric_name in _JUDGE_METRICS:
                 if not judge_model:
-                    logger.warning("Skipping LLM Judge (judge_model not configured)")
+                    logger.warning("Skipping %s (judge_model not configured)", metric_name)
                     continue
                 judgment_type = metric_params.get("judgment_type", "binary")
                 max_concurrent = metric_params.get(
                     "max_concurrent", metric_params.get("batch_size", 20)
                 )
+                module_path, class_name = _METRIC_REGISTRY[metric_name]
+                metric_cls = _import_metric_class(module_path, class_name)
+                if metric_cls is None:
+                    logger.warning("Skipping %s (not installed)", metric_name)
+                    continue
                 metrics.append(
-                    LLMJudgeQAMetric(
+                    metric_cls(
                         judge_model=judge_model,
                         judgment_type=judgment_type,
                         max_concurrent=max_concurrent,
                     )
                 )
+                continue
 
-            elif metric_name == "faithfulness":
-                if not FAITHFULNESS_AVAILABLE:
-                    logger.warning("Skipping Faithfulness (not installed)")
-                    continue
-                metrics.append(FaithfulnessMetric(**metric_params))
-
-            elif metric_name == "hallucination":
-                if not HALLUCINATION_AVAILABLE:
-                    logger.warning("Skipping Hallucination (not installed)")
-                    continue
-                metrics.append(HallucinationMetric(**metric_params))
-
-            else:
-                logger.warning("Unknown metric: %s, skipping", metric_name)
+            # Standard metrics: lazy import and instantiate
+            module_path, class_name = _METRIC_REGISTRY[metric_name]
+            metric_cls = _import_metric_class(module_path, class_name)
+            if metric_cls is None:
+                logger.warning("Skipping %s (not installed)", metric_name)
+                continue
+            metrics.append(metric_cls(**metric_params))
 
         return metrics

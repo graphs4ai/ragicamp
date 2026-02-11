@@ -12,11 +12,18 @@ Supports multiple search backends:
 - HierarchicalSearcher: Child search, parent return
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from tqdm import tqdm
+
+if TYPE_CHECKING:
+    from ragicamp.cache.retrieval_store import RetrievalStore
+    from ragicamp.models.providers.reranker import RerankerProvider
+    from ragicamp.rag.query_transform.base import QueryTransformer
 
 from ragicamp.agents.base import (
     Agent,
@@ -66,11 +73,11 @@ class FixedRAGAgent(Agent):
         index: SearchBackend,
         top_k: int = 5,
         prompt_builder: PromptBuilder | None = None,
-        retrieval_store: Any | None = None,
+        retrieval_store: RetrievalStore | None = None,
         retriever_name: str | None = None,
-        reranker_provider: Any | None = None,
+        reranker_provider: RerankerProvider | None = None,
         fetch_k: int | None = None,
-        query_transformer: Any | None = None,
+        query_transformer: QueryTransformer | None = None,
     ):
         """Initialize agent with providers (not loaded models).
 
