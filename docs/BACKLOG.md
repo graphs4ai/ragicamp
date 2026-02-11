@@ -452,17 +452,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.8 `_build_rag_specs` has 8 levels of nesting
 
-- **Status:** `[ ]`
-- **File:** `spec/builder.py:342-404`
-- **Problem:** 8 nested `for` loops for the Cartesian product. Hard to read and modify.
-- **Fix:** Use `itertools.product`:
-  ```python
-  for model, ret_name, top_k, prompt, qt, rr_cfg, dataset in product(
-      models, retriever_names, top_k_values, prompts, query_transforms, reranker_cfgs, datasets
-  ):
-  ```
-- **Impact:** Readability improvement. Easier to add/remove dimensions.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `spec/builder.py`
+- **Fix:** Replaced 8 nested for-loops with `itertools.product` (imported as `cartesian`). Body flattened to 2 levels (cartesian + inner rrf_k loop).
 
 ### 4.9 HybridSearcher duplicates logic between search and batch_search
 
@@ -524,25 +516,21 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.3 `gradient_checkpointing_enable` called during inference
 
-- **Status:** `[ ]`
-- **File:** `models/huggingface.py:80-81`
-- **Problem:** Trades compute for memory during backprop, but this is inference-only (`model.eval()`). Adds overhead without benefit.
-- **Fix:** Remove the two lines.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `models/huggingface.py`
+- **Fix:** Removed `gradient_checkpointing_enable()` call — unnecessary overhead during inference-only mode.
 
 ### 5.4 Missing `gc.collect()` in SentenceTransformerEmbedder.unload
 
-- **Status:** `[ ]`
-- **File:** `models/st_embedder.py:134-150`
-- **Fix:** Add `gc.collect()` between model deletion and CUDA cache clearing, matching other `unload()` methods.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `models/st_embedder.py`
+- **Fix:** Added `gc.collect()` between model deletion and CUDA cache clearing.
 
 ### 5.5 `spec/__init__.py` exports private `_model_short` and `_spec_hash`
 
-- **Status:** `[ ]`
-- **File:** `spec/__init__.py:11, 18-19`
-- **Fix:** Either drop underscore prefix (they're intentionally public) or remove from `__all__`.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `spec/__init__.py`
+- **Fix:** Removed private `_model_short` and `_spec_hash` from `__all__` exports.
 
 ### 5.6 `is_hybrid_searcher` uses fragile `hasattr` duck typing
 
@@ -581,10 +569,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.11 `QAExample.metadata` uses `None` default instead of `field(default_factory=dict)`
 
-- **Status:** `[ ]`
-- **File:** `datasets/base.py:30`
-- **Fix:** Use `field(default_factory=dict)`.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `datasets/base.py`
+- **Fix:** Changed to `field(default_factory=dict)`, removed `__post_init__` guard.
 
 ### 5.12 `should_skip_file` overly broad substring match
 
@@ -595,10 +582,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.13 `GPUProfile` threshold constants treated as dataclass fields
 
-- **Status:** `[ ]`
-- **File:** `models/providers/gpu_profile.py:25-26`
-- **Fix:** Use `ClassVar[float]` annotation.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `models/providers/gpu_profile.py`
+- **Fix:** Annotated `_HIGH_THRESHOLD` and `_MID_THRESHOLD` as `ClassVar[float]`.
 
 ### 5.14 Duplicate GPU tier detection logic
 
@@ -693,6 +679,6 @@ These are not issues per se but architectural improvements for when the project 
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
-| P3 — Interface/Design | 14 | 6 | 8 |
-| P4 — Polish | 21 | 0 | 21 |
-| **Total** | **68** | **35** | **33** |
+| P3 — Interface/Design | 14 | 7 | 7 |
+| P4 — Polish | 21 | 5 | 16 |
+| **Total** | **68** | **41** | **27** |
