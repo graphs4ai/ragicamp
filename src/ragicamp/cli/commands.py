@@ -105,7 +105,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
     # Save index
     from ragicamp.utils.artifacts import get_artifact_manager
-    
+
     manager = get_artifact_manager()
     index_path = manager.get_embedding_index_path(index_name)
     index.save(index_path)
@@ -347,8 +347,9 @@ def cmd_metrics(args: argparse.Namespace) -> int:
         with open(results_path) as f:
             result_data = json.load(f)
         result_data["metrics"].update(results.get("aggregate", {}))
-        with open(results_path, "w") as f:
-            json.dump(result_data, f, indent=2)
+        from ragicamp.utils.experiment_io import atomic_write_json
+
+        atomic_write_json(result_data, results_path)
         print(f"\n✓ Updated {results_path}")
 
     return 0
@@ -504,7 +505,10 @@ def _find_indexes_to_migrate(
 
 
 def _migrate_single_index(
-    index_path: Path, *, dry_run: bool, force: bool,
+    index_path: Path,
+    *,
+    dry_run: bool,
+    force: bool,
 ) -> str:
     """Migrate a single index directory.
 

@@ -94,12 +94,14 @@ class BERTScoreMetric(Metric):
             # Start with batch_size=128, halve on OOM
             batch_size = 128
             min_batch_size = 1
+            all_P: list = []
+            all_R: list = []
+            all_F1: list = []
+            processed = 0  # Track how many items completed successfully
 
-            while batch_size >= min_batch_size:
+            while processed < len(predictions):
                 try:
-                    all_P, all_R, all_F1 = [], [], []
-
-                    for i in range(0, len(predictions), batch_size):
+                    for i in range(processed, len(predictions), batch_size):
                         batch_preds = predictions[i : i + batch_size]
                         batch_refs = references[i : i + batch_size]
 
@@ -111,28 +113,15 @@ class BERTScoreMetric(Metric):
                         all_P.append(P)
                         all_R.append(R)
                         all_F1.append(F1)
+                        processed += len(batch_preds)
 
-                    # Concatenate results
-                    P = torch.cat(all_P)
-                    R = torch.cat(all_R)
-                    F1 = torch.cat(all_F1)
-
-                    # Store per-item scores for detailed analysis
-                    self._last_scores = F1.tolist()
-                    self._last_per_item = self._last_scores  # B5 fix: base class compat
-
-                    return {
-                        "bertscore": F1.mean().item(),  # B6 fix: primary key matches metric.name
-                        "bertscore_precision": P.mean().item(),
-                        "bertscore_recall": R.mean().item(),
-                        "bertscore_f1": F1.mean().item(),
-                    }
+                    break  # All done
 
                 except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
                     if "out of memory" in str(e).lower() or isinstance(
                         e, torch.cuda.OutOfMemoryError
                     ):
-                        # Clear memory and retry with smaller batch
+                        # Clear memory and retry failed batch with smaller size
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                         gc.collect()
@@ -141,8 +130,10 @@ class BERTScoreMetric(Metric):
                         batch_size = batch_size // 2
                         if batch_size >= min_batch_size:
                             logger.warning(
-                                "OOM with batch_size=%d, retrying with %d",
-                                old_batch_size, batch_size,
+                                "OOM with batch_size=%d, retrying from item %d with %d",
+                                old_batch_size,
+                                processed,
+                                batch_size,
                             )
                         else:
                             raise RuntimeError(
@@ -152,8 +143,21 @@ class BERTScoreMetric(Metric):
                     else:
                         raise
 
-            # Should not reach here
-            raise RuntimeError("BERTScore computation failed")
+            # Concatenate results
+            P = torch.cat(all_P)
+            R = torch.cat(all_R)
+            F1 = torch.cat(all_F1)
+
+            # Store per-item scores for detailed analysis
+            self._last_scores = F1.tolist()
+            self._last_per_item = self._last_scores  # B5 fix: base class compat
+
+            return {
+                "bertscore": F1.mean().item(),  # B6 fix: primary key matches metric.name
+                "bertscore_precision": P.mean().item(),
+                "bertscore_recall": R.mean().item(),
+                "bertscore_f1": F1.mean().item(),
+            }
 
         finally:
             # ALWAYS unload after computation to free GPU

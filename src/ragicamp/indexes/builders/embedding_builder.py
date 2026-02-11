@@ -113,7 +113,9 @@ def build_embedding_index(
     logger.info("  Embedding backend: %s", embedding_backend)
     logger.info("  Chunk size: %s, overlap: %s", chunk_size, chunk_overlap)
     logger.info("  Chunking strategy: %s", chunking_strategy)
-    logger.info("  Doc batch size: %s, embedding batch size: %s", doc_batch_size, embedding_batch_size)
+    logger.info(
+        "  Doc batch size: %s, embedding batch size: %s", doc_batch_size, embedding_batch_size
+    )
     logger.info("  FAISS index type: %s, GPU: %s, threads: %s", index_type, use_gpu, num_threads)
     if index_type in ("ivf", "ivfpq"):
         logger.info("  IVF params: nlist=%s, nprobe=%s", nlist, nprobe)
@@ -163,7 +165,9 @@ def build_embedding_index(
     checkpoint = checkpoint_mgr.load(EmbeddingCheckpoint)
     if checkpoint and index_checkpoint_path.exists():
         logger.info(
-            "  Resuming from checkpoint: batch %s, %s docs", checkpoint.batch_num, checkpoint.total_docs
+            "  Resuming from checkpoint: batch %s, %s docs",
+            checkpoint.batch_num,
+            checkpoint.total_docs,
         )
         logger.info("  Loading checkpointed index...")
         index = faiss.read_index(str(index_checkpoint_path))
@@ -177,7 +181,9 @@ def build_embedding_index(
             cpu_index = faiss.IndexFlatIP(embedding_dim)
         elif index_type == "ivf":
             quantizer = faiss.IndexFlatIP(embedding_dim)
-            cpu_index = faiss.IndexIVFFlat(quantizer, embedding_dim, nlist, faiss.METRIC_INNER_PRODUCT)
+            cpu_index = faiss.IndexIVFFlat(
+                quantizer, embedding_dim, nlist, faiss.METRIC_INNER_PRODUCT
+            )
         elif index_type == "ivfpq":
             quantizer = faiss.IndexFlatIP(embedding_dim)
             m = min(32, embedding_dim // 4)
@@ -235,7 +241,9 @@ def build_embedding_index(
 
         chunk_elapsed = time.time() - t_chunk
         if truncated > 0:
-            logger.info("    %s chunks in %.1fs (truncated %s)", len(batch_chunks), chunk_elapsed, truncated)
+            logger.info(
+                "    %s chunks in %.1fs (truncated %s)", len(batch_chunks), chunk_elapsed, truncated
+            )
         else:
             logger.info("    %s chunks in %.1fs", len(batch_chunks), chunk_elapsed)
 
@@ -251,8 +259,9 @@ def build_embedding_index(
                 texts, show_progress_bar=True, batch_size=embedding_batch_size
             )
 
-            # Normalize in-place
+            # Normalize in-place (guard against zero-norm from empty/whitespace chunks)
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-12)
             np.divide(embeddings, norms, out=embeddings)
 
             # Train IVF if needed (first batch only)
@@ -266,7 +275,9 @@ def build_embedding_index(
             index.add(embeddings.astype(np.float32))
             index_elapsed = time.time() - t_index
 
-            logger.info("    Added to index in %.1fs (total: %s vectors)", index_elapsed, index.ntotal)
+            logger.info(
+                "    Added to index in %.1fs (total: %s vectors)", index_elapsed, index.ntotal
+            )
 
             # Save chunks to disk
             storage.append_chunks(batch_chunks)
@@ -275,7 +286,9 @@ def build_embedding_index(
             del embeddings, texts
             gc.collect()
 
-        logger.info("  Total: %s docs -> %s chunks (index: %s)", total_docs, total_chunks, index.ntotal)
+        logger.info(
+            "  Total: %s docs -> %s chunks (index: %s)", total_docs, total_chunks, index.ntotal
+        )
 
         # Checkpoint every N batches
         if batch_num % CHECKPOINT_INTERVAL == 0:
@@ -326,7 +339,12 @@ def build_embedding_index(
         storage.close()
         raise RuntimeError(f"Build failed at batch {batch_num}: {e}") from e
 
-    logger.info("\nBuild complete: %s docs -> %s chunks -> %s vectors", total_docs, total_chunks, index.ntotal)
+    logger.info(
+        "\nBuild complete: %s docs -> %s chunks -> %s vectors",
+        total_docs,
+        total_chunks,
+        index.ntotal,
+    )
 
     # Set nprobe for IVF indexes
     if index_type in ("ivf", "ivfpq") and hasattr(index, "nprobe"):

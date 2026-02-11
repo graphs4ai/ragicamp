@@ -25,7 +25,6 @@ class AgentType(str, Enum):
         return agent_type in [t.value for t in cls.rag_types()]
 
 
-
 class MetricType(str, Enum):
     """Metric types supported by RAGiCamp."""
 
@@ -86,6 +85,17 @@ class MetricType(str, Enum):
         context_metrics.add(cls.HALLUCINATION.value)
         return metric_type in context_metrics
 
+
+# === Error Markers ===
+
+# Prefix used by model backends when an API call fails.
+# Metrics should detect and exclude these from scoring.
+ERROR_PREDICTION_PREFIX = "[ERROR:"
+
+
+def is_error_prediction(text: str) -> bool:
+    """Check if a prediction is an error marker from a failed API call."""
+    return text.startswith(ERROR_PREDICTION_PREFIX)
 
 
 # === Default Values ===

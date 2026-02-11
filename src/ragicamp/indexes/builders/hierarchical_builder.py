@@ -123,7 +123,9 @@ def build_hierarchical_index(
     logger.info("  Embedding backend: %s", backend)
     logger.info("  Parent chunks: %s", parent_chunk_size)
     logger.info("  Child chunks: %s", child_chunk_size)
-    logger.info("  Doc batch size: %s, embedding batch size: %s", doc_batch_size, embedding_batch_size)
+    logger.info(
+        "  Doc batch size: %s, embedding batch size: %s", doc_batch_size, embedding_batch_size
+    )
     logger.info("  FAISS index type: %s", index_type)
     logger.info("  FAISS threads: %s", num_threads)
     logger.info("=" * 60)
@@ -183,7 +185,9 @@ def build_hierarchical_index(
     checkpoint = checkpoint_mgr.load(HierarchicalCheckpoint)
     if checkpoint and index_checkpoint_path.exists():
         logger.info(
-            "  Resuming from checkpoint: batch %s, %s docs", checkpoint.batch_num, checkpoint.total_docs
+            "  Resuming from checkpoint: batch %s, %s docs",
+            checkpoint.batch_num,
+            checkpoint.total_docs,
         )
         logger.info("  Loading checkpointed index...")
         index = faiss.read_index(str(index_checkpoint_path))
@@ -238,7 +242,10 @@ def build_hierarchical_index(
                 )
                 chunk_elapsed = time.time() - t_chunk
                 logger.info(
-                    "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)", len(parent_chunks), len(child_chunks), chunk_elapsed
+                    "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)",
+                    len(parent_chunks),
+                    len(child_chunks),
+                    chunk_elapsed,
                 )
 
                 # Save mapping
@@ -258,8 +265,9 @@ def build_hierarchical_index(
                         child_texts, show_progress_bar=True, batch_size=embedding_batch_size
                     )
 
-                    # Normalize in-place
+                    # Normalize in-place (guard against zero-norm from empty/whitespace chunks)
                     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    norms = np.maximum(norms, 1e-12)
                     np.divide(embeddings, norms, out=embeddings)
 
                     # Add to index
@@ -267,7 +275,9 @@ def build_hierarchical_index(
                     index.add(embeddings.astype(np.float32))
                     index_elapsed = time.time() - t_index
                     logger.info(
-                        "    Added to index in %.1fs (total: %s vectors)", index_elapsed, index.ntotal
+                        "    Added to index in %.1fs (total: %s vectors)",
+                        index_elapsed,
+                        index.ntotal,
                     )
 
                     # Save child chunks
@@ -278,7 +288,10 @@ def build_hierarchical_index(
                     gc.collect()
 
                 logger.info(
-                    "  Total: %s docs -> %s parents, %s children", total_docs, parent_count, child_count
+                    "  Total: %s docs -> %s parents, %s children",
+                    total_docs,
+                    parent_count,
+                    child_count,
                 )
                 doc_batch = []
                 del parent_chunks, child_chunks, batch_child_to_parent
@@ -311,7 +324,10 @@ def build_hierarchical_index(
             )
             chunk_elapsed = time.time() - t_chunk
             logger.info(
-                "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)", len(parent_chunks), len(child_chunks), chunk_elapsed
+                "    Chunking (hierarchical) -> %s parents, %s children (%.1fs)",
+                len(parent_chunks),
+                len(child_chunks),
+                chunk_elapsed,
             )
 
             pickle.dump(batch_child_to_parent, mapping_file)
@@ -341,7 +357,9 @@ def build_hierarchical_index(
 
                 del child_texts, embeddings
 
-            logger.info("  Total: %s docs -> %s parents, %s children", total_docs, parent_count, child_count)
+            logger.info(
+                "  Total: %s docs -> %s parents, %s children", total_docs, parent_count, child_count
+            )
             del doc_batch, parent_chunks, child_chunks, batch_child_to_parent
             gc.collect()
 
@@ -366,7 +384,11 @@ def build_hierarchical_index(
 
     mapping_file.close()
     logger.info(
-        "\nBuild complete: %s docs -> %s parents, %s children -> %s vectors", total_docs, parent_count, child_count, index.ntotal
+        "\nBuild complete: %s docs -> %s parents, %s children -> %s vectors",
+        total_docs,
+        parent_count,
+        child_count,
+        index.ntotal,
     )
 
     # ==========================================================================

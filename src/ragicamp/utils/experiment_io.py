@@ -69,10 +69,7 @@ class ExperimentIO:
 
     def _atomic_write(self, data: dict[str, Any], path: Path) -> None:
         """Write JSON atomically (write to temp, then rename)."""
-        temp_path = path.with_suffix(".tmp")
-        with open(temp_path, "w") as f:
-            json.dump(data, f, indent=2)
-        temp_path.replace(path)
+        atomic_write_json(data, path)
 
     # =========================================================================
     # Predictions
@@ -224,6 +221,28 @@ class ExperimentIO:
 # =============================================================================
 
 
+def atomic_write_json(data: dict[str, Any], path: Path, **kwargs: Any) -> None:
+    """Write JSON atomically (write to temp file, then rename).
+
+    This is the canonical atomic write function. Use this everywhere
+    instead of bare ``open(path, 'w') + json.dump()``.
+
+    Args:
+        data: Dictionary to serialize as JSON
+        path: Final destination path
+        **kwargs: Extra keyword arguments forwarded to ``json.dump``
+            (e.g. ``indent``, ``sort_keys``).  Defaults to ``indent=2``
+            when no kwargs are given.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kwargs.setdefault("indent", 2)
+    temp_path = path.with_suffix(".tmp")
+    with open(temp_path, "w") as f:
+        json.dump(data, f, **kwargs)
+    temp_path.replace(path)
+
+
 def save_predictions_atomic(data: dict[str, Any], path: Path) -> None:
     """Save predictions atomically (standalone function).
 
@@ -231,10 +250,7 @@ def save_predictions_atomic(data: dict[str, Any], path: Path) -> None:
         data: Predictions data dict
         path: Path to save to
     """
-    temp_path = path.with_suffix(".tmp")
-    with open(temp_path, "w") as f:
-        json.dump(data, f, indent=2)
-    temp_path.replace(path)
+    atomic_write_json(data, path)
 
 
 def load_predictions(path: Path) -> dict[str, Any]:

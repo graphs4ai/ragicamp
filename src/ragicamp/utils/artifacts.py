@@ -52,14 +52,15 @@ class ArtifactManager:
         return path
 
     def save_json(self, data: dict[str, Any], path: Path) -> None:
-        """Save dictionary as JSON.
+        """Save dictionary as JSON (atomic write).
 
         Args:
             data: Dictionary to save
             path: Path to save to
         """
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+        from ragicamp.utils.experiment_io import atomic_write_json
+
+        atomic_write_json(data, path)
 
     def load_json(self, path: Path) -> dict[str, Any]:
         """Load JSON file.

@@ -68,12 +68,21 @@ def build_specs(
 
     # Warn about YAML keys that are not used by the spec builder
     _KNOWN_KEYS = {
-        "name", "datasets", "batch_size", "metrics", "direct", "rag",
-        "experiments", "models", "description", "version",
+        "name",
+        "datasets",
+        "batch_size",
+        "metrics",
+        "direct",
+        "rag",
+        "experiments",
+        "models",
+        "description",
+        "version",
     }
     unknown_keys = set(config.keys()) - _KNOWN_KEYS
     if unknown_keys:
         import warnings
+
         warnings.warn(
             f"Unrecognized top-level config keys: {unknown_keys}. "
             f"These have no effect. Known keys: {sorted(_KNOWN_KEYS)}",
@@ -111,9 +120,7 @@ def build_specs(
     # Build singleton experiments (hypothesis-driven) - never sampled
     experiments = config.get("experiments", [])
     if experiments:
-        specs.extend(
-            _build_singleton_specs(experiments, config, batch_size, metrics)
-        )
+        specs.extend(_build_singleton_specs(experiments, config, batch_size, metrics))
 
     return specs
 
@@ -153,7 +160,7 @@ def _apply_sampling(
             logger.info(
                 "[%s] Excluding %d already-completed experiments from sampling pool",
                 spec_type,
-                excluded_count
+                excluded_count,
             )
 
     if n_experiments >= len(specs):
@@ -170,13 +177,13 @@ def _apply_sampling(
     elif mode == "stratified":
         # Stratified sampling: ensure at least one experiment per stratum
         stratify_by = sampling_config.get("stratify_by", ["model", "retriever"])
-        sampled = _stratified_sample(specs, n_experiments, stratify_by)
+        sampled = _stratified_sample(specs, n_experiments, stratify_by, rng=rng)
         logger.info(
             "[%s] Stratified sampling by %s: %d/%d experiments",
             spec_type,
             stratify_by,
             len(sampled),
-            len(specs)
+            len(specs),
         )
         return sampled
 
@@ -189,6 +196,7 @@ def _stratified_sample(
     specs: list[ExperimentSpec],
     n_experiments: int,
     stratify_by: list[str],
+    rng: random.Random | None = None,
 ) -> list[ExperimentSpec]:
     """Stratified sampling ensuring coverage across specified dimensions.
 
@@ -201,11 +209,15 @@ def _stratified_sample(
         specs: Full list of experiment specs
         n_experiments: Target number of experiments
         stratify_by: Dimensions to stratify by (e.g., ['model', 'retriever'])
+        rng: Seeded random generator for reproducibility
 
     Returns:
         Stratified sample of specs
     """
     from collections import defaultdict
+
+    if rng is None:
+        rng = random.Random()
 
     # Group specs by stratification key
     groups: dict[tuple, list[ExperimentSpec]] = defaultdict(list)
@@ -220,7 +232,7 @@ def _stratified_sample(
     for group_specs in groups.values():
         if len(sampled) >= n_experiments:
             break
-        choice = random.choice(group_specs)
+        choice = rng.choice(group_specs)
         if choice.name not in sampled_set:
             sampled.append(choice)
             sampled_set.add(choice.name)
@@ -230,7 +242,7 @@ def _stratified_sample(
     if remaining_budget > 0:
         remaining_specs = [s for s in specs if s.name not in sampled_set]
         if remaining_specs:
-            additional = random.sample(remaining_specs, min(remaining_budget, len(remaining_specs)))
+            additional = rng.sample(remaining_specs, min(remaining_budget, len(remaining_specs)))
             sampled.extend(additional)
 
     return sampled
@@ -368,7 +380,9 @@ def _build_rag_specs(
                                 # Determine rrf_k values to iterate over
                                 # Only relevant for hybrid retrievers
                                 is_hybrid = ret_cfg.get("type") == "hybrid"
-                                rrf_k_list = rrf_k_values if (is_hybrid and rrf_k_values) else [None]
+                                rrf_k_list = (
+                                    rrf_k_values if (is_hybrid and rrf_k_values) else [None]
+                                )
 
                                 for rrf_k in rrf_k_list:
                                     name = name_rag(

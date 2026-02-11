@@ -10,6 +10,7 @@ Use cross-encoders as a second stage after initial retrieval:
 3. Return top-k reranked results
 """
 
+import copy
 from typing import TYPE_CHECKING
 
 from ragicamp.core.logging import get_logger
@@ -127,13 +128,14 @@ class CrossEncoderReranker(Reranker):
             show_progress_bar=False,
         )
 
-        # Attach scores to documents
-        for doc, score in zip(documents, scores):
+        # Copy documents and attach scores (avoid mutating caller's objects)
+        scored_docs = [copy.copy(doc) for doc in documents]
+        for doc, score in zip(scored_docs, scores):
             doc.score = float(score)
 
         # Sort by score (descending) and return top_k
-        sorted_docs = sorted(documents, key=lambda d: d.score, reverse=True)
-        return sorted_docs[:top_k]
+        scored_docs.sort(key=lambda d: d.score, reverse=True)
+        return scored_docs[:top_k]
 
     def batch_rerank(
         self,
@@ -175,15 +177,16 @@ class CrossEncoderReranker(Reranker):
             show_progress_bar=False,
         )
 
-        # Assign scores back to documents
+        # Copy documents and assign scores (avoid mutating caller's objects)
+        copied_docs = [[copy.copy(doc) for doc in docs] for docs in documents_list]
         for (q_idx, d_idx), score in zip(pair_indices, scores):
-            documents_list[q_idx][d_idx].score = float(score)
+            copied_docs[q_idx][d_idx].score = float(score)
 
         # Sort and return top_k for each query
         results = []
-        for docs in documents_list:
-            sorted_docs = sorted(docs, key=lambda d: d.score, reverse=True)
-            results.append(sorted_docs[:top_k])
+        for docs in copied_docs:
+            docs.sort(key=lambda d: d.score, reverse=True)
+            results.append(docs[:top_k])
 
         return results
 

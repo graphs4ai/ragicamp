@@ -63,7 +63,9 @@ def ensure_output_dirs() -> None:
 
 
 def safe_write_json(data: dict, path: Union[str, Path], **kwargs) -> Path:
-    """Write JSON to file, ensuring directory exists.
+    """Write JSON to file atomically, ensuring directory exists.
+
+    Uses atomic write (temp file + rename) to prevent corruption on crash.
 
     Args:
         data: Dictionary to write as JSON
@@ -77,14 +79,10 @@ def safe_write_json(data: dict, path: Union[str, Path], **kwargs) -> Path:
         >>> safe_write_json({"key": "value"}, "outputs/data.json")
         PosixPath('outputs/data.json')
     """
-    import json
+    from ragicamp.utils.experiment_io import atomic_write_json
 
     path = Path(path)
-    ensure_dir(path)
-
-    with open(path, "w") as f:
-        json.dump(data, f, **kwargs)
-
+    atomic_write_json(data, path, **kwargs)
     return path
 
 

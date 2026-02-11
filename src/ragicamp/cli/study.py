@@ -8,7 +8,6 @@ The actual implementation is delegated to specialized modules:
 - factory: Component creation
 """
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -37,7 +36,7 @@ def _log_print(msg: str) -> None:
 
 def _index_exists(index_path: Path) -> bool:
     """Check if index exists, supporting both old and new formats.
-    
+
     New format: config.json + index.faiss + documents.pkl
     Old format: retriever_config.json + index.faiss OR just index.faiss
     Sharded: config.json + shard_*/ directories
@@ -45,20 +44,20 @@ def _index_exists(index_path: Path) -> bool:
     # New format
     if (index_path / "config.json").exists():
         return True
-    
+
     # Old format with retriever_config.json
     if (index_path / "retriever_config.json").exists():
         return True
-    
+
     # Very old format - just the FAISS index
     if (index_path / "index.faiss").exists():
         return True
-    
+
     # Sharded index
     shard_dirs = list(index_path.glob("shard_*"))
     if shard_dirs and any((s / "index.faiss").exists() for s in shard_dirs):
         return True
-    
+
     return False
 
 
@@ -73,7 +72,7 @@ def _build_sparse_index(
     sparse_method: str,
 ) -> None:
     """Build sparse index from documents in the embedding index.
-    
+
     Args:
         sparse_name: Name for the sparse index
         embedding_index_path: Path to the dense embedding index (to get documents)
@@ -81,23 +80,23 @@ def _build_sparse_index(
     """
     from ragicamp.indexes.sparse import SparseIndex, SparseMethod
     from ragicamp.indexes.vector_index import VectorIndex
-    
+
     _study_logger.info("Building sparse index: %s (method=%s)", sparse_name, sparse_method)
-    
+
     # Load documents from the dense index
     _study_logger.info("Loading documents from: %s", embedding_index_path)
     vector_index = VectorIndex.load(embedding_index_path, use_mmap=True)
     documents = vector_index.documents
-    
+
     _study_logger.info("Building %s index from %d documents...", sparse_method, len(documents))
-    
+
     # Build sparse index
     sparse_index = SparseIndex(
         name=sparse_name,
         method=SparseMethod(sparse_method),
     )
     sparse_index.build(documents, show_progress=True)
-    
+
     # Save
     saved_path = sparse_index.save()
     _study_logger.info("Sparse index saved to: %s", saved_path)
@@ -111,15 +110,15 @@ def _save_retriever_config(
     sparse_name: str | None = None,
 ) -> None:
     """Save retriever config to artifacts/retrievers/{name}/config.json.
-    
+
     This creates a retriever config that references the actual index paths,
     enabling experiment.py to load the correct indexes at runtime.
     """
     retriever_path = manager.get_retriever_path(retriever_name)
     config_path = retriever_path / "config.json"
-    
+
     retriever_type = config.get("type", "dense")
-    
+
     retriever_cfg = {
         "name": retriever_name,
         "type": retriever_type,
@@ -129,50 +128,50 @@ def _save_retriever_config(
         "chunk_size": config.get("chunk_size", Defaults.CHUNK_SIZE),
         "chunk_overlap": config.get("chunk_overlap", Defaults.CHUNK_OVERLAP),
     }
-    
+
     if retriever_type == "hybrid" and sparse_name:
         retriever_cfg["sparse_index"] = sparse_name
         retriever_cfg["sparse_method"] = config.get("sparse_method", "bm25")
         retriever_cfg["alpha"] = config.get("alpha", Defaults.HYBRID_ALPHA)
-    
+
     if retriever_type == "hierarchical":
         retriever_cfg["parent_chunk_size"] = config.get("parent_chunk_size", 2048)
         retriever_cfg["child_chunk_size"] = config.get("child_chunk_size", 448)
-    
+
     manager.save_json(retriever_cfg, config_path)
     _study_logger.info("Saved retriever config: %s -> %s", retriever_name, config_path)
 
 
 def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
     """Ensure all required indexes exist, building them if necessary.
-    
+
     For dense retrievers: builds embedding index
     For hybrid retrievers: builds embedding index + sparse index
     For hierarchical retrievers: builds hierarchical index
-    
+
     Args:
         retriever_configs: List of retriever configuration dicts
         corpus_config: Corpus configuration dict
     """
     manager = get_artifact_manager()
-    
+
     for config in retriever_configs:
         retriever_type = config.get("type", "dense")
         name = config.get("name", "")
-        
+
         # ===================================================================
         # Step 1: Check/Build dense embedding index
         # ===================================================================
         # All retriever types use the same index name resolution
         index_name = config.get("embedding_index", name)
         index_path = manager.get_embedding_index_path(index_name)
-        
+
         if _index_exists(index_path):
             _study_logger.info("Dense index exists: %s (at %s)", name, index_path)
         else:
             # Build the dense index
             _study_logger.info("Building dense index: %s", name)
-            
+
             if retriever_type == "hierarchical":
                 build_hierarchical_index(
                     retriever_config=config,
@@ -180,7 +179,9 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                     doc_batch_size=corpus_config.get("doc_batch_size", 5000),
                     embedding_batch_size=corpus_config.get("embedding_batch_size", 4096),
                     embedding_backend=corpus_config.get("embedding", {}).get("backend", "vllm"),
-                    vllm_gpu_memory_fraction=corpus_config.get("embedding", {}).get("vllm_gpu_memory_fraction", Defaults.VLLM_GPU_MEMORY_FRACTION),
+                    vllm_gpu_memory_fraction=corpus_config.get("embedding", {}).get(
+                        "vllm_gpu_memory_fraction", Defaults.VLLM_GPU_MEMORY_FRACTION
+                    ),
                 )
             else:
                 build_embedding_index(
@@ -191,23 +192,23 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                     corpus_config=corpus_config,
                     embedding_backend=config.get("embedding_backend", "vllm"),
                 )
-        
+
         # ===================================================================
         # Step 2: For hybrid retrievers, check/build sparse index
         # ===================================================================
         sparse_name = None
         if retriever_type == "hybrid":
             sparse_method = config.get("sparse_method", "tfidf")
-            
+
             # Determine sparse index name
             # Priority: explicit sparse_index > auto-generated from embedding_index
             sparse_name = config.get("sparse_index")
             if not sparse_name:
                 # Auto-generate: {embedding_index}_sparse_{method}
                 sparse_name = f"{index_name}_sparse_{sparse_method}"
-            
+
             sparse_path = manager.get_sparse_index_path(sparse_name)
-            
+
             if _sparse_index_exists(sparse_path):
                 _study_logger.info("Sparse index exists: %s (at %s)", sparse_name, sparse_path)
             else:
@@ -217,7 +218,7 @@ def ensure_indexes_exist(retriever_configs: list, corpus_config: dict) -> None:
                     embedding_index_path=index_path,
                     sparse_method=sparse_method,
                 )
-        
+
         # ===================================================================
         # Step 3: Save retriever config to artifacts/retrievers/{name}/
         # ===================================================================
@@ -266,7 +267,6 @@ def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):
         model_name = model_spec.split(":", 1)[1]
         return OpenAIModel(model_name=model_name)
     return None
-
 
 
 def _run_spec_list(
@@ -441,9 +441,7 @@ def run_study(
         corpus_config = rag_config.get("corpus", {})
         all_retrievers = rag_config.get("retrievers", [])
         active_retriever_names = set(rag_config.get("retriever_names", []))
-        retriever_configs = [
-            r for r in all_retrievers if r.get("name") in active_retriever_names
-        ]
+        retriever_configs = [r for r in all_retrievers if r.get("name") in active_retriever_names]
         ensure_indexes_exist(retriever_configs, corpus_config)
 
     # ===================================================================
@@ -512,15 +510,19 @@ def run_study(
     # ===================================================================
     _log_print(f"\n{'=' * 70}")
     _log_print(f"Study Complete: {study_name}")
-    _log_print(f"  Baselines — Completed: {results['completed']}, "
-               f"Failed: {results['failed']}, Skipped: {results['skipped']}")
+    _log_print(
+        f"  Baselines — Completed: {results['completed']}, "
+        f"Failed: {results['failed']}, Skipped: {results['skipped']}"
+    )
     if optuna_study is not None:
         n_complete = len(optuna_study.trials)
         n_pruned = len([t for t in optuna_study.trials if t.state.name == "PRUNED"])
         _log_print(f"  Optuna — Trials: {n_complete}, Pruned: {n_pruned}")
         if optuna_study.best_trial:
-            _log_print(f"  Best trial: {optuna_study.best_value:.4f} "
-                       f"(trial #{optuna_study.best_trial.number})")
+            _log_print(
+                f"  Best trial: {optuna_study.best_value:.4f} "
+                f"(trial #{optuna_study.best_trial.number})"
+            )
     _log_print(f"{'=' * 70}")
 
     meta = {
@@ -529,8 +531,9 @@ def run_study(
         "results": results,
         "timestamp": datetime.now().isoformat(),
     }
-    with open(out / "study_meta.json", "w") as f:
-        json.dump(meta, f, indent=2)
+    from ragicamp.utils.experiment_io import atomic_write_json
+
+    atomic_write_json(meta, out / "study_meta.json")
 
 
 def compare(out: Path) -> None:

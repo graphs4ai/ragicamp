@@ -125,12 +125,32 @@ def compute_metrics_batched(
 
     from ragicamp.utils.resource_manager import ResourceManager
 
+    from ragicamp.core.constants import is_error_prediction
+
     already_computed = already_computed or []
     aggregate_results: dict[str, float] = {}
     per_item_metrics: dict[str, list[float]] = {}
     computed: list[str] = []
     failed: list[str] = []
     timings: dict[str, float] = {}
+
+    # Filter out error predictions (from failed API calls) before scoring
+    valid_mask = [not is_error_prediction(p) for p in predictions]
+    n_errors = sum(1 for v in valid_mask if not v)
+    if n_errors > 0:
+        logger.warning(
+            "Excluding %d/%d error predictions from metric computation",
+            n_errors,
+            len(predictions),
+        )
+        predictions = [p for p, v in zip(predictions, valid_mask) if v]
+        references = [r for r, v in zip(references, valid_mask) if v]
+        if questions is not None:
+            questions = [q for q, v in zip(questions, valid_mask) if v]
+
+    if not predictions:
+        logger.warning("No valid predictions to score after filtering errors")
+        return aggregate_results, per_item_metrics, computed, failed, timings
 
     # Check if we need multi-reference handling
     has_multi = _has_multi_references(references)
@@ -142,7 +162,8 @@ def compute_metrics_batched(
         )
         logger.info(
             "Multi-reference detected: %d predictions -> %d pairs",
-            len(predictions), len(expanded_preds),
+            len(predictions),
+            len(expanded_preds),
         )
     else:
         # Simple case: 1-to-1
@@ -197,7 +218,8 @@ def compute_metrics_batched(
                     logger.warning(
                         "Could not find key '%s' in metric results %s; "
                         "multi-reference aggregation skipped for this metric",
-                        metric.name, list(scores.keys()),
+                        metric.name,
+                        list(scores.keys()),
                     )
             elif expanded_per_item:
                 per_item_metrics[metric.name] = expanded_per_item

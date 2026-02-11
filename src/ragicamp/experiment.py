@@ -46,8 +46,8 @@ from ragicamp.state import (
     check_health,
     detect_state,
 )
+from ragicamp.utils.experiment_io import atomic_write_json
 from ragicamp.utils.formatting import format_metrics_summary
-from ragicamp.utils.paths import ensure_dir
 from ragicamp.utils.resource_manager import ResourceManager
 
 if TYPE_CHECKING:
@@ -115,10 +115,8 @@ class ExperimentResult:
         }
 
     def save(self, path: Path) -> None:
-        """Save result to JSON file."""
-        ensure_dir(path)
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+        """Save result to JSON file (atomic write)."""
+        atomic_write_json(self.to_dict(), path)
 
     def __repr__(self) -> str:
         return f"ExperimentResult(name={self.name!r}, f1={self.f1:.3f}, em={self.exact_match:.3f})"
@@ -397,10 +395,7 @@ class Experiment:
             metadata=result_metadata,
         )
 
-        temp_path = self.results_path.with_suffix(".tmp")
-        with open(temp_path, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
-        temp_path.replace(self.results_path)
+        atomic_write_json(result.to_dict(), self.results_path)
 
         metrics_str = format_metrics_summary(result.metrics)
         logger.info("Done! %s (%.1fs)", metrics_str, duration)
@@ -414,10 +409,7 @@ class Experiment:
 
     def _save_predictions(self, data: dict[str, Any]) -> None:
         """Save predictions atomically."""
-        temp_path = self.predictions_path.with_suffix(".tmp")
-        with open(temp_path, "w") as f:
-            json.dump(data, f, indent=2)
-        temp_path.replace(self.predictions_path)
+        atomic_write_json(data, self.predictions_path)
 
         if self._callbacks.on_checkpoint:
             n = len(data.get("predictions", []))
@@ -452,11 +444,13 @@ class Experiment:
         result_metadata = {}
         if self._spec is not None:
             result_metadata = self._spec.to_dict()
-        result_metadata.update({
-            "agent": self.agent.name,
-            "dataset": self.dataset.name,
-            "batch_size": self._batch_size,
-        })
+        result_metadata.update(
+            {
+                "agent": self.agent.name,
+                "dataset": self.dataset.name,
+                "batch_size": self._batch_size,
+            }
+        )
 
         result_data = {
             "name": self.name,
@@ -472,8 +466,7 @@ class Experiment:
             "metadata": result_metadata,
         }
 
-        with open(self.results_path, "w") as f:
-            json.dump(result_data, f, indent=2)
+        atomic_write_json(result_data, self.results_path)
 
     def _phases_from(self, phase: ExperimentPhase) -> list[ExperimentPhase]:
         """Get list of phases starting from the given phase."""
@@ -515,7 +508,9 @@ class Experiment:
 
         def _load():
             _t0 = time.perf_counter()
-            logger.info("Loading index: %s (type=%s, path=%s)", index_name, retriever_type, index_path)
+            logger.info(
+                "Loading index: %s (type=%s, path=%s)", index_name, retriever_type, index_path
+            )
 
             if retriever_type == "hierarchical":
                 from ragicamp.indexes.hierarchical import HierarchicalIndex
@@ -534,7 +529,9 @@ class Experiment:
 
                 cfg = retriever_config or {}
                 # Prefer explicit override (from spec) over on-disk config
-                sparse_name = sparse_index_override or cfg.get("sparse_index", f"{index_name}_sparse_bm25")
+                sparse_name = sparse_index_override or cfg.get(
+                    "sparse_index", f"{index_name}_sparse_bm25"
+                )
                 alpha = cfg.get("alpha", 0.5)
                 # Override with spec-level alpha if provided
                 if alpha_override is not None:
@@ -545,7 +542,9 @@ class Experiment:
 
                 logger.info(
                     "Loading sparse index: %s (alpha=%.2f, path=%s)",
-                    sparse_name, alpha, sparse_path,
+                    sparse_name,
+                    alpha,
+                    sparse_path,
                 )
                 sparse_index = SparseIndex.load(
                     name=sparse_name,
@@ -605,43 +604,49 @@ class Experiment:
 
         # Create providers (lazy loading)
         generator_provider = ProviderFactory.create_generator(spec.model)
-        
+
         # Create embedder provider if RAG experiment
         embedder_provider = None
         index = None
-        
+
         if spec.exp_type == "rag" and spec.retriever:
             # Load retriever config from artifacts/retrievers/{name}/config.json
             manager = get_artifact_manager()
             retriever_path = manager.get_retriever_path(spec.retriever)
             config_path = retriever_path / "config.json"
-            
+
             if config_path.exists():
                 with open(config_path) as f:
                     retriever_config = json.load(f)
-                
+
                 embedding_model = retriever_config.get("embedding_model", Defaults.EMBEDDING_MODEL)
-                embedding_backend = retriever_config.get("embedding_backend", Defaults.EMBEDDING_BACKEND)
-                
+                embedding_backend = retriever_config.get(
+                    "embedding_backend", Defaults.EMBEDDING_BACKEND
+                )
+
                 embedder_provider = ProviderFactory.create_embedder(
                     embedding_model,
                     backend=embedding_backend,
                 )
-                
+
                 # Lazy-load index — deferred until first batch_search call.
                 # When retrieval cache gives 100% hits the index is never
                 # touched, saving ~3 min of pickle/FAISS deserialization.
                 retriever_type = retriever_config.get("type", "dense")
                 # Prefer spec values (set at spec-build time from YAML) over
                 # on-disk config to avoid silent divergence.
-                index_name = spec.embedding_index or retriever_config.get("embedding_index", spec.retriever)
+                index_name = spec.embedding_index or retriever_config.get(
+                    "embedding_index", spec.retriever
+                )
                 index_path = manager.get_embedding_index_path(index_name)
 
                 from ragicamp.retrievers.lazy import LazySearchBackend
 
                 index = LazySearchBackend(
                     loader=cls._build_index_loader(
-                        retriever_type, index_name, index_path,
+                        retriever_type,
+                        index_name,
+                        index_path,
                         retriever_config=retriever_config,
                         sparse_index_override=spec.sparse_index,
                         rrf_k=spec.rrf_k,
@@ -651,7 +656,8 @@ class Experiment:
                 )
                 logger.info(
                     "Index deferred (lazy): %s (type=%s)",
-                    index_name, retriever_type,
+                    index_name,
+                    retriever_type,
                 )
 
         # Create dataset
@@ -666,14 +672,16 @@ class Experiment:
             reranker_provider = ProviderFactory.create_reranker(reranker_spec)
             logger.info(
                 "Reranker enabled: %s (fetch_k=%s, top_k=%d)",
-                reranker_spec, spec.fetch_k, spec.top_k,
+                reranker_spec,
+                spec.fetch_k,
+                spec.top_k,
             )
 
         # Create agent
         if spec.exp_type == "rag":
             if embedder_provider is None or index is None:
                 raise ValueError(f"Could not load retriever config for: {spec.retriever}")
-            
+
             agent = AgentFactory.from_spec(
                 spec=spec,
                 embedder_provider=embedder_provider,

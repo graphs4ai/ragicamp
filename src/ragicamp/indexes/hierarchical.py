@@ -61,7 +61,7 @@ class HierarchicalIndex:
         self.child_chunk_size = child_chunk_size
         self.parent_overlap = parent_overlap
         self.child_overlap = child_overlap
-        
+
         # Embedding backend configuration
         self.embedding_backend = embedding_backend
         self.vllm_gpu_memory_fraction = vllm_gpu_memory_fraction
@@ -215,8 +215,10 @@ class HierarchicalIndex:
         child_texts = [doc.text for doc in self.child_docs]
         embeddings = self.encoder.encode(child_texts, show_progress_bar=True)
 
-        # Normalize for cosine similarity
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        # Normalize for cosine similarity (guard against zero-norm)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        embeddings = embeddings / norms
 
         # Create and populate FAISS index
         self.index = faiss.IndexFlatIP(self.embedding_dim)

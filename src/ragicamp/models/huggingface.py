@@ -176,8 +176,14 @@ class HuggingFaceModel(LanguageModel):
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using the model's hidden states."""
+        # Resolve actual device (handles device_map="auto" for quantized models)
+        if hasattr(self.model, "device"):
+            target_device = self.model.device
+        else:
+            target_device = next(self.model.parameters()).device
+
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(
-            self.device
+            target_device
         )
 
         with torch.no_grad():

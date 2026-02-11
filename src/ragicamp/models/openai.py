@@ -183,7 +183,7 @@ class OpenAIModel(LanguageModel):
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using OpenAI embeddings API."""
-        response = openai.embeddings.create(model="text-embedding-ada-002", input=texts)
+        response = openai.embeddings.create(model=self.model_name, input=texts)
         return [item.embedding for item in response.data]
 
     def count_tokens(self, text: str) -> int:
@@ -308,7 +308,7 @@ class OpenAIModel(LanguageModel):
             List of embedding vectors
         """
         response = await self.async_client.embeddings.create(
-            model="text-embedding-ada-002",
+            model=self.model_name,
             input=texts,
         )
         return [item.embedding for item in response.data]
