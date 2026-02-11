@@ -481,7 +481,9 @@ def batch_embed_and_search(
     with StepTimer(BATCH_SEARCH) as search_step:
         search_step.input = {"n_queries": len(texts_to_search), "top_k": top_k}
         if is_hybrid:
-            search_results = index.batch_search(embeddings, texts_to_search, top_k=top_k)
+            search_results = index.batch_search(
+                embeddings, top_k=top_k, query_texts=texts_to_search
+            )
         else:
             search_results = index.batch_search(embeddings, top_k=top_k)
         search_step.output = {"n_results": sum(len(r) for r in search_results)}

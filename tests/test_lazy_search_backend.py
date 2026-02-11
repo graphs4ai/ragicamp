@@ -1,6 +1,5 @@
 """Tests for LazySearchBackend proxy."""
 
-import pytest
 
 from ragicamp.retrievers.lazy import LazySearchBackend
 
@@ -24,7 +23,7 @@ class FakeHybridIndex(FakeIndex):
 
     sparse_index = "dummy"
 
-    def batch_search(self, embeddings, query_texts, top_k=5):
+    def batch_search(self, embeddings, top_k=5, query_texts=None):
         self.batch_search_calls += 1
         return [[] for _ in range(len(embeddings))]
 
@@ -33,7 +32,6 @@ class FakeHybridIndex(FakeIndex):
 
 
 class TestLazySearchBackend:
-
     def test_does_not_load_on_construction(self):
         """Creating a lazy proxy should NOT call the loader."""
         called = []
@@ -100,7 +98,6 @@ class TestLazySearchBackend:
 
 
 class TestHybridDetection:
-
     def test_non_hybrid_hides_sparse_index(self):
         """Non-hybrid proxy should NOT expose sparse_index."""
         proxy = LazySearchBackend(lambda: FakeIndex(), is_hybrid=False)
@@ -134,7 +131,6 @@ class TestHybridDetection:
 
 
 class TestRepr:
-
     def test_repr_before_load(self):
         proxy = LazySearchBackend(lambda: FakeIndex())
         assert "not loaded" in repr(proxy)

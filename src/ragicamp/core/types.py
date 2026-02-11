@@ -94,12 +94,15 @@ class Searcher(Protocol):
         self,
         query_embeddings: np.ndarray,
         top_k: int = 10,
+        query_texts: list[str] | None = None,
     ) -> list[list[SearchResult]]:
         """Search for multiple queries at once.
 
         Args:
             query_embeddings: Query vectors, shape (n_queries, dim)
             top_k: Number of results per query
+            query_texts: Optional raw query strings (required by HybridSearcher
+                for sparse retrieval; ignored by dense-only backends)
 
         Returns:
             List of SearchResult lists, one per query

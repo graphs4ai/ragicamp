@@ -76,19 +76,24 @@ class HybridSearcher:
     def batch_search(
         self,
         query_embeddings,
-        query_texts: list[str],
         top_k: int = 10,
+        query_texts: list[str] | None = None,
     ) -> list[list[SearchResult]]:
         """Batch hybrid search.
 
         Args:
             query_embeddings: Pre-computed query embeddings, shape (n, dim)
-            query_texts: Query texts for sparse search
             top_k: Number of results per query
+            query_texts: Query texts for sparse search (required for hybrid)
 
         Returns:
             List of SearchResult lists
+
+        Raises:
+            ValueError: If query_texts is None (required for hybrid search)
         """
+        if query_texts is None:
+            raise ValueError("HybridSearcher.batch_search requires query_texts")
         candidates = top_k * 3
 
         all_dense = self.vector_index.batch_search(query_embeddings, top_k=candidates)

@@ -10,7 +10,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -25,7 +25,7 @@ class ChunkConfig:
 
     Attributes:
         strategy: Chunking strategy ('fixed', 'sentence', 'paragraph', 'recursive')
-        chunk_size: Target size in characters (or sentences for 'sentence' strategy)
+        chunk_size: Target size in characters (all strategies, including sentence)
         chunk_overlap: Overlap between consecutive chunks (prevents context loss)
         min_chunk_size: Minimum chunk size (discard smaller chunks)
         separators: Custom separators for recursive strategy
@@ -35,7 +35,7 @@ class ChunkConfig:
     chunk_size: int = Defaults.CHUNK_SIZE
     chunk_overlap: int = Defaults.CHUNK_OVERLAP
     min_chunk_size: int = 50
-    separators: Optional[list[str]] = None
+    separators: list[str] | None = None
 
     def __post_init__(self):
         if self.separators is None:
@@ -123,9 +123,10 @@ class FixedSizeChunker(ChunkingStrategy):
 
 
 class SentenceChunker(ChunkingStrategy):
-    """Split text by sentences, grouping into chunks of N sentences.
+    """Split text by sentences, grouping into chunks.
 
-    Better semantic boundaries than fixed-size. chunk_size = number of sentences.
+    Better semantic boundaries than fixed-size. ``chunk_size`` (in characters)
+    is converted to an approximate sentence count (~80 chars/sentence).
     """
 
     SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -139,8 +140,11 @@ class SentenceChunker(ChunkingStrategy):
             return [text] if text.strip() else []
 
         chunks = []
-        sentences_per_chunk = max(1, self.config.chunk_size)
-        overlap_sentences = max(0, self.config.chunk_overlap)
+        # chunk_size is target characters; convert to sentence count.
+        # Average English sentence is ~80-100 chars.
+        avg_sentence_len = 80
+        sentences_per_chunk = max(1, self.config.chunk_size // avg_sentence_len)
+        overlap_sentences = max(0, self.config.chunk_overlap // avg_sentence_len)
 
         i = 0
         while i < len(sentences):
@@ -371,7 +375,7 @@ class DocumentChunker:
         ...     print(f"Chunk {chunk_doc.id}: {len(chunk_doc.text)} chars")
     """
 
-    def __init__(self, config: Optional[ChunkConfig] = None):
+    def __init__(self, config: ChunkConfig | None = None):
         """Initialize document chunker."""
         self.config = config or ChunkConfig()
         self.strategy = get_chunker(self.config)
