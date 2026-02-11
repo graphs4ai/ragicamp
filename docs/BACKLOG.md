@@ -286,7 +286,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.3 ResilientExecutor — zero tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `execution/executor.py` (~240 lines)
 - **Gap:** The batch processing engine handling GPU memory management, error recovery, sequential fallback, and consecutive-failure abort (5 failures) is completely untested.
 - **Tests needed:**
@@ -300,7 +300,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.4 ExperimentState — zero tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `state/experiment_state.py`
 - **Gap:** The phase state machine (INIT→GENERATING→GENERATED→COMPUTING_METRICS→COMPLETE) enabling crash recovery has no tests.
 - **Tests needed:**
@@ -314,7 +314,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.5 ExperimentIO atomic write — zero direct tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `utils/experiment_io.py`
 - **Gap:** The atomic write pattern (temp → rename) is a critical data integrity mechanism with zero tests.
 - **Tests needed:**
@@ -327,7 +327,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.6 PromptBuilder — zero tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `utils/prompts.py`
 - **Gap:** The prompt template builder used by all agents has no tests. `_fewshot_cache` behavior untested.
 - **Tests needed:**
@@ -714,7 +714,7 @@ These are not issues per se but architectural improvements for when the project 
 |-------|-------|------|-----------|
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
-| P2 — Test Coverage | 10 | 1 | 9 |
+| P2 — Test Coverage | 10 | 5 | 5 |
 | P3 — Interface/Design | 14 | 0 | 14 |
 | P4 — Polish | 21 | 0 | 21 |
-| **Total** | **68** | **22** | **46** |
+| **Total** | **68** | **26** | **42** |
