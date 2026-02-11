@@ -45,7 +45,7 @@ class EmbedderProvider(ModelProvider):
         return self.config.model_name
 
     @contextmanager
-    def load(self, gpu_fraction: float | None = None) -> Iterator["Embedder"]:
+    def load(self, gpu_fraction: float | None = None) -> Iterator["ManagedEmbedder"]:
         """Load embedder, yield it, then unload.
 
         Supports ref-counting: nested ``with provider.load()`` calls reuse
@@ -91,7 +91,7 @@ class EmbedderProvider(ModelProvider):
             if self._refcount == 0:
                 self._unload()
 
-    def _load_vllm(self, gpu_fraction: float) -> "Embedder":
+    def _load_vllm(self, gpu_fraction: float) -> "ManagedEmbedder":
         """Load vLLM embedder."""
         from ragicamp.models.vllm_embedder import VLLMEmbedder
 
@@ -102,7 +102,7 @@ class EmbedderProvider(ModelProvider):
         )
         return VLLMEmbedderWrapper(vllm_embedder)
 
-    def _load_sentence_transformers(self) -> "Embedder":
+    def _load_sentence_transformers(self) -> "ManagedEmbedder":
         """Load sentence-transformers embedder."""
         from sentence_transformers import SentenceTransformer
 
@@ -120,8 +120,12 @@ class EmbedderProvider(ModelProvider):
         logger.info("Embedder unloaded: %s", self.model_name)
 
 
-class Embedder(ABC):
-    """Protocol for embedders with batch operations."""
+class ManagedEmbedder(ABC):
+    """ABC for provider-managed embedders with batch operations.
+
+    Distinct from ``ragicamp.models.embedder.Embedder`` (Protocol for raw backends).
+    Wrappers produced by ``EmbedderProvider.load()`` implement this interface.
+    """
 
     @abstractmethod
     def batch_encode(self, texts: list[str]) -> Any:
@@ -137,7 +141,7 @@ class Embedder(ABC):
         """Unload model (optional override)."""
 
 
-class VLLMEmbedderWrapper(Embedder):
+class VLLMEmbedderWrapper(ManagedEmbedder):
     """Wrapper around VLLMEmbedder implementing Embedder protocol."""
 
     def __init__(self, embedder):
@@ -153,7 +157,7 @@ class VLLMEmbedderWrapper(Embedder):
         self._embedder.unload()
 
 
-class SentenceTransformerWrapper(Embedder):
+class SentenceTransformerWrapper(ManagedEmbedder):
     """Wrapper around SentenceTransformer implementing Embedder protocol."""
 
     def __init__(self, model):

@@ -182,25 +182,26 @@ def compute_metrics_batched(
             ResourceManager.clear_gpu_memory()
             _metric_t0 = _time.perf_counter()
 
-            # Call metric with expanded inputs
+            # Call metric with compute_with_details() to get per-item scores
+            # directly from the return value, avoiding the stateful
+            # _last_per_item side-channel (4.13 fix).
             if metric.name in ("llm_judge", "llm_judge_qa"):
                 if expanded_questions is None:
                     logger.warning("%s requires questions, skipping", metric.name)
                     failed.append(metric.name)
                     continue
-                scores = metric.compute(
+                metric_result = metric.compute_with_details(
                     predictions=expanded_preds,
                     references=expanded_refs,
                     questions=expanded_questions,
                 )
             else:
-                scores = metric.compute(predictions=expanded_preds, references=expanded_refs)
+                metric_result = metric.compute_with_details(
+                    predictions=expanded_preds, references=expanded_refs
+                )
 
-            # Get per-item scores
-            if hasattr(metric, "get_per_item_scores"):
-                expanded_per_item = metric.get_per_item_scores()
-            else:
-                expanded_per_item = []
+            scores = {metric_result.name: metric_result.aggregate}
+            expanded_per_item = metric_result.per_item
 
             # Aggregate if multi-reference
             if has_multi and expanded_per_item:

@@ -112,6 +112,9 @@ class HybridSearcher:
     ) -> list[SearchResult]:
         """Merge dense SearchResults and sparse (index, score) hits via RRF.
 
+        Computes RRF scores directly from dense results and sparse (idx, score)
+        tuples without creating intermediate SearchResult objects for sparse hits.
+
         Args:
             dense_results: Dense search results.
             sparse_hits: Sparse hits as (doc_index, score) tuples.
@@ -120,69 +123,46 @@ class HybridSearcher:
         Returns:
             Merged SearchResult list sorted by RRF score.
         """
-        # Convert sparse hits to SearchResult
-        sparse_results: list[SearchResult] = []
-        for idx, score in sparse_hits:
-            if 0 <= idx < len(self.vector_index.documents):
-                doc = self.vector_index.documents[idx]
-                sparse_results.append(
-                    SearchResult(
-                        document=Document(
-                            id=doc.id,
-                            text=doc.text,
-                            metadata=doc.metadata.copy(),
-                            score=score,
-                        ),
-                        score=score,
-                        rank=len(sparse_results),
-                    )
-                )
-
-        # Compute RRF scores
-        rrf_scores = self._reciprocal_rank_fusion(dense_results, sparse_results)
-        sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-
-        # Build final results
-        doc_map = {r.document.id: r.document for r in dense_results + sparse_results}
-        results: list[SearchResult] = []
-
-        for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
-            if doc_id in doc_map:
-                doc = doc_map[doc_id]
-                results.append(
-                    SearchResult(
-                        document=Document(
-                            id=doc.id,
-                            text=doc.text,
-                            metadata=doc.metadata.copy(),
-                            score=score,
-                        ),
-                        score=score,
-                        rank=rank,
-                    )
-                )
-
-        return results
-
-    def _reciprocal_rank_fusion(
-        self,
-        dense_results: list[SearchResult],
-        sparse_results: list[SearchResult],
-    ) -> dict[str, float]:
-        """Compute RRF scores.
-
-        RRF formula: score(d) = Σ 1/(k + rank(d))
-        """
+        documents = self.vector_index.documents
+        num_docs = len(documents)
         rrf_scores: dict[str, float] = {}
 
-        # Add dense scores (with alpha weight)
+        # Build doc_map from dense results (reuse existing Document objects)
+        doc_map: dict[str, Document] = {}
         for rank, result in enumerate(dense_results, start=1):
-            score = self.alpha / (self.rrf_k + rank)
-            rrf_scores[result.document.id] = rrf_scores.get(result.document.id, 0) + score
+            doc_id = result.document.id
+            doc_map[doc_id] = result.document
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + self.alpha / (self.rrf_k + rank)
 
-        # Add sparse scores (with 1-alpha weight)
-        for rank, result in enumerate(sparse_results, start=1):
-            score = (1 - self.alpha) / (self.rrf_k + rank)
-            rrf_scores[result.document.id] = rrf_scores.get(result.document.id, 0) + score
+        # Add sparse scores directly from (idx, score) tuples — no SearchResult creation
+        sparse_rank = 0
+        for idx, _score in sparse_hits:
+            if 0 <= idx < num_docs:
+                sparse_rank += 1
+                doc = documents[idx]
+                doc_id = doc.id
+                if doc_id not in doc_map:
+                    doc_map[doc_id] = doc
+                rrf_scores[doc_id] = (
+                    rrf_scores.get(doc_id, 0) + (1 - self.alpha) / (self.rrf_k + sparse_rank)
+                )
 
-        return rrf_scores
+        # Sort by RRF score descending and build final results
+        sorted_docs = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        results: list[SearchResult] = []
+        for rank, (doc_id, score) in enumerate(sorted_docs[:top_k]):
+            doc = doc_map[doc_id]
+            results.append(
+                SearchResult(
+                    document=Document(
+                        id=doc.id,
+                        text=doc.text,
+                        metadata=doc.metadata.copy(),
+                        score=score,
+                    ),
+                    score=score,
+                    rank=rank,
+                )
+            )
+
+        return results

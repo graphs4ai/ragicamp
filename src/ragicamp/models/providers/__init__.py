@@ -8,7 +8,7 @@ Design principles:
 
 Split into sub-modules for maintainability:
 - base: ModelProvider ABC
-- embedder: EmbedderProvider, Embedder, wrappers
+- embedder: EmbedderProvider, ManagedEmbedder, wrappers
 - generator: GeneratorProvider, Generator, wrappers
 - reranker: RerankerProvider, RerankerWrapper
 - gpu_profile: GPUProfile auto-detection
@@ -24,9 +24,9 @@ if not shutil.which("nvcc") and "VLLM_ATTENTION_BACKEND" not in os.environ:
 
 from .base import ModelProvider
 from .embedder import (
-    Embedder,
     EmbedderConfig,
     EmbedderProvider,
+    ManagedEmbedder,
     SentenceTransformerWrapper,
     VLLMEmbedderWrapper,
 )
@@ -46,7 +46,7 @@ __all__ = [
     # Embedder
     "EmbedderConfig",
     "EmbedderProvider",
-    "Embedder",
+    "ManagedEmbedder",
     "VLLMEmbedderWrapper",
     "SentenceTransformerWrapper",
     # Generator

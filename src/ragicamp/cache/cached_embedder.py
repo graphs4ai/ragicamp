@@ -20,13 +20,14 @@ benefit automatically -- zero code changes required.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from ragicamp.core.logging import get_logger
-from ragicamp.models.providers import Embedder, ModelProvider
+from ragicamp.models.providers import ManagedEmbedder, ModelProvider
 
 if TYPE_CHECKING:
     from ragicamp.cache.embedding_store import EmbeddingStore
@@ -50,7 +51,7 @@ class CachedEmbedderProvider(ModelProvider):
         Shared SQLite store for persisting embeddings across processes.
     """
 
-    def __init__(self, inner: "EmbedderProvider", store: "EmbeddingStore") -> None:
+    def __init__(self, inner: EmbedderProvider, store: EmbeddingStore) -> None:
         self.inner = inner
         self.store = store
 
@@ -61,7 +62,7 @@ class CachedEmbedderProvider(ModelProvider):
         return self.inner.model_name
 
     @contextmanager
-    def load(self, gpu_fraction: float | None = None) -> Iterator["CachedEmbedder"]:
+    def load(self, gpu_fraction: float | None = None) -> Iterator[CachedEmbedder]:
         """Yield a :class:`CachedEmbedder`.
 
         The real model loads lazily inside ``batch_encode`` only if needed.
@@ -84,7 +85,7 @@ class CachedEmbedderProvider(ModelProvider):
         return self.inner.config
 
 
-class CachedEmbedder(Embedder):
+class CachedEmbedder(ManagedEmbedder):
     """Embedder implementation that checks the KV store before computing.
 
     On ``batch_encode(texts)``:
@@ -97,14 +98,14 @@ class CachedEmbedder(Embedder):
 
     def __init__(
         self,
-        provider: "EmbedderProvider",
-        store: "EmbeddingStore",
+        provider: EmbedderProvider,
+        store: EmbeddingStore,
         gpu_fraction: float | None = None,
     ) -> None:
         self._provider = provider
         self._store = store
         self._gpu_fraction = gpu_fraction
-        self._real_embedder: Optional[Embedder] = None
+        self._real_embedder: ManagedEmbedder | None = None
         self._real_ctx = None  # context manager for the real embedder
 
     # -- Embedder interface -----------------------------------------------
@@ -193,12 +194,12 @@ class CachedEmbedder(Embedder):
         return self._real_embedder.get_dimension()
 
     def unload(self) -> None:
-        """Alias for :meth:`cleanup` -- matches the ``Embedder`` protocol."""
+        """Alias for :meth:`cleanup` -- matches the ``ManagedEmbedder`` protocol."""
         self.cleanup()
 
     # -- Internal ---------------------------------------------------------
 
-    def _load_real_model(self) -> Embedder:
+    def _load_real_model(self) -> ManagedEmbedder:
         """Load the real embedder via the inner provider's context manager."""
         ctx = self._provider.load(gpu_fraction=self._gpu_fraction)
         embedder = ctx.__enter__()

@@ -51,18 +51,16 @@ def compute_metrics_from_file(
         try:
             logger.debug("Computing %s...", metric.name)
             if metric.name in ("llm_judge", "llm_judge_qa"):
-                scores = metric.compute(
+                result = metric.compute_with_details(
                     predictions=predictions, references=references, questions=questions
                 )
             else:
-                scores = metric.compute(predictions=predictions, references=references)
-            aggregate_results.update(scores)
-
-            # Get per-item scores
-            if hasattr(metric, "get_per_item_scores"):
-                per_item = metric.get_per_item_scores()
-                if per_item:
-                    per_item_results[metric.name] = per_item
+                result = metric.compute_with_details(
+                    predictions=predictions, references=references
+                )
+            aggregate_results[result.name] = result.aggregate
+            if result.per_item:
+                per_item_results[result.name] = result.per_item
         except Exception as e:
             logger.warning("%s failed: %s", metric.name, e)
 
