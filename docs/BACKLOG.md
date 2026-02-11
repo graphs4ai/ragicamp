@@ -463,11 +463,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 4.10 Migrate `@validator` to `@field_validator` (Pydantic v2)
 
-- **Status:** `[ ]`
-- **File:** `config/schemas.py` (lines 95, 170, 178, 209, 276, 284, 292, 300, 310)
-- **Problem:** Deprecated Pydantic v1 `@validator` generates deprecation warnings.
-- **Fix:** Migrate to `@field_validator` with v2 API.
-- **Effort:** Medium (9 validators to migrate)
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `config/schemas.py`
+- **Fix:** Migrated all 9 validators: `@validator` → `@field_validator`/`@model_validator`, `class Config:` → `model_config = ConfigDict(...)`, `values` → `ValidationInfo.data`. Cross-field validators consolidated into `@model_validator(mode="after")`.
 
 ### 4.11 `DocumentCorpus.load` uses `raise NotImplementedError` instead of `@abstractmethod`
 
@@ -597,17 +595,15 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.16 `sys.path` mutation in tests
 
-- **Status:** `[ ]`
-- **Files:** `tests/test_analysis_utils.py:10-11`, `tests/test_config_wiring.py:527-528`
-- **Fix:** Use `importlib` or make the scripts proper importable modules.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `tests/conftest.py`, `tests/test_analysis_utils.py`, `tests/test_config_wiring.py`
+- **Fix:** Moved notebooks/ path insertion into `conftest.py` (runs once), removed per-file sys.path hacks.
 
 ### 5.17 Global mutable singleton in ArtifactManager
 
-- **Status:** `[ ]`
-- **File:** `utils/artifacts.py:301-317`
-- **Fix:** Raise error if `base_dir` differs from existing, or remove singleton pattern.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `utils/artifacts.py`
+- **Fix:** Added `logger.warning` when `get_artifact_manager()` called with different `base_dir` than existing instance.
 
 ### 5.18 `_fewshot_cache` is mutable class variable, never invalidated
 
@@ -674,6 +670,6 @@ These are not issues per se but architectural improvements for when the project 
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
-| P3 — Interface/Design | 14 | 7 | 7 |
-| P4 — Polish | 21 | 10 | 11 |
-| **Total** | **68** | **46** | **22** |
+| P3 — Interface/Design | 14 | 8 | 6 |
+| P4 — Polish | 21 | 12 | 9 |
+| **Total** | **68** | **49** | **19** |
