@@ -1,7 +1,7 @@
 """Evaluation utilities for computing metrics on predictions."""
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 def compute_metrics_from_file(
     predictions_path: str,
     metrics: list[Metric],
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> dict[str, Any]:
     """Compute metrics from saved predictions file.
 
@@ -101,7 +101,7 @@ class Evaluator:
     def compute_metrics_from_file(
         predictions_path: str,
         metrics: list[Metric],
-        output_path: Optional[str] = None,
+        output_path: str | None = None,
     ) -> dict[str, Any]:
         """Compute metrics from saved predictions file."""
         return compute_metrics_from_file(predictions_path, metrics, output_path)

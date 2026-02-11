@@ -11,7 +11,7 @@ Follows best practices from SQuAD and other QA benchmarks:
 import re
 import string
 from collections import Counter
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
@@ -25,7 +25,7 @@ def normalize_answer(
     remove_articles: bool = True,
     remove_punctuation: bool = True,
     remove_extra_whitespace: bool = True,
-    stemmer: Optional[Any] = None,
+    stemmer: Any | None = None,
 ) -> str:
     """Normalize answer text following SQuAD evaluation practices.
 
@@ -102,7 +102,9 @@ class ExactMatchMetric(Metric):
 
                 self.stemmer = PorterStemmer()
             except ImportError:
-                logger.warning("NLTK not installed. Stemming disabled. Install with: pip install nltk")
+                logger.warning(
+                    "NLTK not installed. Stemming disabled. Install with: pip install nltk"
+                )
                 self.use_stemming = False
 
     def compute(
@@ -123,7 +125,7 @@ class ExactMatchMetric(Metric):
         """
         scores = []
 
-        for pred, ref in zip(predictions, references):
+        for pred, ref in zip(predictions, references, strict=True):
             if self.normalize:
                 pred_norm = normalize_answer(
                     pred, stemmer=self.stemmer if self.use_stemming else None
@@ -179,7 +181,9 @@ class F1Metric(Metric):
 
                 self.stemmer = PorterStemmer()
             except ImportError:
-                logger.warning("NLTK not installed. Stemming disabled. Install with: pip install nltk")
+                logger.warning(
+                    "NLTK not installed. Stemming disabled. Install with: pip install nltk"
+                )
                 self.use_stemming = False
 
     def compute(
@@ -200,7 +204,7 @@ class F1Metric(Metric):
         """
         scores = []
 
-        for pred, ref in zip(predictions, references):
+        for pred, ref in zip(predictions, references, strict=True):
             score = self._compute_f1(pred, ref)
             scores.append(score)
 

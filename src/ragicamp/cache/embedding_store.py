@@ -20,7 +20,6 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -67,11 +66,11 @@ class EmbeddingStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._ensure_table()
 
     @classmethod
-    def default(cls) -> "EmbeddingStore":
+    def default(cls) -> EmbeddingStore:
         """Open (or create) the default cache DB at ``artifacts/cache/ragicamp_cache.db``."""
         db_dir = os.environ.get("RAGICAMP_CACHE_DIR", _DEFAULT_DB_DIR)
         return cls(Path(db_dir) / _DEFAULT_DB_NAME)
@@ -114,7 +113,7 @@ class EmbeddingStore:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "EmbeddingStore":
+    def __enter__(self) -> EmbeddingStore:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -131,7 +130,7 @@ class EmbeddingStore:
         self,
         model: str,
         texts: list[str],
-    ) -> tuple[Optional[np.ndarray], np.ndarray]:
+    ) -> tuple[np.ndarray | None, np.ndarray]:
         """Look up cached embeddings for a list of texts.
 
         Args:
@@ -209,7 +208,7 @@ class EmbeddingStore:
 
         params = [
             (model, _text_hash(text), dim, emb_row.tobytes(), now)
-            for text, emb_row in zip(texts, embeddings)
+            for text, emb_row in zip(texts, embeddings, strict=True)
         ]
 
         cursor = self.conn.cursor()
@@ -236,7 +235,7 @@ class EmbeddingStore:
     # Dimension helper
     # ------------------------------------------------------------------
 
-    def get_dimension(self, model: str) -> Optional[int]:
+    def get_dimension(self, model: str) -> int | None:
         """Return the embedding dimension stored for *model*, or ``None``."""
         row = self.conn.execute(
             "SELECT dim FROM embeddings WHERE model = ? LIMIT 1",
@@ -274,7 +273,7 @@ class EmbeddingStore:
             "models": models,
         }
 
-    def clear(self, model: Optional[str] = None) -> int:
+    def clear(self, model: str | None = None) -> int:
         """Delete cached embeddings.
 
         Args:

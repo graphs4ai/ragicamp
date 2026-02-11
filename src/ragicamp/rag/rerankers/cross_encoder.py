@@ -130,7 +130,7 @@ class CrossEncoderReranker(Reranker):
 
         # Copy documents and attach scores (avoid mutating caller's objects)
         scored_docs = [copy.copy(doc) for doc in documents]
-        for doc, score in zip(scored_docs, scores):
+        for doc, score in zip(scored_docs, scores, strict=True):
             doc.score = float(score)
 
         # Sort by score (descending) and return top_k
@@ -162,7 +162,7 @@ class CrossEncoderReranker(Reranker):
         all_pairs = []
         pair_indices = []  # (query_idx, doc_idx_within_query)
 
-        for q_idx, (query, docs) in enumerate(zip(queries, documents_list)):
+        for q_idx, (query, docs) in enumerate(zip(queries, documents_list, strict=True)):
             for d_idx, doc in enumerate(docs):
                 all_pairs.append((query, doc.text))
                 pair_indices.append((q_idx, d_idx))
@@ -179,7 +179,7 @@ class CrossEncoderReranker(Reranker):
 
         # Copy documents and assign scores (avoid mutating caller's objects)
         copied_docs = [[copy.copy(doc) for doc in docs] for docs in documents_list]
-        for (q_idx, d_idx), score in zip(pair_indices, scores):
+        for (q_idx, d_idx), score in zip(pair_indices, scores, strict=True):
             copied_docs[q_idx][d_idx].score = float(score)
 
         # Sort and return top_k for each query

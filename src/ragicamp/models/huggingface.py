@@ -156,7 +156,7 @@ class HuggingFaceModel(LanguageModel):
 
         # Remove input prompt from output
         results = []
-        for prompt_text, generated in zip(prompts, generated_texts):
+        for prompt_text, generated in zip(prompts, generated_texts, strict=True):
             # Remove the prompt from the generated text
             if generated.startswith(prompt_text):
                 generated = generated[len(prompt_text) :].strip()

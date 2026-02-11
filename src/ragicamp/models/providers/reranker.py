@@ -143,7 +143,7 @@ class RerankerWrapper:
 
         # Copy documents to avoid mutating caller's objects
         docs_copy = [copy.copy(doc) for doc in documents]
-        for doc, score in zip(docs_copy, scores):
+        for doc, score in zip(docs_copy, scores, strict=True):
             doc.score = float(score)
 
         sorted_docs = sorted(docs_copy, key=lambda d: d.score, reverse=True)
@@ -172,7 +172,7 @@ class RerankerWrapper:
         all_pairs = []
         pair_indices = []
 
-        for q_idx, (query, docs) in enumerate(zip(queries, documents_list)):
+        for q_idx, (query, docs) in enumerate(zip(queries, documents_list, strict=True)):
             for d_idx, doc in enumerate(docs):
                 all_pairs.append((query, doc.text))
                 pair_indices.append((q_idx, d_idx))
@@ -189,7 +189,7 @@ class RerankerWrapper:
 
         # Copy documents to avoid mutating caller's objects, then assign scores
         copied_lists = [[copy.copy(d) for d in docs] for docs in documents_list]
-        for (q_idx, d_idx), score in zip(pair_indices, scores):
+        for (q_idx, d_idx), score in zip(pair_indices, scores, strict=True):
             copied_lists[q_idx][d_idx].score = float(score)
 
         # Sort and return

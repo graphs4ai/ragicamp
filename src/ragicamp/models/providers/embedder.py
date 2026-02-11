@@ -1,9 +1,10 @@
 """Embedder provider with lazy loading and lifecycle management."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -132,9 +133,8 @@ class Embedder(ABC):
         """Get embedding dimension."""
         ...
 
-    def unload(self) -> None:
+    def unload(self) -> None:  # noqa: B027
         """Unload model (optional override)."""
-        pass
 
 
 class VLLMEmbedderWrapper(Embedder):

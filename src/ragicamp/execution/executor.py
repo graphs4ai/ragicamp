@@ -12,7 +12,8 @@ Note: With vLLM as the backend, batch size just controls how many prompts
 are queued at once. vLLM handles its own GPU memory management internally.
 """
 
-from typing import Any, Callable, Optional, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from tqdm import tqdm
 
@@ -116,7 +117,7 @@ class ResilientExecutor:
         queries: list[tuple[int, str, list[str]]],
         progress: bool = True,
         checkpoint_every: int = 0,
-        checkpoint_callback: Optional[Callable[[list[dict]], None]] = None,
+        checkpoint_callback: Callable[[list[dict]], None] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Execute queries with batch processing.
@@ -150,7 +151,7 @@ class ResilientExecutor:
         queries: list[tuple[int, str, list[str]]],
         progress: bool,
         checkpoint_every: int,
-        checkpoint_callback: Optional[Callable[[list[dict]], None]],
+        checkpoint_callback: Callable[[list[dict]], None] | None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Execute with batch processing."""
@@ -169,7 +170,7 @@ class ResilientExecutor:
             try:
                 responses = self.agent.batch_answer(batch_queries, **kwargs)
 
-                for (orig_idx, query, expected), resp in zip(batch, responses):
+                for (orig_idx, query, expected), resp in zip(batch, responses, strict=True):
                     results.append(_build_result_item(resp, orig_idx, query, expected))
 
                 pbar.update(len(batch))
@@ -231,7 +232,7 @@ class ResilientExecutor:
         queries: list[tuple[int, str, list[str]]],
         progress: bool,
         checkpoint_every: int,
-        checkpoint_callback: Optional[Callable[[list[dict]], None]],
+        checkpoint_callback: Callable[[list[dict]], None] | None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Execute queries one at a time."""

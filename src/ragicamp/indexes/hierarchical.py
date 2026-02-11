@@ -2,7 +2,7 @@
 
 import pickle
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING
 
 import faiss
 import numpy as np
@@ -67,11 +67,11 @@ class HierarchicalIndex:
         self.vllm_gpu_memory_fraction = vllm_gpu_memory_fraction
 
         # Lazy load encoder
-        self._encoder: Optional["Embedder"] = None
-        self._embedding_dim: Optional[int] = None
+        self._encoder: Embedder | None = None
+        self._embedding_dim: int | None = None
 
         # Chunker
-        self._chunker: Optional[HierarchicalChunker] = None
+        self._chunker: HierarchicalChunker | None = None
 
         # Storage
         self.parent_docs: list[Document] = []
@@ -80,7 +80,7 @@ class HierarchicalIndex:
         self.parent_id_to_idx: dict[str, int] = {}
 
         # FAISS index for child chunks
-        self.index: Optional[faiss.Index] = None
+        self.index: faiss.Index | None = None
 
     @property
     def encoder(self) -> "Embedder":
@@ -249,7 +249,7 @@ class HierarchicalIndex:
         parent_scores: dict[str, float] = {}
         parent_best_child: dict[str, int] = {}
 
-        for idx, score in zip(indices[0], scores[0]):
+        for idx, score in zip(indices[0], scores[0], strict=True):
             if idx < 0 or idx >= len(self.child_docs):
                 continue
 
@@ -329,7 +329,7 @@ class HierarchicalIndex:
             parent_scores: dict[str, float] = {}
             parent_best_child: dict[str, int] = {}
 
-            for idx, score in zip(indices_batch[q_idx], scores_batch[q_idx]):
+            for idx, score in zip(indices_batch[q_idx], scores_batch[q_idx], strict=True):
                 if idx < 0 or idx >= len(self.child_docs):
                     continue
 
@@ -357,19 +357,19 @@ class HierarchicalIndex:
 
         return all_results
 
-    def get_parent(self, idx: int) -> Optional[Document]:
+    def get_parent(self, idx: int) -> Document | None:
         """Get parent document by index."""
         if 0 <= idx < len(self.parent_docs):
             return self.parent_docs[idx]
         return None
 
-    def get_child(self, idx: int) -> Optional[Document]:
+    def get_child(self, idx: int) -> Document | None:
         """Get child document by index."""
         if 0 <= idx < len(self.child_docs):
             return self.child_docs[idx]
         return None
 
-    def get_document(self, idx: int) -> Optional[Document]:
+    def get_document(self, idx: int) -> Document | None:
         """Get parent document (alias for get_parent)."""
         return self.get_parent(idx)
 
@@ -377,7 +377,7 @@ class HierarchicalIndex:
         """Number of parent documents."""
         return len(self.parent_docs)
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Path | None = None) -> Path:
         """Save index to disk.
 
         Args:
@@ -427,7 +427,7 @@ class HierarchicalIndex:
         return path
 
     @classmethod
-    def load(cls, name: str, path: Optional[Path] = None) -> "HierarchicalIndex":
+    def load(cls, name: str, path: Path | None = None) -> "HierarchicalIndex":
         """Load index from disk.
 
         Args:

@@ -174,9 +174,8 @@ class Generator(ABC):
         """Generate response for single prompt."""
         return self.batch_generate([prompt], **kwargs)[0]
 
-    def unload(self) -> None:
+    def unload(self) -> None:  # noqa: B027
         """Unload model (optional override)."""
-        pass
 
 
 class VLLMGeneratorWrapper(Generator):

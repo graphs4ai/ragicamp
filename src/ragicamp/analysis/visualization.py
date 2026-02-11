@@ -13,7 +13,6 @@ Example:
     fig.savefig("model_comparison.png")
 """
 
-from typing import Optional
 
 from ragicamp.analysis.comparison import compare_results, pivot_results
 from ragicamp.analysis.loader import ExperimentResult
@@ -79,9 +78,9 @@ def plot_comparison(
     group_by: str = "model",
     metric: str = "f1",
     figsize: tuple[int, int] = (10, 6),
-    title: Optional[str] = None,
+    title: str | None = None,
     show_error_bars: bool = True,
-    color_palette: Optional[list[str]] = None,
+    color_palette: list[str] | None = None,
 ) -> "plt.Figure":
     """Bar chart comparing groups by a metric.
 
@@ -113,8 +112,8 @@ def plot_comparison(
 
     if show_error_bars:
         # Error bars showing range
-        yerr_lower = [m - mn for m, mn in zip(means, mins)]
-        yerr_upper = [mx - m for m, mx in zip(means, maxs)]
+        yerr_lower = [m - mn for m, mn in zip(means, mins, strict=True)]
+        yerr_upper = [mx - m for m, mx in zip(means, maxs, strict=True)]
         ax.errorbar(
             groups,
             means,
@@ -126,7 +125,7 @@ def plot_comparison(
         )
 
     # Add value labels on bars
-    for bar, mean in zip(bars, means):
+    for bar, mean in zip(bars, means, strict=True):
         height = bar.get_height()
         ax.annotate(
             f"{mean:.3f}",
@@ -156,7 +155,7 @@ def plot_heatmap(
     cols: str = "dataset",
     metric: str = "f1",
     figsize: tuple[int, int] = (10, 8),
-    title: Optional[str] = None,
+    title: str | None = None,
     cmap: str = "YlGnBu",
     annotate: bool = True,
 ) -> "plt.Figure":
@@ -224,7 +223,7 @@ def plot_multi_metric(
     group_by: str = "model",
     metrics: list[str] = None,
     figsize: tuple[int, int] = (12, 6),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> "plt.Figure":
     """Grouped bar chart comparing multiple metrics.
 
@@ -282,7 +281,7 @@ def plot_scatter(
     y_metric: str = "throughput_qps",
     color_by: str = "model",
     figsize: tuple[int, int] = (10, 8),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> "plt.Figure":
     """Scatter plot of two metrics, colored by a dimension.
 
@@ -327,9 +326,9 @@ def plot_scatter(
 def plot_distribution(
     results: list[ExperimentResult],
     metric: str = "f1",
-    group_by: Optional[str] = None,
+    group_by: str | None = None,
     figsize: tuple[int, int] = (10, 6),
-    title: Optional[str] = None,
+    title: str | None = None,
 ) -> "plt.Figure":
     """Box plot or violin plot of metric distribution.
 
@@ -410,7 +409,7 @@ def create_summary_dashboard(
     axes[0, 0].bar(groups, means, color=plt.cm.Set2.colors[: len(groups)])
     axes[0, 0].set_title("F1 by Model", fontsize=12)
     axes[0, 0].set_ylabel("F1")
-    for i, (_g, m) in enumerate(zip(groups, means)):
+    for i, (_g, m) in enumerate(zip(groups, means, strict=True)):
         axes[0, 0].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom")
 
     # 2. Heatmap: model x dataset
@@ -443,7 +442,7 @@ def create_summary_dashboard(
     axes[1, 1].bar(groups, means, color=["#ff9999", "#99ccff"])
     axes[1, 1].set_title("F1: Direct LLM vs RAG", fontsize=12)
     axes[1, 1].set_ylabel("F1")
-    for i, (_g, m) in enumerate(zip(groups, means)):
+    for i, (_g, m) in enumerate(zip(groups, means, strict=True)):
         axes[1, 1].annotate(f"{m:.3f}", xy=(i, m), ha="center", va="bottom")
 
     plt.suptitle("Experiment Summary Dashboard", fontsize=16, y=1.02)

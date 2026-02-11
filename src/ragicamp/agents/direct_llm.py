@@ -80,7 +80,7 @@ class DirectLLMAgent(Agent):
         # Generator is now unloaded
 
         # Build results
-        iterator = zip(pending, prompts, answers)
+        iterator = zip(pending, prompts, answers, strict=True)
         if show_progress:
             iterator = tqdm(list(iterator), desc="Building results")
 

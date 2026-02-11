@@ -125,7 +125,7 @@ Answer:"""
 
         # Build result: for each query, return [original, hypothetical]
         results = []
-        for query, hyp in zip(queries, hypotheticals):
+        for query, hyp in zip(queries, hypotheticals, strict=True):
             query_list = []
             if self.include_original:
                 query_list.append(query)

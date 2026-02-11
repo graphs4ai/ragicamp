@@ -326,7 +326,7 @@ class IterativeRAGAgent(Agent):
             active[idx].steps.extend(embed_search_steps)
 
         # Merge results into per-query state
-        for idx, results in zip(idx_order, retrievals):
+        for idx, results in zip(idx_order, retrievals, strict=True):
             state = active[idx]
             new_docs = [r.document for r in results]
             state.docs = self._merge_documents(state.docs, new_docs)
@@ -367,7 +367,7 @@ class IterativeRAGAgent(Agent):
             refined = generator.batch_generate(refine_prompts, max_tokens=100)
             step.input = {"n_queries": len(refine_prompts), "iteration": iteration}
 
-        for idx, new_text in zip(idx_list, refined):
+        for idx, new_text in zip(idx_list, refined, strict=True):
             new_text = new_text.strip()
             if new_text.startswith('"') and new_text.endswith('"'):
                 new_text = new_text[1:-1]
@@ -416,7 +416,7 @@ class IterativeRAGAgent(Agent):
                 step.input = {"n_queries": len(suff_prompts), "iteration": iteration}
 
             # Parse responses
-            for idx, response in zip(idx_order, suff_responses):
+            for idx, response in zip(idx_order, suff_responses, strict=True):
                 resp_upper = response.upper()
                 is_sufficient = "SUFFICIENT" in resp_upper and "INSUFFICIENT" not in resp_upper
                 state = active[idx]
@@ -483,7 +483,7 @@ class IterativeRAGAgent(Agent):
         # Build AgentResult list in original query order
         result_map: dict[int, AgentResult] = {}
         for idx, answer, prompt, final_docs in zip(
-            idx_order, answers, prompts, final_docs_per_query
+            idx_order, answers, prompts, final_docs_per_query, strict=True
         ):
             state = all_states[idx]
             state.steps.append(

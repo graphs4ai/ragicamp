@@ -161,7 +161,7 @@ Alternative questions:"""
 
         # Parse each response
         results = []
-        for query, response in zip(queries, responses):
+        for query, response in zip(queries, responses, strict=True):
             query_list = []
             if self.include_original:
                 query_list.append(query)

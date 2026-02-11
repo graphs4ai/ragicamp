@@ -278,7 +278,7 @@ class SelfRAGAgent(Agent):
                 step.input = {"n_queries": len(prompts)}
                 step.output = {"n_responses": len(responses)}
 
-        for idx, response in zip(idx_order, responses):
+        for idx, response in zip(idx_order, responses, strict=True):
             confidence = self._parse_confidence(response)
             state = states[idx]
             state.confidence = confidence
@@ -338,7 +338,7 @@ class SelfRAGAgent(Agent):
         for idx in idx_order:
             retrieval_group[idx].steps.extend(embed_search_steps)
 
-        for idx, results in zip(idx_order, retrievals):
+        for idx, results in zip(idx_order, retrievals, strict=True):
             state = retrieval_group[idx]
             state.docs = [r.document for r in results]
             state.docs_info = RetrievedDocInfo.from_search_results(results)
@@ -365,7 +365,7 @@ class SelfRAGAgent(Agent):
                 step.input = {"n_queries": len(prompts)}
                 step.output = {"n_answers": len(answers)}
 
-            for idx, answer in zip(idx_order, answers):
+            for idx, answer in zip(idx_order, answers, strict=True):
                 state = all_states[idx]
                 state.answer = answer
                 state.steps.append(
@@ -410,7 +410,7 @@ class SelfRAGAgent(Agent):
 
         # Parse verification results
         fallback_ids: list[int] = []
-        for idx, response in zip(idx_order, verify_responses):
+        for idx, response in zip(idx_order, verify_responses, strict=True):
             verdict = self._parse_verification(response)
             state = retrieval_group[idx]
             state.verification = verdict
@@ -442,7 +442,7 @@ class SelfRAGAgent(Agent):
                 fallback_answers = generator.batch_generate(fallback_prompts)
                 step.input = {"n_queries": len(fallback_prompts)}
 
-            for idx, answer in zip(fallback_ids, fallback_answers):
+            for idx, answer in zip(fallback_ids, fallback_answers, strict=True):
                 state = retrieval_group[idx]
                 state.answer = answer
                 state.prompt = fallback_prompts[fallback_ids.index(idx)]

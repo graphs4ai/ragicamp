@@ -220,7 +220,7 @@ class FixedRAGAgent(Agent):
         """
         # Build all prompts
         prompts: list[str] = []
-        for query, results in zip(queries, retrievals):
+        for query, results in zip(queries, retrievals, strict=True):
             docs = [r.document for r in results]
             context_text = ContextFormatter.format_numbered_from_docs(docs)
             prompt = self.prompt_builder.build_rag(query.text, context_text)
@@ -238,7 +238,7 @@ class FixedRAGAgent(Agent):
         # Build results
         results: list[AgentResult] = []
 
-        iterator = zip(queries, retrievals, prompts, answers)
+        iterator = zip(queries, retrievals, prompts, answers, strict=True)
         if show_progress:
             iterator = tqdm(list(iterator), desc="Building results")
 

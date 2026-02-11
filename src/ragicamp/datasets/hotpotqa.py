@@ -1,7 +1,7 @@
 """HotpotQA dataset loader."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from datasets import load_dataset
 
@@ -19,7 +19,7 @@ class HotpotQADataset(QADataset):
         self,
         split: str = "train",
         distractor: bool = True,
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         use_cache: bool = True,
         **kwargs: Any,
     ):
@@ -60,7 +60,9 @@ class HotpotQADataset(QADataset):
         for item in dataset:
             # Combine context passages
             context_parts = []
-            for title, sentences in zip(item["context"]["title"], item["context"]["sentences"]):
+            for title, sentences in zip(
+                item["context"]["title"], item["context"]["sentences"], strict=True
+            ):
                 context_parts.append(f"{title}: {' '.join(sentences)}")
 
             example = QAExample(

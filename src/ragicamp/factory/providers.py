@@ -13,10 +13,15 @@ Embedding cache:
     Disable with ``RAGICAMP_CACHE=0``.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any
 
 from ragicamp.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from ragicamp.cache.cached_embedder import CachedEmbedderProvider
 from ragicamp.models.providers import (
     EmbedderConfig,
     EmbedderProvider,
@@ -31,28 +36,28 @@ logger = get_logger(__name__)
 
 class ProviderFactory:
     """Factory for creating model providers from configuration.
-    
+
     Usage:
         # From model spec string
         gen_provider = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
         emb_provider = ProviderFactory.create_embedder("Alibaba-NLP/gte-Qwen2-1.5B-instruct")
-        
+
         # Use with context managers
         with gen_provider.load() as generator:
             answers = generator.batch_generate(prompts)
     """
-    
+
     @staticmethod
     def parse_generator_spec(
         spec: str,
         **kwargs: Any,
     ) -> GeneratorConfig:
         """Parse a model spec string into GeneratorConfig.
-        
+
         Args:
             spec: Model spec like 'vllm:meta-llama/Llama-3.2-3B' or 'hf:google/gemma-2b-it'
             **kwargs: Additional config params
-        
+
         Returns:
             GeneratorConfig
         """
@@ -60,9 +65,9 @@ class ProviderFactory:
             provider, model_name = spec.split(":", 1)
         else:
             provider, model_name = "vllm", spec
-        
+
         backend = "vllm" if provider == "vllm" else "hf"
-        
+
         return GeneratorConfig(
             model_name=model_name,
             backend=backend,
@@ -70,18 +75,18 @@ class ProviderFactory:
             trust_remote_code=kwargs.get("trust_remote_code", True),
             max_model_len=kwargs.get("max_model_len"),
         )
-    
+
     @staticmethod
     def create_generator(
         spec: str | dict[str, Any],
         **kwargs: Any,
     ) -> GeneratorProvider:
         """Create a GeneratorProvider from spec.
-        
+
         Args:
             spec: Model spec string or config dict
             **kwargs: Additional params
-        
+
         Returns:
             GeneratorProvider ready for .load()
         """
@@ -95,10 +100,10 @@ class ProviderFactory:
             )
         else:
             config = ProviderFactory.parse_generator_spec(spec, **kwargs)
-        
+
         logger.info("Creating generator provider: %s (%s)", config.model_name, config.backend)
         return GeneratorProvider(config)
-    
+
     @staticmethod
     def parse_embedder_spec(
         spec: str,
@@ -106,12 +111,12 @@ class ProviderFactory:
         **kwargs: Any,
     ) -> EmbedderConfig:
         """Parse an embedder spec into EmbedderConfig.
-        
+
         Args:
             spec: Model name like 'BAAI/bge-large-en-v1.5'
             backend: 'vllm' or 'sentence_transformers'
             **kwargs: Additional config params
-        
+
         Returns:
             EmbedderConfig
         """
@@ -120,13 +125,13 @@ class ProviderFactory:
             backend=backend,
             trust_remote_code=kwargs.get("trust_remote_code", True),
         )
-    
+
     @staticmethod
     def create_embedder(
         spec: str | dict[str, Any],
         backend: str = "vllm",
         **kwargs: Any,
-    ) -> Union[EmbedderProvider, "CachedEmbedderProvider"]:
+    ) -> EmbedderProvider | CachedEmbedderProvider:
         """Create an EmbedderProvider from spec.
 
         When the embedding cache is enabled (``RAGICAMP_CACHE=1``, the
@@ -138,7 +143,7 @@ class ProviderFactory:
             spec: Model name or config dict
             backend: 'vllm' or 'sentence_transformers'
             **kwargs: Additional params
-        
+
         Returns:
             EmbedderProvider (or CachedEmbedderProvider) ready for .load()
         """
@@ -150,7 +155,7 @@ class ProviderFactory:
             )
         else:
             config = ProviderFactory.parse_embedder_spec(spec, backend, **kwargs)
-        
+
         logger.info("Creating embedder provider: %s (%s)", config.model_name, config.backend)
         provider: ModelProvider = EmbedderProvider(config)
 

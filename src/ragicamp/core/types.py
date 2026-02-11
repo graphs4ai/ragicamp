@@ -6,9 +6,14 @@ Single source of truth for Document, Chunk, and related types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, Union, runtime_checkable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from ragicamp.indexes.vector_index import VectorIndex
+    from ragicamp.retrievers.hierarchical import HierarchicalSearcher
+    from ragicamp.retrievers.hybrid import HybridSearcher
 
 
 @dataclass
@@ -42,7 +47,7 @@ class Document:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Document":
+    def from_dict(cls, data: dict[str, Any]) -> Document:
         """Create from dictionary."""
         return cls(
             id=data["id"],

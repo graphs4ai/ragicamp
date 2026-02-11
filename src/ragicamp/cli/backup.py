@@ -1,13 +1,12 @@
 """Backblaze B2 backup and download operations."""
 
-import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
 
 from ragicamp.core.logging import get_logger
 
@@ -72,9 +71,7 @@ def _parallel_transfer(
 
     with tqdm(total=total_bytes, unit="B", unit_scale=True, desc=desc) as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(transfer_fn, *item): item for item in files
-            }
+            future_to_file = {executor.submit(transfer_fn, *item): item for item in files}
 
             for future in as_completed(future_to_file):
                 item = future_to_file[future]
@@ -97,11 +94,23 @@ def _parallel_transfer(
 
     return progress
 
+
 # Files/patterns to skip during backup
 SKIP_PATTERNS = {
-    ".tmp", ".temp", ".pyc", ".pyo", "__pycache__", ".git",
-    ".DS_Store", "Thumbs.db", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "*.log", "checkpoint.json", ".lock",
+    ".tmp",
+    ".temp",
+    ".pyc",
+    ".pyo",
+    "__pycache__",
+    ".git",
+    ".DS_Store",
+    "Thumbs.db",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "*.log",
+    "checkpoint.json",
+    ".lock",
 }
 
 
@@ -202,7 +211,6 @@ def backup(
     Returns:
         Exit code (0 on success)
     """
-    from tqdm import tqdm
 
     s3, _, _, _ = get_b2_client()
     if s3 is None:
@@ -226,7 +234,11 @@ def backup(
                 contents = page.get("Contents", [])
                 for obj in contents:
                     existing_files[obj["Key"]] = obj["Size"]
-            logger.info("Found %d existing files in backup (scanned %d pages)", len(existing_files), page_count)
+            logger.info(
+                "Found %d existing files in backup (scanned %d pages)",
+                len(existing_files),
+                page_count,
+            )
         except Exception as e:
             logger.warning("Could not list existing files: %s", e)
             logger.warning("Proceeding without sync (will upload all files)")
@@ -238,25 +250,27 @@ def backup(
     for backup_dir in dirs_to_backup:
         for root, dirs, files in os.walk(backup_dir):
             # Filter directories
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")]
+            dirs[:] = [
+                d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")
+            ]
             for file in files:
                 local_path = Path(root) / file
-                
+
                 # Skip temp/cache files
                 if should_skip_file(local_path):
                     skipped_temp += 1
                     continue
-                
+
                 relative_path = local_path.relative_to(backup_dir.parent)
                 s3_key = f"{prefix}/{relative_path}"
                 file_size = local_path.stat().st_size
-                
+
                 # In sync mode, skip if file exists with same size
                 if sync and s3_key in existing_files:
                     if existing_files[s3_key] == file_size:
                         skipped_files += 1
                         continue
-                
+
                 files_to_upload.append((local_path, s3_key, file_size))
 
     if not files_to_upload:
@@ -277,7 +291,7 @@ def backup(
 
     if dry_run:
         print("\n[DRY RUN] Would upload:")
-        for local_path, s3_key, size in files_to_upload[:10]:
+        for _local_path, s3_key, size in files_to_upload[:10]:
             size_mb = size / (1024 * 1024)
             print(f"  {s3_key} ({size_mb:.1f} MB)")
         if len(files_to_upload) > 10:
@@ -306,8 +320,12 @@ def backup(
     elapsed = time.time() - start_time
     speed_mbps = (progress.total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
-    print(f"\n✓ Uploaded {progress.total_files}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/")
-    print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(
+        f"\n✓ Uploaded {progress.total_files}/{len(files_to_upload)} files to s3://{bucket}/{prefix}/"
+    )
+    print(
+        f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
+    )
 
     if progress.errors:
         logger.warning("%d upload errors occurred", len(progress.errors))
@@ -354,7 +372,9 @@ def prune(
         if not backup_dir.exists():
             continue
         for root, dirs, files in os.walk(backup_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")]
+            dirs[:] = [
+                d for d in dirs if not d.startswith(".") and d not in ("__pycache__", ".git")
+            ]
             for file in files:
                 local_path = Path(root) / file
                 if should_skip_file(local_path):
@@ -411,10 +431,7 @@ def prune(
 
     with tqdm(total=len(orphans), desc="Deleting", unit="file") as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(delete_one, key, size): key
-                for key, size in orphans
-            }
+            futures = {executor.submit(delete_one, key, size): key for key, size in orphans}
             for future in as_completed(futures):
                 success, error = future.result()
                 if success:
@@ -424,7 +441,9 @@ def prune(
                     logger.warning("Failed to delete %s: %s", futures[future], error)
                 pbar.update(1)
 
-    print(f"\nDeleted {deleted}/{len(orphans)} orphaned files ({orphan_bytes / (1024**2):.1f} MB freed)")
+    print(
+        f"\nDeleted {deleted}/{len(orphans)} orphaned files ({orphan_bytes / (1024**2):.1f} MB freed)"
+    )
     if errors:
         logger.warning("%d deletions failed", errors)
 
@@ -433,7 +452,7 @@ def prune(
 
 def download(
     bucket: str,
-    backup_name: Optional[str] = None,
+    backup_name: str | None = None,
     artifacts_only: bool = False,
     outputs_only: bool = False,
     indexes_only: bool = False,
@@ -460,7 +479,6 @@ def download(
     Returns:
         Exit code (0 on success)
     """
-    from tqdm import tqdm
 
     s3, _, _, _ = get_b2_client()
     if s3 is None:
@@ -503,13 +521,13 @@ def download(
                     continue
 
                 local_path = Path(relative_path)
-                
+
                 # Skip existing files with same size
                 if skip_existing and local_path.exists():
                     if local_path.stat().st_size == size:
                         skipped_existing += 1
                         continue
-                
+
                 files_to_download.append((s3_key, local_path, size))
     except Exception as e:
         logger.error("Failed to list backup contents: %s", e)
@@ -565,7 +583,9 @@ def download(
     speed_mbps = (progress.total_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
     print(f"\n✓ Downloaded {progress.total_files}/{len(files_to_download)} files")
-    print(f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)")
+    print(
+        f"  Total: {progress.total_bytes / (1024**3):.2f} GB in {elapsed:.1f}s ({speed_mbps:.1f} MB/s)"
+    )
 
     if progress.errors:
         logger.warning("%d download errors occurred", len(progress.errors))
@@ -587,8 +607,10 @@ def download(
         if indexes_dir.exists():
             logger.info("Migrating indexes to new format...")
             try:
-                from ragicamp.cli.commands import cmd_migrate_indexes
                 import argparse
+
+                from ragicamp.cli.commands import cmd_migrate_indexes
+
                 migrate_args = argparse.Namespace(index_name=None, dry_run=False)
                 cmd_migrate_indexes(migrate_args)
             except Exception as e:

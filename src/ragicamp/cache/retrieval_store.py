@@ -23,7 +23,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 
@@ -67,11 +67,11 @@ class RetrievalStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._ensure_table()
 
     @classmethod
-    def default(cls) -> "RetrievalStore":
+    def default(cls) -> RetrievalStore:
         """Open the default cache DB (same file as embedding cache)."""
         import os
 
@@ -114,7 +114,7 @@ class RetrievalStore:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "RetrievalStore":
+    def __enter__(self) -> RetrievalStore:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -132,7 +132,7 @@ class RetrievalStore:
         retriever: str,
         queries: list[str],
         top_k: int,
-    ) -> tuple[list[Optional[list[dict[str, Any]]]], list[bool]]:
+    ) -> tuple[list[list[dict[str, Any]] | None], list[bool]]:
         """Look up cached retrieval results for a batch of queries.
 
         Args:
@@ -166,7 +166,7 @@ class RetrievalStore:
         for query_hash, data in rows:
             lookup[query_hash] = data
 
-        results: list[Optional[list[dict[str, Any]]]] = []
+        results: list[list[dict[str, Any]] | None] = []
         hit_mask: list[bool] = []
 
         for h in hashes:
@@ -206,7 +206,7 @@ class RetrievalStore:
 
         params = [
             (retriever, _query_hash(query), top_k, json.dumps(results, separators=(",", ":")), now)
-            for query, results in zip(queries, results_per_query)
+            for query, results in zip(queries, results_per_query, strict=True)
         ]
 
         cursor = self.conn.cursor()
@@ -261,7 +261,7 @@ class RetrievalStore:
             "retrievers": retrievers,
         }
 
-    def clear(self, retriever: Optional[str] = None) -> int:
+    def clear(self, retriever: str | None = None) -> int:
         """Delete cached retrieval results."""
         if retriever is not None:
             cursor = self.conn.execute(

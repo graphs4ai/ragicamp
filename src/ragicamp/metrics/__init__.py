@@ -39,7 +39,7 @@ def _expand_for_multi_reference(
     pred_indices = []
     ref_indices = []
 
-    for i, (pred, ref) in enumerate(zip(predictions, references)):
+    for i, (pred, ref) in enumerate(zip(predictions, references, strict=True)):
         # Normalize to list of references
         refs_list = ref if isinstance(ref, list) else [ref]
 
@@ -75,7 +75,7 @@ def _aggregate_multi_reference_scores(
     # Initialize with -inf so any score will be higher
     best_scores = [float("-inf")] * num_predictions
 
-    for score, idx in zip(scores, pred_indices):
+    for score, idx in zip(scores, pred_indices, strict=True):
         if score > best_scores[idx]:
             best_scores[idx] = score
 
@@ -143,10 +143,10 @@ def compute_metrics_batched(
             n_errors,
             len(predictions),
         )
-        predictions = [p for p, v in zip(predictions, valid_mask) if v]
-        references = [r for r, v in zip(references, valid_mask) if v]
+        predictions = [p for p, v in zip(predictions, valid_mask, strict=True) if v]
+        references = [r for r, v in zip(references, valid_mask, strict=True) if v]
         if questions is not None:
-            questions = [q for q, v in zip(questions, valid_mask) if v]
+            questions = [q for q, v in zip(questions, valid_mask, strict=True) if v]
 
     if not predictions:
         logger.warning("No valid predictions to score after filtering errors")

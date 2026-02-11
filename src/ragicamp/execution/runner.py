@@ -428,7 +428,7 @@ def run_spec(
 
     # Determine which phase we're resuming from
     if health.can_resume:
-        action = "Resuming from %s" % health.resume_phase.value
+        action = f"Resuming from {health.resume_phase.value}"
     else:
         action = "Starting"
 

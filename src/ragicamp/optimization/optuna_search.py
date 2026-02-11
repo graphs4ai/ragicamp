@@ -42,7 +42,7 @@ import random
 from datetime import datetime
 from itertools import product as itertools_product
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import optuna
 from optuna.samplers import PartialFixedSampler
@@ -267,7 +267,7 @@ def _suggest_hybrid_params(
     retriever_name: str,
     retriever_lookup: dict[str, dict[str, Any]],
     config: dict[str, Any],
-) -> tuple[Optional[int], Optional[float]]:
+) -> tuple[int | None, float | None]:
     """Conditionally suggest rrf_k and alpha when retriever is hybrid.
 
     These parameters only matter for hybrid retrievers (dense + sparse
@@ -414,7 +414,7 @@ def _get_experiment_metric(
     exp_name: str,
     output_dir: Path,
     metric_name: str = "f1",
-) -> Optional[float]:
+) -> float | None:
     """Extract a metric value from a completed experiment's output files.
 
     Tries ``results.json`` first, then ``predictions.json``.
@@ -456,7 +456,7 @@ def _get_experiment_metric(
 # ---------------------------------------------------------------------------
 
 
-def _create_sampler(mode: str, seed: Optional[int] = None) -> optuna.samplers.BaseSampler:
+def _create_sampler(mode: str, seed: int | None = None) -> optuna.samplers.BaseSampler:
     """Map a sampling mode name to an Optuna sampler instance.
 
     Args:
@@ -663,11 +663,11 @@ def run_optuna_study(
     output_dir: Path,
     sampler_mode: str = "tpe",
     optimize_metric: str = "f1",
-    limit: Optional[int] = None,
+    limit: int | None = None,
     judge_model: Any = None,
-    llm_judge_config: Optional[dict[str, Any]] = None,
-    study_name: Optional[str] = None,
-    seed: Optional[int] = None,
+    llm_judge_config: dict[str, Any] | None = None,
+    study_name: str | None = None,
+    seed: int | None = None,
 ) -> optuna.Study:
     """Run an Optuna-driven experiment search over the RAG search space.
 
@@ -905,7 +905,7 @@ def run_optuna_study(
         rng = random.Random(seed)
         schedule: list[dict[str, Any]] = []
         while len(schedule) < remaining:
-            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            epoch = [dict(zip(fixed_dims, combo, strict=True)) for combo in fixed_combos]
             rng.shuffle(epoch)
             schedule.extend(epoch)
         schedule = schedule[:remaining]

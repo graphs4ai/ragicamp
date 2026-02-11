@@ -22,7 +22,7 @@ Example:
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from tqdm.asyncio import tqdm as atqdm
 
@@ -70,7 +70,7 @@ class AsyncAPIMetric(Metric):
         self,
         prediction: str,
         reference: str,
-        question: Optional[str] = None,
+        question: str | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
         """Compute metric for a single prediction-reference pair (async, 1-to-1).
@@ -92,7 +92,7 @@ class AsyncAPIMetric(Metric):
         self,
         predictions: list[str],
         references: list[str],
-        questions: Optional[list[str]] = None,
+        questions: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
         """Compute metric for all predictions using async parallel execution.
@@ -112,7 +112,7 @@ class AsyncAPIMetric(Metric):
             idx: int,
             pred: str,
             ref: str,
-            q: Optional[str],
+            q: str | None,
         ) -> dict[str, float]:
             """Compute with rate limiting."""
             async with semaphore:
@@ -125,7 +125,7 @@ class AsyncAPIMetric(Metric):
 
         # Build tasks
         tasks = []
-        for i, (pred, ref) in enumerate(zip(predictions, references)):
+        for i, (pred, ref) in enumerate(zip(predictions, references, strict=True)):
             q = questions[i] if questions and i < len(questions) else None
             tasks.append(rate_limited_compute(i, pred, ref, q))
 
@@ -184,7 +184,7 @@ class AsyncAPIMetric(Metric):
         self,
         predictions: list[str],
         references: list[str],
-        questions: Optional[list[str]] = None,
+        questions: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
         """Compute metric synchronously (wrapper around async).
@@ -220,7 +220,7 @@ class AsyncAPIMetric(Metric):
         self,
         prediction: str,
         reference: str,
-        question: Optional[str] = None,
+        question: str | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
         """Compute metric for a single item (sync wrapper).

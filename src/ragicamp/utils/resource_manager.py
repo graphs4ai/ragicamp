@@ -17,8 +17,9 @@ GPU Memory Partitioning:
 """
 
 import gc
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any
 
 import torch
 
@@ -77,13 +78,13 @@ class ResourceManager:
         """Print current memory status."""
         info = ResourceManager.get_gpu_memory_info()
         if info["available"]:
-            prefix = "[%s] " % phase if phase else ""
+            prefix = f"[{phase}] " if phase else ""
             logger.info(
                 "%sGPU: %.1f/%.1f GiB (free: %.1f GiB)",
                 prefix,
-                info['allocated_gb'],
-                info['total_gb'],
-                info['free_gb']
+                info["allocated_gb"],
+                info["total_gb"],
+                info["free_gb"],
             )
 
     @staticmethod
@@ -97,8 +98,12 @@ class ResourceManager:
             vllm_gb = total * Defaults.VLLM_GPU_MEMORY_FRACTION
             faiss_gb = total * Defaults.FAISS_GPU_MEMORY_FRACTION
             logger.info("GPU Memory Partitioning (total: %.1f GiB):", total)
-            logger.info("   vLLM:  %.1f GiB (%.0f%%)", vllm_gb, Defaults.VLLM_GPU_MEMORY_FRACTION * 100)
-            logger.info("   FAISS: %.1f GiB (%.0f%%)", faiss_gb, Defaults.FAISS_GPU_MEMORY_FRACTION * 100)
+            logger.info(
+                "   vLLM:  %.1f GiB (%.0f%%)", vllm_gb, Defaults.VLLM_GPU_MEMORY_FRACTION * 100
+            )
+            logger.info(
+                "   FAISS: %.1f GiB (%.0f%%)", faiss_gb, Defaults.FAISS_GPU_MEMORY_FRACTION * 100
+            )
 
 
 @contextmanager
