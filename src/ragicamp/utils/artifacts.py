@@ -3,7 +3,11 @@
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
+from ragicamp.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class ArtifactManager:
@@ -300,7 +304,7 @@ class ArtifactManager:
 
 
 # Global artifact manager instance
-_artifact_manager: Optional[ArtifactManager] = None
+_artifact_manager: ArtifactManager | None = None
 
 
 def get_artifact_manager(base_dir: str = "artifacts") -> ArtifactManager:
@@ -315,4 +319,10 @@ def get_artifact_manager(base_dir: str = "artifacts") -> ArtifactManager:
     global _artifact_manager
     if _artifact_manager is None:
         _artifact_manager = ArtifactManager(base_dir)
+    elif str(_artifact_manager.base_dir) != base_dir:
+        logger.warning(
+            "ArtifactManager already initialized with base_dir='%s', ignoring '%s'",
+            _artifact_manager.base_dir,
+            base_dir,
+        )
     return _artifact_manager

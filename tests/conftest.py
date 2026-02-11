@@ -12,11 +12,17 @@ Usage:
 """
 
 import json
+import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pytest
+
+# Make notebooks/ importable so tests can use analysis_utils without sys.path hacks
+_NOTEBOOKS_DIR = str(Path(__file__).resolve().parent.parent / "notebooks")
+if _NOTEBOOKS_DIR not in sys.path:
+    sys.path.insert(0, _NOTEBOOKS_DIR)
 
 # Import RAGiCamp components
 from ragicamp.core.types import Document
@@ -36,7 +42,7 @@ class MockLanguageModel:
         self,
         model_name: str = "mock_model",
         default_response: str = "Mock answer",
-        responses: Optional[dict[str, str]] = None,
+        responses: dict[str, str] | None = None,
     ):
         self.model_name = model_name
         self.default_response = default_response
@@ -106,7 +112,7 @@ class MockRetriever:
     def __init__(
         self,
         name: str = "mock_retriever",
-        documents: Optional[list[Document]] = None,
+        documents: list[Document] | None = None,
     ):
         self.name = name
         self.documents = documents or self._default_documents()
@@ -243,7 +249,7 @@ class MockMetric(Metric):
     def __init__(
         self,
         name: str = "mock_metric",
-        fixed_score: Optional[float] = None,
+        fixed_score: float | None = None,
     ):
         super().__init__(name=name)
         self.fixed_score = fixed_score

@@ -13,24 +13,20 @@ Each test follows the pattern:
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ragicamp.agents import FixedRAGAgent, IterativeRAGAgent, SelfRAGAgent
-from ragicamp.agents.base import Query, Step
+from ragicamp.agents.base import Query
 from ragicamp.core.types import Document, SearchResult
 from ragicamp.factory import AgentFactory
 from ragicamp.factory.providers import ProviderFactory
 from ragicamp.spec.experiment import ExperimentSpec
-
 
 # ---------------------------------------------------------------------------
 # Shared mocks
@@ -40,6 +36,7 @@ from ragicamp.spec.experiment import ExperimentSpec
 class _MockEmbedder:
     def batch_encode(self, texts):
         import numpy as np
+
         return np.random.randn(len(texts), 64).astype("float32")
 
 
@@ -82,10 +79,7 @@ def _make_provider(obj, model_name="mock"):
     return p
 
 
-SAMPLE_DOCS = [
-    Document(id=f"d{i}", text=f"Document {i} text.", metadata={})
-    for i in range(20)
-]
+SAMPLE_DOCS = [Document(id=f"d{i}", text=f"Document {i} text.", metadata={}) for i in range(20)]
 
 
 class _MockIndex:
@@ -96,10 +90,12 @@ class _MockIndex:
     def batch_search(self, embeddings, top_k=5, **kw):
         results = []
         for _ in embeddings:
-            results.append([
-                SearchResult(document=SAMPLE_DOCS[j], score=1.0 - j * 0.05, rank=j)
-                for j in range(top_k)
-            ])
+            results.append(
+                [
+                    SearchResult(document=SAMPLE_DOCS[j], score=1.0 - j * 0.05, rank=j)
+                    for j in range(top_k)
+                ]
+            )
         return results
 
 
@@ -122,11 +118,12 @@ class TestHybridRetrieverWiring:
 
         # We can't actually load indexes from disk in unit tests,
         # but we CAN verify the loader calls the right classes.
-        with patch("ragicamp.indexes.vector_index.VectorIndex.load") as mock_vi, \
-             patch("ragicamp.indexes.sparse.SparseIndex.load") as mock_si, \
-             patch("ragicamp.retrievers.hybrid.HybridSearcher") as mock_hs, \
-             patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am:
-
+        with (
+            patch("ragicamp.indexes.vector_index.VectorIndex.load") as mock_vi,
+            patch("ragicamp.indexes.sparse.SparseIndex.load") as mock_si,
+            patch("ragicamp.retrievers.hybrid.HybridSearcher") as mock_hs,
+            patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am,
+        ):
             mock_vi.return_value = MagicMock(documents=[])
             mock_si.return_value = MagicMock()
             mock_hs.return_value = MagicMock()
@@ -146,16 +143,18 @@ class TestHybridRetrieverWiring:
 
             # Verify alpha was passed through
             call_kwargs = mock_hs.call_args
-            assert call_kwargs.kwargs.get("alpha") == 0.7 or \
-                   (call_kwargs.args and len(call_kwargs.args) >= 3)
+            assert call_kwargs.kwargs.get("alpha") == 0.7 or (
+                call_kwargs.args and len(call_kwargs.args) >= 3
+            )
 
     def test_build_index_loader_hierarchical_unchanged(self):
         """_build_index_loader still works for hierarchical."""
         from ragicamp.experiment import Experiment
 
-        with patch("ragicamp.indexes.hierarchical.HierarchicalIndex.load") as mock_hi, \
-             patch("ragicamp.retrievers.hierarchical.HierarchicalSearcher") as mock_hs:
-
+        with (
+            patch("ragicamp.indexes.hierarchical.HierarchicalIndex.load") as mock_hi,
+            patch("ragicamp.retrievers.hierarchical.HierarchicalSearcher") as mock_hs,
+        ):
             mock_hi.return_value = MagicMock()
             mock_hs.return_value = MagicMock()
 
@@ -524,8 +523,6 @@ class TestAnalysisMetadataEnrichment:
 
     def test_enrich_from_metadata_overrides_name_parsing(self):
         """Structured metadata fields must override name-parsed values."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "notebooks"))
         from analysis_utils import _enrich_from_metadata, parse_experiment_name
 
         # Name with wrong/ambiguous parsing
@@ -559,8 +556,6 @@ class TestAnalysisMetadataEnrichment:
 
     def test_enrich_from_metadata_no_reranker(self):
         """When metadata says reranker=none, row should reflect that."""
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "notebooks"))
         from analysis_utils import _enrich_from_metadata
 
         row = {"reranker": "bge"}  # Wrong initial value
@@ -616,7 +611,10 @@ class TestMigrationNameStripping:
 
         name = "iterative_rag_iter1_stopok_vllm_google_gemma29bit_hier_bge_large_2048p_448c_k5_bge_fewshot_3_nq"
         result = _strip_reranker_from_name(name)
-        assert result == "iterative_rag_iter1_stopok_vllm_google_gemma29bit_hier_bge_large_2048p_448c_k5_fewshot_3_nq"
+        assert (
+            result
+            == "iterative_rag_iter1_stopok_vllm_google_gemma29bit_hier_bge_large_2048p_448c_k5_fewshot_3_nq"
+        )
 
     def test_strips_msmarco_reranker(self):
         from migrate_fake_reranked import _strip_reranker_from_name
@@ -650,13 +648,13 @@ class TestMigrationNameStripping:
             assert len(actions) == 2
 
             # Only one should be 'rename', the other should be 'merge_keep_new' (archived)
-            action_types = [a['action'] for a in actions]
-            assert action_types.count('rename') == 1
-            assert action_types.count('merge_keep_new') == 1
+            action_types = [a["action"] for a in actions]
+            assert action_types.count("rename") == 1
+            assert action_types.count("merge_keep_new") == 1
 
             # The rename winner should be the one with higher F1 (bgev2)
-            rename_action = [a for a in actions if a['action'] == 'rename'][0]
-            assert 'bgev2' in rename_action['old_name']
+            rename_action = [a for a in actions if a["action"] == "rename"][0]
+            assert "bgev2" in rename_action["old_name"]
 
 
 if __name__ == "__main__":
