@@ -530,7 +530,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.6 `is_hybrid_searcher` uses fragile `hasattr` duck typing
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `agents/base.py:208-215`
 - **Fix:** Use `isinstance(index, HybridSearcher)` or check `_is_hybrid` flag on `LazySearchBackend`.
 - **Effort:** Small
@@ -549,14 +549,14 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.9 Duplicate `MODELS` dict in CrossEncoderReranker and RerankerProvider
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `rag/rerankers/cross_encoder.py:39-45`, `models/providers/reranker.py:35-41`
 - **Fix:** Define once in a shared location.
 - **Effort:** Small
 
 ### 5.10 `SentenceTransformerWrapper.unload` — redundant `del` before `= None`
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `models/providers/embedder.py:152-163`
 - **Fix:** Just `self._model = None` + `gc.collect()`.
 - **Effort:** Small
@@ -569,7 +569,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.12 `should_skip_file` overly broad substring match
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `cli/backup.py:108-119`
 - **Fix:** Use `fnmatch` or restrict substring matching to filename only.
 - **Effort:** Small
@@ -607,14 +607,14 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.18 `_fewshot_cache` is mutable class variable, never invalidated
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `utils/prompts.py:67`
 - **Fix:** Use instance-level cache or add invalidation.
 - **Effort:** Small
 
 ### 5.19 `IndexBuilder._process_batch` returns 1D empty array for empty batches
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `indexes/index_builder.py:256`
 - **Fix:** Return `np.empty((0, dim), dtype=np.float32)` or guard in caller to skip `faiss_index.add` when empty.
 - **Effort:** Small
@@ -635,7 +635,7 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.21 Pickle security boundary undocumented
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `indexes/sparse.py:315`, `indexes/vector_index.py:418`, `indexes/hierarchical.py:496`
 - **Fix:** Add security note in CLAUDE.md and near pickle.load calls. Consider checksum verification for downloaded artifacts.
 - **Effort:** Small
@@ -671,5 +671,5 @@ These are not issues per se but architectural improvements for when the project 
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
 | P3 — Interface/Design | 14 | 8 | 6 |
-| P4 — Polish | 21 | 13 | 8 |
-| **Total** | **68** | **50** | **18** |
+| P4 — Polish | 21 | 20 | 1 |
+| **Total** | **68** | **57** | **11** |
