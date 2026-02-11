@@ -23,7 +23,10 @@ logger = get_logger(__name__)
 
 
 def _build_result_item(
-    resp: Any, orig_idx: int, query: str, expected: list[str],
+    resp: Any,
+    orig_idx: int,
+    query: str,
+    expected: list[str],
 ) -> dict[str, Any]:
     """Build a result dict from a successful agent response."""
     result_item: dict[str, Any] = {
@@ -34,9 +37,7 @@ def _build_result_item(
         "prompt": getattr(resp, "prompt", None),
         "error": None,
     }
-    metadata = (
-        getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
-    )
+    metadata = getattr(resp, "metadata_dict", None) or getattr(resp, "metadata", {}) or {}
     if metadata:
         result_item["metadata"] = metadata
     context = getattr(resp, "context", None)
@@ -46,7 +47,10 @@ def _build_result_item(
 
 
 def _build_error_item(
-    orig_idx: int, query: str, expected: list[str], error: str,
+    orig_idx: int,
+    query: str,
+    expected: list[str],
+    error: str,
 ) -> dict[str, Any]:
     """Build a result dict for a failed query."""
     return {
@@ -152,6 +156,8 @@ class ResilientExecutor:
         """Execute with batch processing."""
         results: list[dict[str, Any]] = []
         idx = 0
+        items_since_checkpoint = 0
+        batches_since_gc = 0
         pbar = tqdm(total=len(queries), desc="Generating", disable=not progress)
         consecutive_failures = 0
         max_consecutive_failures = 5
@@ -181,14 +187,16 @@ class ResilientExecutor:
                     )
                     for i in range(idx, len(queries)):
                         orig_idx, query, expected = queries[i]
-                        results.append({
-                            "idx": orig_idx,
-                            "query": query,
-                            "prediction": f"[ABORTED: {consecutive_failures} consecutive failures]",
-                            "expected": expected,
-                            "prompt": None,
-                            "error": f"Aborted after {consecutive_failures} failures: {error_str}",
-                        })
+                        results.append(
+                            {
+                                "idx": orig_idx,
+                                "query": query,
+                                "prediction": f"[ABORTED: {consecutive_failures} consecutive failures]",
+                                "expected": expected,
+                                "prompt": None,
+                                "error": f"Aborted after {consecutive_failures} failures: {error_str}",
+                            }
+                        )
                     pbar.update(len(queries) - idx)
                     break
 
@@ -203,11 +211,17 @@ class ResilientExecutor:
                 pbar.update(len(batch))
                 idx += len(batch)
 
-            if checkpoint_every and len(results) % checkpoint_every == 0:
+            items_since_checkpoint += len(batch)
+            if checkpoint_every and items_since_checkpoint >= checkpoint_every:
                 if checkpoint_callback:
                     checkpoint_callback(results)
+                items_since_checkpoint = 0
 
-            ResourceManager.clear_gpu_memory()
+            # Only clear GPU memory every 10 batches to avoid overhead
+            batches_since_gc += 1
+            if batches_since_gc >= 10:
+                ResourceManager.clear_gpu_memory()
+                batches_since_gc = 0
 
         pbar.close()
         return results
@@ -222,6 +236,8 @@ class ResilientExecutor:
     ) -> list[dict[str, Any]]:
         """Execute queries one at a time."""
         results: list[dict[str, Any]] = []
+        items_since_checkpoint = 0
+        items_since_gc = 0
 
         for orig_idx, query, expected in tqdm(queries, desc="Generating", disable=not progress):
             try:
@@ -230,11 +246,16 @@ class ResilientExecutor:
             except Exception as e:
                 results.append(_build_error_item(orig_idx, query, expected, str(e)))
 
-            if checkpoint_every and len(results) % checkpoint_every == 0:
+            items_since_checkpoint += 1
+            if checkpoint_every and items_since_checkpoint >= checkpoint_every:
                 if checkpoint_callback:
                     checkpoint_callback(results)
+                items_since_checkpoint = 0
 
-            ResourceManager.clear_gpu_memory()
+            # Only clear GPU memory every 10 items to avoid overhead
+            items_since_gc += 1
+            if items_since_gc >= 10:
+                ResourceManager.clear_gpu_memory()
+                items_since_gc = 0
 
         return results
-

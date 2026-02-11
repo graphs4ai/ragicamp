@@ -200,8 +200,11 @@ class CachedEmbedder(Embedder):
 
     def _load_real_model(self) -> Embedder:
         """Load the real embedder via the inner provider's context manager."""
-        self._real_ctx = self._provider.load(gpu_fraction=self._gpu_fraction)
-        embedder = self._real_ctx.__enter__()
+        ctx = self._provider.load(gpu_fraction=self._gpu_fraction)
+        embedder = ctx.__enter__()
+        # Only store the context after successful entry so cleanup()
+        # never calls __exit__() on a context that failed to enter.
+        self._real_ctx = ctx
         return embedder
 
     def cleanup(self) -> None:

@@ -287,10 +287,17 @@ class IterativeRAGAgent(Agent):
         # Subsequent iterations have LLM-refined queries that won't hit cache.
         use_cache = iteration == 0 and self.retrieval_store is not None
 
-        # Only apply query transform on iteration 0.  On later iterations the
-        # queries have been LLM-refined and are already document-like, making
-        # HyDE redundant and expensive (extra generator load per iteration).
+        # IMPORTANT: Query transforms (HyDE, multiquery) are only applied on
+        # iteration 0.  On later iterations the queries have been LLM-refined
+        # and are already document-like — applying HyDE again is both redundant
+        # (the refined query IS a hypothetical answer) and expensive (extra
+        # generator load per iteration).  See docs/AGENT_PERFORMANCE_ANALYSIS.md.
         use_transformer = self.query_transformer if iteration == 0 else None
+        if iteration > 0 and self.query_transformer is not None:
+            logger.debug(
+                "Skipping query transform on iteration %d (only applied on iteration 0)",
+                iteration,
+            )
 
         retrievals, embed_search_steps = batch_transform_embed_and_search(
             query_transformer=use_transformer,

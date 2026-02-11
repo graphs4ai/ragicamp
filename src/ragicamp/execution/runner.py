@@ -195,11 +195,13 @@ def run_generation(
     # then layer on runtime-specific fields
     io = ExperimentIO(exp_out)
     metadata = spec.to_dict()
-    metadata.update({
-        "type": spec.exp_type,  # Keep "type" key (vs "exp_type" in spec)
-        "metrics": result.metrics,
-        "duration": time.time() - start,
-    })
+    metadata.update(
+        {
+            "type": spec.exp_type,  # Keep "type" key (vs "exp_type" in spec)
+            "metrics": result.metrics,
+            "duration": time.time() - start,
+        }
+    )
     io.save_metadata(metadata)
 
     # Check if there were aborted predictions (model failures)
@@ -298,12 +300,7 @@ def run_spec_subprocess(
 
     from ragicamp.utils.paths import get_project_root
 
-    script_path = (
-        get_project_root()
-        / "scripts"
-        / "experiments"
-        / "run_single_experiment.py"
-    )
+    script_path = get_project_root() / "scripts" / "experiments" / "run_single_experiment.py"
 
     # Use spec.to_dict() as the single source of truth to avoid field drift
     spec_dict = spec.to_dict()
@@ -363,6 +360,7 @@ def run_spec_subprocess(
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+        tee_thread.join(timeout=5)
         logger.warning("Timeout after %ds", timeout)
         return "timeout"
 
@@ -400,8 +398,12 @@ def run_spec(
     """
     if use_subprocess:
         return run_spec_subprocess(
-            spec, limit, metrics, out,
-            llm_judge_config=llm_judge_config, timeout=timeout,
+            spec,
+            limit,
+            metrics,
+            out,
+            llm_judge_config=llm_judge_config,
+            timeout=timeout,
         )
 
     # In-process execution with phase-aware dispatching

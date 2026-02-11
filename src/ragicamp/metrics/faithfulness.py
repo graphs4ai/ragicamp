@@ -64,6 +64,7 @@ class FaithfulnessMetric(Metric):
     def _has_cuda(self) -> bool:
         try:
             import torch
+
             return torch.cuda.is_available()
         except ImportError:
             return False
@@ -86,18 +87,19 @@ class FaithfulnessMetric(Metric):
         Returns:
             Dict with "faithfulness" aggregate score
         """
-        scores = []
-        for i, prediction in enumerate(predictions):
-            ctx = contexts[i] if contexts and i < len(contexts) else None
-            scores.append(self._score_single(prediction, ctx))
+        try:
+            scores = []
+            for i, prediction in enumerate(predictions):
+                ctx = contexts[i] if contexts and i < len(contexts) else None
+                scores.append(self._score_single(prediction, ctx))
 
-        self._last_per_item = scores
-        avg = sum(scores) / len(scores) if scores else 0.0
-        return {"faithfulness": avg}
+            self._last_per_item = scores
+            avg = sum(scores) / len(scores) if scores else 0.0
+            return {"faithfulness": avg}
+        finally:
+            self._unload_pipeline()
 
-    def _score_single(
-        self, prediction: str, context: list[str] | None
-    ) -> float:
+    def _score_single(self, prediction: str, context: list[str] | None) -> float:
         """Score a single prediction against its context."""
         if not context:
             return 0.0
@@ -113,6 +115,19 @@ class FaithfulnessMetric(Metric):
         else:
             raise ValueError(f"Unknown faithfulness method: {self.method}")
 
+    def _unload_pipeline(self) -> None:
+        """Unload the NLI pipeline to free GPU memory."""
+        if self._nli_pipeline is not None:
+            del self._nli_pipeline
+            self._nli_pipeline = None
+            try:
+                from ragicamp.utils.resource_manager import ResourceManager
+
+                ResourceManager.clear_gpu_memory()
+            except Exception:
+                pass
+            logger.info("Faithfulness NLI pipeline unloaded")
+
     def _compute_nli_faithfulness(self, prediction: str, context: list[str]) -> float:
         """Compute faithfulness using NLI entailment."""
         nli = self._get_nli_pipeline()
@@ -123,9 +138,7 @@ class FaithfulnessMetric(Metric):
                 continue
 
             # A4 fix: pass premise/hypothesis as dict pair, not literal [SEP]
-            result = nli(
-                {"text": passage, "text_pair": prediction}, top_k=None
-            )
+            result = nli({"text": passage, "text_pair": prediction}, top_k=None)
 
             for label_result in result:
                 if "entailment" in label_result["label"].lower():
@@ -141,8 +154,24 @@ class FaithfulnessMetric(Metric):
         """Simple token overlap baseline."""
         pred_tokens = set(prediction.lower().split())
         stopwords = {
-            "the", "a", "an", "is", "was", "are", "were", "be", "been",
-            "in", "on", "at", "to", "for", "of", "and", "or", "but",
+            "the",
+            "a",
+            "an",
+            "is",
+            "was",
+            "are",
+            "were",
+            "be",
+            "been",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "and",
+            "or",
+            "but",
         }
         pred_tokens = pred_tokens - stopwords
         if not pred_tokens:

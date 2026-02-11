@@ -93,7 +93,21 @@ In `iterative_rag`, query transform is now only applied on iteration 0. On later
 iterations, queries have been LLM-refined and are already document-like, making HyDE
 redundant. This saves 1 generator load per additional iteration.
 
-**File**: `agents/iterative_rag.py:273`
+**File**: `agents/iterative_rag.py:293`
+
+**Why iteration 0 only?** HyDE generates a hypothetical answer to convert a short
+question into a document-like text for dense retrieval. After iteration 0, the
+`_phase_evaluate_and_refine` method produces LLM-refined queries that are already
+descriptive and document-like (e.g., "Find information about X that explains Y and
+covers Z"). Applying HyDE to these refined queries would generate a hypothetical
+answer *of a hypothetical answer* — adding noise rather than signal, while costing
+an extra generator call per iteration. The same logic applies to MultiQuery: refined
+queries are already specific enough that generating reformulations adds little value.
+
+**Enforcement**: A `logger.debug()` message is emitted when the transform is skipped
+on iteration > 0, making the behavior visible in logs. The guard is at
+`_phase_embed_and_search()` — any future code that bypasses this method would need
+to implement its own guard.
 
 ### 4. Retrieval Cache for Transformed Queries (Medium Impact)
 

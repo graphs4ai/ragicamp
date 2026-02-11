@@ -118,40 +118,28 @@ Issues that degrade robustness under failure or waste resources.
 
 ### 2.1 SQLite connections never closed — resource leak
 
-- **Status:** `[ ]`
-- **Files:** `cache/embedding_store.py:83-94`, `cache/retrieval_store.py:85-94`
-- **Bug:** Connections opened lazily via `@property` but no `close()` is ever called. No `__enter__`/`__exit__`. `CachedEmbedder` at `cache/cached_embedder.py` holds a store reference but never closes it. WAL mode holds shared locks until process exit. In long-running studies with many subprocess spawns, WAL checkpoint may be delayed.
-- **Fix:**
-  1. Add `__enter__`/`__exit__` context manager methods to both stores.
-  2. Update callers to use `with` blocks.
-  3. Add `__del__` as a safety net.
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `cache/embedding_store.py`, `cache/retrieval_store.py`
+- **Bug:** Connections opened lazily via `@property` but no `close()` is ever called. No `__enter__`/`__exit__`. WAL mode holds shared locks until process exit.
+- **Fix:** Added `__enter__`/`__exit__` context manager methods and `__del__` safety net to both `EmbeddingStore` and `RetrievalStore`. Existing `close()` methods were already present but now properly wired.
 - **Impact:** Prevents connection leaks and potential WAL lock issues in long studies.
-- **Effort:** Medium
+- **Effort:** Small
 
 ### 2.2 CachedEmbedder._load_real_model unsafe context manager entry
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `cache/cached_embedder.py:201-205`
 - **Bug:** `self._real_ctx = self._provider.load(...)` followed by `self._real_ctx.__enter__()`. If `__enter__()` raises (GPU OOM), `self._real_ctx` is set but `__exit__` can't clean up properly. The `cleanup()` method checks `self._real_ctx is not None` and tries to `__exit__` an incompletely entered context.
-- **Fix:** Guard `__enter__()` with try/except; only set `self._real_ctx` on success:
-  ```python
-  ctx = self._provider.load(gpu_fraction=self._gpu_fraction)
-  try:
-      embedder = ctx.__enter__()
-  except Exception:
-      raise  # Don't store ctx
-  self._real_ctx = ctx
-  return embedder
-  ```
+- **Fix:** Reordered to only store `self._real_ctx` after successful `__enter__()`.
 - **Impact:** Prevents GPU resource leak on OOM during embedder initialization.
 - **Effort:** Small
 
 ### 2.3 FaithfulnessMetric and HallucinationMetric NLI pipelines never unloaded
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **Files:** `metrics/faithfulness.py:45-62`, `metrics/hallucination.py:38-54`
 - **Bug:** Both lazy-load an NLI pipeline onto GPU but never unload it. Unlike BERTScore/BLEURT which unload in `finally` blocks, these keep the model in GPU memory indefinitely after `compute()` returns.
-- **Fix:** Add `_unload_pipeline()` methods and call them in `compute()`'s `finally` block, following the BERTScore pattern.
+- **Fix:** Added `_unload_pipeline()` methods and `try/finally` in `compute()`, following the BERTScore pattern.
 - **Impact:** Prevents GPU memory waste after metrics computation.
 - **Effort:** Small
 
@@ -208,48 +196,60 @@ Issues that degrade robustness under failure or waste resources.
 
 ### 2.4f Cache stores use sequential `execute()` instead of `executemany()`
 
-- **Status:** `[ ]`
-- **Files:** `cache/embedding_store.py:202-215`, `cache/retrieval_store.py:199-215`
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `cache/embedding_store.py`, `cache/retrieval_store.py`
 - **Bug:** Batch insertion loops with individual `cursor.execute()` calls inside a transaction. SQLite's `executemany()` is significantly faster for bulk inserts.
-- **Fix:** Pre-build parameter tuples, use `cursor.executemany()`. Loses per-row `rowcount` tracking (minor).
+- **Fix:** Pre-build parameter tuples, use `cursor.executemany()`. Total `rowcount` from executemany replaces per-row tracking.
 - **Impact:** Minor — only affects cache-miss writes, and SQLite is not the bottleneck.
 - **Effort:** Small
 
 ### 2.5 ResourceManager.clear_gpu_memory() called every batch iteration in executor
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `execution/executor.py:210, 237`
 - **Bug:** `gc.collect()` + `torch.cuda.empty_cache()` after every single batch/item. `gc.collect()` is expensive with large Python object graphs. For vLLM-managed backends, `empty_cache()` is a no-op.
-- **Fix:** Move GPU cleanup to between-experiment boundaries, or gate behind a flag/interval (e.g., every N batches).
+- **Fix:** Gated behind interval — GPU memory cleared every 10 batches/items instead of every one.
 - **Impact:** Reduces overhead in batch processing. Most benefit with large batch counts.
 - **Effort:** Small
 
 ### 2.6 Checkpoint callback skips when batch crosses modulo boundary
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `execution/executor.py:206-208`
 - **Bug:** `len(results) % checkpoint_every == 0` can be skipped entirely when a batch adds multiple results at once (e.g., results jumps from 45 to 77, skipping checkpoint at 50/64).
-- **Fix:** Track `last_checkpoint_count` and trigger when `len(results) >= last_checkpoint_count + checkpoint_every`.
+- **Fix:** Replaced modulo check with `items_since_checkpoint >= checkpoint_every` counter that resets after each checkpoint.
 - **Impact:** Ensures checkpoints happen at expected intervals. Prevents data loss on crash.
 - **Effort:** Small
 
 ### 2.7 `_tee` thread in subprocess runner can lose output on timeout
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `execution/runner.py:345-356`
 - **Bug:** When `proc.wait()` raises `TimeoutExpired`, execution jumps to except block and `tee_thread` is never joined — it's daemonic and dies with the process, potentially losing the last buffered output (the most useful debugging info).
-- **Fix:** Join the tee thread in the timeout handler before logging the timeout error.
+- **Fix:** Added `tee_thread.join(timeout=5)` in the `TimeoutExpired` except block.
 - **Impact:** Preserves diagnostic output when experiments time out.
+- **Effort:** Small
+
+### 2.9 Enforce and document query transform iteration-0-only semantics
+
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `agents/iterative_rag.py`, `agents/base.py`, docs
+- **Issue:** Query transforms (HyDE, multiquery) should only run on iteration 0 of iterative agents. On later iterations the query has been LLM-refined and is already document-like — applying HyDE again is redundant and degrades retrieval quality. The iteration guard was added in 2.4b but is implicit (a single `if iteration == 0` check). There is no warning/error if someone tries to bypass this, and no documentation explaining why.
+- **Fix:**
+  1. Add a `logger.warning` (or raise) if `query_transformer` is invoked on iteration > 0.
+  2. Document the rationale in a docstring on the iteration loop and in `AGENT_PERFORMANCE_ANALYSIS.md`.
+  3. Consider adding a config-level `query_transform_iterations` parameter if future use cases need transform on specific iterations.
+- **Impact:** Prevents silent correctness bugs if the guard is accidentally removed during refactoring.
 - **Effort:** Small
 
 ### 2.8 `detect_state` and `check_health` read JSON files multiple times
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `state/health.py`
 - **Bug:** `check_health` calls `detect_state` which reads `state.json`, `results.json`, or `predictions.json`. Then `check_health` reads `questions.json` and `predictions.json` again. For experiments with large `predictions.json` (thousands of entries), this repeated parsing is expensive.
-- **Fix:** Refactor to load each file at most once, or cache parsed data within a single health check call.
+- **Fix:** Added `_load_json()` helper; `check_health` pre-loads `questions.json` and `predictions.json` once and reuses them. `detect_state` still loads independently (it's called standalone elsewhere), but `check_health`'s own redundant reads are eliminated.
 - **Impact:** Faster experiment resume and health checks.
-- **Effort:** Small–Medium
+- **Effort:** Small
 
 ---
 
@@ -713,8 +713,8 @@ These are not issues per se but architectural improvements for when the project 
 | Phase | Total | Done | Remaining |
 |-------|-------|------|-----------|
 | P0 — Data Integrity | 8 | 8 | 0 |
-| P1 — Reliability | 14 | 4 | 10 |
+| P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 1 | 9 |
 | P3 — Interface/Design | 14 | 0 | 14 |
 | P4 — Polish | 21 | 0 | 21 |
-| **Total** | **67** | **13** | **54** |
+| **Total** | **68** | **22** | **46** |

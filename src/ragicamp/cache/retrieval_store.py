@@ -114,6 +114,15 @@ class RetrievalStore:
             self._conn.close()
             self._conn = None
 
+    def __enter__(self) -> "RetrievalStore":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # Core get / put
     # ------------------------------------------------------------------
@@ -194,21 +203,22 @@ class RetrievalStore:
             return 0
 
         now = time.time()
-        written = 0
+
+        params = [
+            (retriever, _query_hash(query), top_k, json.dumps(results, separators=(",", ":")), now)
+            for query, results in zip(queries, results_per_query)
+        ]
 
         cursor = self.conn.cursor()
         try:
             cursor.execute("BEGIN")
-            for query, results in zip(queries, results_per_query):
-                h = _query_hash(query)
-                data = json.dumps(results, separators=(",", ":"))
-                cursor.execute(
-                    "INSERT OR IGNORE INTO retrieval_results "
-                    "(retriever, query_hash, top_k, data, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (retriever, h, top_k, data, now),
-                )
-                written += cursor.rowcount
+            cursor.executemany(
+                "INSERT OR IGNORE INTO retrieval_results "
+                "(retriever, query_hash, top_k, data, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                params,
+            )
+            written = cursor.rowcount
             cursor.execute("COMMIT")
         except Exception:
             cursor.execute("ROLLBACK")
@@ -217,7 +227,9 @@ class RetrievalStore:
         if written > 0:
             logger.debug(
                 "Retrieval cache: stored %d new entries for %s (top_k=%d)",
-                written, retriever, top_k,
+                written,
+                retriever,
+                top_k,
             )
 
         return written

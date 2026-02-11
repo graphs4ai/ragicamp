@@ -114,6 +114,15 @@ class EmbeddingStore:
             self._conn.close()
             self._conn = None
 
+    def __enter__(self) -> "EmbeddingStore":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # Core get / put
     # ------------------------------------------------------------------
@@ -197,21 +206,22 @@ class EmbeddingStore:
         embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
         dim = embeddings.shape[1]
         now = time.time()
-        written = 0
+
+        params = [
+            (model, _text_hash(text), dim, emb_row.tobytes(), now)
+            for text, emb_row in zip(texts, embeddings)
+        ]
 
         cursor = self.conn.cursor()
         try:
             cursor.execute("BEGIN")
-            for text, emb_row in zip(texts, embeddings):
-                h = _text_hash(text)
-                blob = emb_row.tobytes()
-                cursor.execute(
-                    "INSERT OR IGNORE INTO embeddings "
-                    "(model, text_hash, dim, data, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (model, h, dim, blob, now),
-                )
-                written += cursor.rowcount
+            cursor.executemany(
+                "INSERT OR IGNORE INTO embeddings "
+                "(model, text_hash, dim, data, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                params,
+            )
+            written = cursor.rowcount
             cursor.execute("COMMIT")
         except Exception:
             cursor.execute("ROLLBACK")
@@ -275,9 +285,7 @@ class EmbeddingStore:
             Number of entries deleted.
         """
         if model is not None:
-            cursor = self.conn.execute(
-                "DELETE FROM embeddings WHERE model = ?", (model,)
-            )
+            cursor = self.conn.execute("DELETE FROM embeddings WHERE model = ?", (model,))
         else:
             cursor = self.conn.execute("DELETE FROM embeddings")
 

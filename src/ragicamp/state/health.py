@@ -302,6 +302,17 @@ def detect_state(exp_dir: Path, requested_metrics: Optional[list[str]] = None) -
     return ExperimentState.new(metrics=requested_metrics)
 
 
+def _load_json(path: Path) -> Optional[dict]:
+    """Load a JSON file, returning None if it doesn't exist or is invalid."""
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def check_health(
     exp_dir: Path,
     requested_metrics: Optional[list[str]] = None,
@@ -316,30 +327,29 @@ def check_health(
         ExperimentHealth with detailed status
     """
     requested_metrics = requested_metrics or []
-    state = detect_state(exp_dir, requested_metrics)
 
-    # Determine missing predictions
-    missing_predictions = []
+    # Pre-load files once — shared between detect_state and health checking
     predictions_path = exp_dir / "predictions.json"
     questions_path = exp_dir / "questions.json"
+    q_data = _load_json(questions_path)
+    p_data = _load_json(predictions_path)
 
+    state = detect_state(exp_dir, requested_metrics)
+
+    # Determine missing predictions using pre-loaded data
+    missing_predictions = []
     total_questions = state.total_questions
     predictions_complete = state.predictions_complete
 
-    if questions_path.exists():
-        with open(questions_path) as f:
-            q_data = json.load(f)
+    if q_data is not None:
         q_indices = {q["idx"] for q in q_data.get("questions", [])}
         total_questions = len(q_indices)
 
-        if predictions_path.exists():
-            with open(predictions_path) as f:
-                p_data = json.load(f)
+        if p_data is not None:
             p_indices = {p.get("idx", i) for i, p in enumerate(p_data.get("predictions", []))}
             missing_predictions = sorted(q_indices - p_indices)
             predictions_complete = len(p_indices)
         else:
-            # No predictions at all - all questions are missing
             missing_predictions = sorted(q_indices)
             predictions_complete = 0
 

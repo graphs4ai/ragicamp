@@ -6,7 +6,10 @@ Complementary to faithfulness - focuses on identifying problematic outputs.
 
 from typing import Any
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+
+logger = get_logger(__name__)
 
 
 class HallucinationMetric(Metric):
@@ -56,6 +59,7 @@ class HallucinationMetric(Metric):
     def _has_cuda(self) -> bool:
         try:
             import torch
+
             return torch.cuda.is_available()
         except ImportError:
             return False
@@ -78,18 +82,19 @@ class HallucinationMetric(Metric):
         Returns:
             Dict with "hallucination" aggregate score (0=grounded, 1=hallucinated)
         """
-        scores = []
-        for i, prediction in enumerate(predictions):
-            ctx = contexts[i] if contexts and i < len(contexts) else None
-            scores.append(self._score_single(prediction, ctx))
+        try:
+            scores = []
+            for i, prediction in enumerate(predictions):
+                ctx = contexts[i] if contexts and i < len(contexts) else None
+                scores.append(self._score_single(prediction, ctx))
 
-        self._last_per_item = scores
-        avg = sum(scores) / len(scores) if scores else 0.0
-        return {"hallucination": avg}
+            self._last_per_item = scores
+            avg = sum(scores) / len(scores) if scores else 0.0
+            return {"hallucination": avg}
+        finally:
+            self._unload_pipeline()
 
-    def _score_single(
-        self, prediction: str, context: list[str] | None
-    ) -> float:
+    def _score_single(self, prediction: str, context: list[str] | None) -> float:
         """Score a single prediction."""
         if not context:
             return 1.0
@@ -105,6 +110,18 @@ class HallucinationMetric(Metric):
         else:
             raise ValueError(f"Unknown hallucination method: {self.method}")
 
+    def _unload_pipeline(self) -> None:
+        """Unload the NLI pipeline to free GPU memory."""
+        if self._nli_pipeline is not None:
+            del self._nli_pipeline
+            self._nli_pipeline = None
+            try:
+                from ragicamp.utils.resource_manager import ResourceManager
+
+                ResourceManager.clear_gpu_memory()
+            except Exception:
+                pass
+
     def _detect_nli_hallucination(self, prediction: str, context: list[str]) -> float:
         """Detect hallucination using NLI."""
         nli = self._get_nli_pipeline()
@@ -117,9 +134,7 @@ class HallucinationMetric(Metric):
                 continue
 
             # A4 fix: pass premise/hypothesis as dict pair, not literal [SEP]
-            result = nli(
-                {"text": passage, "text_pair": prediction}, top_k=None
-            )
+            result = nli({"text": passage, "text_pair": prediction}, top_k=None)
 
             for label_result in result:
                 label = label_result["label"].lower()
@@ -138,9 +153,32 @@ class HallucinationMetric(Metric):
         """Simple token-based hallucination detection."""
         pred_tokens = set(prediction.lower().split())
         stopwords = {
-            "the", "a", "an", "is", "was", "are", "were", "be", "been",
-            "in", "on", "at", "to", "for", "of", "and", "or", "but",
-            "this", "that", "these", "those", "it", "its", "they", "their",
+            "the",
+            "a",
+            "an",
+            "is",
+            "was",
+            "are",
+            "were",
+            "be",
+            "been",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "and",
+            "or",
+            "but",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "they",
+            "their",
         }
         content_tokens = pred_tokens - stopwords
         if not content_tokens:
