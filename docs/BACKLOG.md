@@ -259,7 +259,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.1 IterativeRAGAgent.run() — zero functional tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `agents/iterative_rag.py` (~535 lines)
 - **Gap:** The multi-iteration loop, sufficiency checking, query refinement, document merging, convergence, and `_apply_reranking` are all untested. Only factory wiring tests verify the agent is _created_ but never _executed_.
 - **Tests needed:**
@@ -273,7 +273,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.2 SelfRAGAgent.run() — zero functional tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `agents/self_rag.py` (~523 lines)
 - **Gap:** Adaptive retrieval pipeline (confidence assessment, retrieval decision, verification, fallback) entirely untested. `_parse_confidence()` regex parsing and `_parse_verification()` response parsing have no tests.
 - **Tests needed:**
@@ -338,7 +338,7 @@ Missing tests that block safe refactoring of Phase 4+ items.
 
 ### 3.7 HybridSearcher — no functional tests
 
-- **Status:** `[ ]`
+- **Status:** `[x]` Fixed 2026-02-11
 - **File:** `retrievers/hybrid.py`
 - **Gap:** The alpha-weighted dense+sparse fusion and RRF merge logic is only wiring-tested (mocked). No functional test of the actual fusion algorithm.
 - **Tests needed:**
@@ -714,7 +714,7 @@ These are not issues per se but architectural improvements for when the project 
 |-------|-------|------|-----------|
 | P0 — Data Integrity | 8 | 8 | 0 |
 | P1 — Reliability | 15 | 13 | 2 |
-| P2 — Test Coverage | 10 | 5 | 5 |
+| P2 — Test Coverage | 10 | 8 | 2 |
 | P3 — Interface/Design | 14 | 0 | 14 |
 | P4 — Polish | 21 | 0 | 21 |
-| **Total** | **68** | **26** | **42** |
+| **Total** | **68** | **29** | **39** |
