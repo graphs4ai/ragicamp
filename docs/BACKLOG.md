@@ -502,17 +502,15 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.1 Inconsistent logging — `import logging` vs `get_logger`
 
-- **Status:** `[ ]`
-- **Files:** `cli/commands.py:11`, `state/health.py:11`
-- **Fix:** Use `from ragicamp.core.logging import get_logger` consistently.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `cli/commands.py`, `state/health.py`
+- **Fix:** Replaced `import logging` / `logging.getLogger` with `get_logger` from `core.logging`.
 
 ### 5.2 Mixed `Optional[X]` and `X | None` syntax
 
-- **Status:** `[ ]`
-- **Files:** Various (e.g., `execution/runner.py` imports `Optional` but uses `X | None` on line 147)
-- **Fix:** Use `X | None` consistently (Python 3.10+ target).
-- **Effort:** Small (grep and replace)
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `execution/runner.py`
+- **Fix:** Replaced remaining `Optional[X]` with `X | None` and removed `Optional` import.
 
 ### 5.3 `gradient_checkpointing_enable` called during inference
 
@@ -541,17 +539,15 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.7 Magic numbers for context truncation
 
-- **Status:** `[ ]`
-- **Files:** `agents/iterative_rag.py:328` (`2000`), `agents/self_rag.py:381` (`3000`)
-- **Fix:** Define `MAX_CONTEXT_CHARS` in `core/constants.py` or make configurable via `agent_params`.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **Files:** `core/constants.py`, `agents/iterative_rag.py`, `agents/self_rag.py`
+- **Fix:** Added `Defaults.MAX_CONTEXT_CHARS` (2000) and `Defaults.MAX_VERIFICATION_CONTEXT_CHARS` (3000) constants. Also added `MAX_INPUT_LENGTH` (4096) for tokenizer truncation.
 
 ### 5.8 `RerankerWrapper.rerank` uses bare `list` type hints
 
-- **Status:** `[ ]`
-- **File:** `models/providers/reranker.py:91-96, 128-133`
-- **Fix:** Change to `list[Document]` and `list[list[Document]]`.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `models/providers/reranker.py`
+- **Fix:** Added `from __future__ import annotations` and TYPE_CHECKING import for `Document`. Updated all 4 bare `list` params to `list[Document]` / `list[list[Document]]`.
 
 ### 5.9 Duplicate `MODELS` dict in CrossEncoderReranker and RerankerProvider
 
@@ -595,10 +591,9 @@ Structural issues that hurt maintainability and extensibility.
 
 ### 5.15 `HFGeneratorWrapper.batch_generate` hardcoded `max_length=4096`
 
-- **Status:** `[ ]`
-- **File:** `models/providers/generator.py:216`
-- **Fix:** Pull from config or make a named constant.
-- **Effort:** Small
+- **Status:** `[x]` Fixed 2026-02-11
+- **File:** `models/providers/generator.py`
+- **Fix:** Replaced `4096` with `Defaults.MAX_INPUT_LENGTH`.
 
 ### 5.16 `sys.path` mutation in tests
 
@@ -680,5 +675,5 @@ These are not issues per se but architectural improvements for when the project 
 | P1 — Reliability | 15 | 13 | 2 |
 | P2 — Test Coverage | 10 | 8 | 2 |
 | P3 — Interface/Design | 14 | 7 | 7 |
-| P4 — Polish | 21 | 5 | 16 |
-| **Total** | **68** | **41** | **27** |
+| P4 — Polish | 21 | 10 | 11 |
+| **Total** | **68** | **46** | **22** |
