@@ -108,6 +108,11 @@ class Defaults:
     MAX_TOKENS = 256
     TEMPERATURE = 0.7
     TOP_P = 1.0
+    MAX_INPUT_LENGTH = 4096  # Max tokenizer input length for HF models
+
+    # Context truncation (characters) for agent prompts
+    MAX_CONTEXT_CHARS = 2000
+    MAX_VERIFICATION_CONTEXT_CHARS = 3000
 
     # Retrieval
     TOP_K = 5

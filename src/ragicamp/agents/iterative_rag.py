@@ -25,6 +25,7 @@ from ragicamp.agents.base import (
     batch_transform_embed_and_search,
     is_hybrid_searcher,
 )
+from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
 from ragicamp.core.step_types import (
     BATCH_GENERATE,
@@ -358,7 +359,7 @@ class IterativeRAGAgent(Agent):
                 REFINEMENT_PROMPT.format(
                     query=state.query.text,
                     previous_query=state.current_text,
-                    context=context[:2000],
+                    context=context[:Defaults.MAX_CONTEXT_CHARS],
                 )
             )
 

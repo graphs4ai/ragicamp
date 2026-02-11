@@ -1,11 +1,17 @@
 """Reranker provider with lazy loading and lifecycle management."""
 
+from __future__ import annotations
+
 import copy
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import TYPE_CHECKING
 
 from ragicamp.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from ragicamp.core.types import Document
 from ragicamp.utils.resource_manager import ResourceManager
 
 from .base import ModelProvider
@@ -50,7 +56,7 @@ class RerankerProvider(ModelProvider):
         return self.MODELS.get(self.config.model_name, self.config.model_name)
 
     @contextmanager
-    def load(self, gpu_fraction: float | None = None) -> Iterator["RerankerWrapper"]:
+    def load(self, gpu_fraction: float | None = None) -> Iterator[RerankerWrapper]:
         """Load reranker, yield it, then unload.
 
         Supports ref-counting: nested ``with provider.load()`` calls reuse
@@ -109,9 +115,9 @@ class RerankerWrapper:
     def rerank(
         self,
         query: str,
-        documents: list,
+        documents: list[Document],
         top_k: int,
-    ) -> list:
+    ) -> list[Document]:
         """Rerank documents based on query relevance.
 
         Args:
@@ -146,9 +152,9 @@ class RerankerWrapper:
     def batch_rerank(
         self,
         queries: list[str],
-        documents_list: list[list],
+        documents_list: list[list[Document]],
         top_k: int,
-    ) -> list[list]:
+    ) -> list[list[Document]]:
         """Batch rerank for multiple queries.
 
         Args:
@@ -197,6 +203,7 @@ class RerankerWrapper:
     def unload(self):
         """Unload model."""
         import gc
+
         import torch
 
         del self._model

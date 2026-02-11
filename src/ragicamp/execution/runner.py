@@ -19,7 +19,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Optional
+from typing import IO, Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.spec import ExperimentSpec
@@ -37,7 +37,7 @@ def run_metrics_only(
     output_path: Path,
     metrics: list[str],
     judge_model: Any = None,
-    spec: Optional["ExperimentSpec"] = None,
+    spec: "ExperimentSpec | None" = None,
 ) -> str:
     """Run metrics computation only - no model needed.
 

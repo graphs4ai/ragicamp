@@ -1,9 +1,9 @@
 """Generator provider with lazy loading and lifecycle management."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -230,7 +230,7 @@ class HFGeneratorWrapper(Generator):
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=4096,
+            max_length=Defaults.MAX_INPUT_LENGTH,
         )
 
         # Move to model device
@@ -255,6 +255,7 @@ class HFGeneratorWrapper(Generator):
 
     def unload(self):
         import gc
+
         import torch
 
         del self._model

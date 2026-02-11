@@ -7,15 +7,14 @@ This module provides health detection and diagnosis:
 """
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
+from ragicamp.core.logging import get_logger
 from ragicamp.state.experiment_state import ExperimentPhase, ExperimentState
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -30,7 +29,7 @@ class ExperimentHealth:
     missing_predictions: list[int]  # Question indices missing predictions
     metrics_computed: list[str]
     metrics_missing: list[str]
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def can_resume(self) -> bool:
@@ -47,7 +46,7 @@ class ExperimentHealth:
         return True
 
     @property
-    def resume_phase(self) -> Optional[ExperimentPhase]:
+    def resume_phase(self) -> ExperimentPhase | None:
         """Determine which phase to resume from."""
         if self.is_complete:
             return None
@@ -197,7 +196,7 @@ def _validate_state_artifacts(state: ExperimentState, exp_dir: Path) -> Experime
     return state
 
 
-def detect_state(exp_dir: Path, requested_metrics: Optional[list[str]] = None) -> ExperimentState:
+def detect_state(exp_dir: Path, requested_metrics: list[str] | None = None) -> ExperimentState:
     """Detect experiment state from files on disk.
 
     Args:
@@ -302,7 +301,7 @@ def detect_state(exp_dir: Path, requested_metrics: Optional[list[str]] = None) -
     return ExperimentState.new(metrics=requested_metrics)
 
 
-def _load_json(path: Path) -> Optional[dict]:
+def _load_json(path: Path) -> dict | None:
     """Load a JSON file, returning None if it doesn't exist or is invalid."""
     if not path.exists():
         return None
@@ -315,7 +314,7 @@ def _load_json(path: Path) -> Optional[dict]:
 
 def check_health(
     exp_dir: Path,
-    requested_metrics: Optional[list[str]] = None,
+    requested_metrics: list[str] | None = None,
 ) -> ExperimentHealth:
     """Check health of an experiment.
 

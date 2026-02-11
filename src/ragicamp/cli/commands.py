@@ -2,13 +2,14 @@
 
 import argparse
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-logger = logging.getLogger(__name__)
+from ragicamp.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
