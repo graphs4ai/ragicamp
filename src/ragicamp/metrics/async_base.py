@@ -21,6 +21,7 @@ Example:
 """
 
 import asyncio
+import random
 import time
 from abc import abstractmethod
 from typing import Any
@@ -49,11 +50,14 @@ class AsyncAPIMetric(Metric):
 
     # Default RPM limit for API calls (0 = unlimited)
     DEFAULT_RPM_LIMIT: int = 1200
+    # Retry config for transient errors (429, 5xx)
+    MAX_RETRIES: int = 5
+    RETRY_BASE_DELAY: float = 2.0
 
     def __init__(
         self,
         name: str,
-        max_concurrent: int = 10,
+        max_concurrent: int = 5,
         rpm_limit: int | None = None,
         show_progress: bool = True,
         **kwargs: Any,
@@ -62,7 +66,7 @@ class AsyncAPIMetric(Metric):
 
         Args:
             name: Metric identifier
-            max_concurrent: Maximum concurrent API calls (default: 10)
+            max_concurrent: Maximum concurrent API calls (default: 5)
             rpm_limit: Maximum requests per minute (default: 1200, 0 = unlimited)
             show_progress: Show progress bar during computation
             **kwargs: Additional configuration
@@ -132,22 +136,34 @@ class AsyncAPIMetric(Metric):
             ref: str,
             q: str | None,
         ) -> dict[str, float]:
-            """Compute with concurrency and RPM rate limiting."""
+            """Compute with concurrency, RPM rate limiting, and retry on 429."""
             async with semaphore:
-                # Enforce RPM limit by spacing out request starts
-                if rpm_lock is not None:
-                    async with rpm_lock:
-                        now = time.monotonic()
-                        wait = last_request_time[0] + min_interval - now
-                        if wait > 0:
-                            await asyncio.sleep(wait)
-                        last_request_time[0] = time.monotonic()
-                try:
-                    return await self.acompute_single(pred, ref, q, **kwargs)
-                except Exception as e:
-                    # Return error score but don't crash the batch
-                    logger.warning("Error computing metric for item %d: %s", idx, e)
-                    return {self.name: 0.0, f"{self.name}_error": 1.0}
+                for attempt in range(self.MAX_RETRIES + 1):
+                    # Enforce RPM limit by spacing out request starts
+                    if rpm_lock is not None:
+                        async with rpm_lock:
+                            now = time.monotonic()
+                            wait = last_request_time[0] + min_interval - now
+                            if wait > 0:
+                                await asyncio.sleep(wait)
+                            last_request_time[0] = time.monotonic()
+                    try:
+                        return await self.acompute_single(pred, ref, q, **kwargs)
+                    except Exception as e:
+                        is_retryable = "429" in str(e) or "5" == str(e)[:1]
+                        if is_retryable and attempt < self.MAX_RETRIES:
+                            delay = self.RETRY_BASE_DELAY * (2 ** attempt) + random.random()
+                            logger.info(
+                                "Item %d: 429/5xx, retry %d/%d in %.1fs",
+                                idx, attempt + 1, self.MAX_RETRIES, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        # Non-retryable or exhausted retries
+                        logger.warning("Error computing metric for item %d: %s", idx, e)
+                        return {self.name: 0.0, f"{self.name}_error": 1.0}
+            # Should never reach here, but satisfy type checker
+            return {self.name: 0.0, f"{self.name}_error": 1.0}
 
         # Build tasks
         tasks = []
