@@ -21,6 +21,7 @@ Example:
 """
 
 import asyncio
+import time
 from abc import abstractmethod
 from typing import Any
 
@@ -46,10 +47,14 @@ class AsyncAPIMetric(Metric):
         show_progress: Whether to show progress bar
     """
 
+    # Default RPM limit for API calls (0 = unlimited)
+    DEFAULT_RPM_LIMIT: int = 1200
+
     def __init__(
         self,
         name: str,
         max_concurrent: int = 10,
+        rpm_limit: int | None = None,
         show_progress: bool = True,
         **kwargs: Any,
     ):
@@ -58,11 +63,13 @@ class AsyncAPIMetric(Metric):
         Args:
             name: Metric identifier
             max_concurrent: Maximum concurrent API calls (default: 10)
+            rpm_limit: Maximum requests per minute (default: 1200, 0 = unlimited)
             show_progress: Show progress bar during computation
             **kwargs: Additional configuration
         """
         super().__init__(name, **kwargs)
         self.max_concurrent = max_concurrent
+        self.rpm_limit = rpm_limit if rpm_limit is not None else self.DEFAULT_RPM_LIMIT
         self.show_progress = show_progress
 
     @abstractmethod
@@ -108,14 +115,33 @@ class AsyncAPIMetric(Metric):
         """
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
+        # Token-bucket rate limiter for RPM enforcement
+        rpm = self.rpm_limit
+        if rpm > 0:
+            min_interval = 60.0 / rpm  # seconds between requests
+            last_request_time: list[float] = [0.0]  # mutable container for closure
+            rpm_lock = asyncio.Lock()
+        else:
+            min_interval = 0.0
+            last_request_time = [0.0]
+            rpm_lock = None
+
         async def rate_limited_compute(
             idx: int,
             pred: str,
             ref: str,
             q: str | None,
         ) -> dict[str, float]:
-            """Compute with rate limiting."""
+            """Compute with concurrency and RPM rate limiting."""
             async with semaphore:
+                # Enforce RPM limit by spacing out request starts
+                if rpm_lock is not None:
+                    async with rpm_lock:
+                        now = time.monotonic()
+                        wait = last_request_time[0] + min_interval - now
+                        if wait > 0:
+                            await asyncio.sleep(wait)
+                        last_request_time[0] = time.monotonic()
                 try:
                     return await self.acompute_single(pred, ref, q, **kwargs)
                 except Exception as e:
