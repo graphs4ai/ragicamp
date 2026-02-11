@@ -9,110 +9,18 @@ Tests multi-iteration query refinement with batched operations:
 - Proper result structure and metadata
 """
 
-import numpy as np
 import pytest
 
 from ragicamp.agents.base import Query
 from ragicamp.agents.iterative_rag import IterativeRAGAgent
-from ragicamp.core.types import Document, SearchResult
-
-
-class FakeEmbedder:
-    """Mock embedder that returns fixed-dimension random vectors."""
-
-    def batch_encode(self, texts):
-        return np.random.randn(len(texts), 4).astype("float32")
-
-    def get_dimension(self):
-        return 4
-
-
-class FakeGenerator:
-    """Mock generator with configurable responses based on prompt content."""
-
-    def __init__(self, responses=None):
-        self._responses = responses or {}
-        self._call_count = 0
-        self.model_name = "fake-generator"
-
-    def batch_generate(self, prompts, **kwargs):
-        self._call_count += 1
-        results = []
-        for p in prompts:
-            # Check for configured responses based on prompt content
-            matched = False
-            for key, val in self._responses.items():
-                if key in p:
-                    results.append(val)
-                    matched = True
-                    break
-            if not matched:
-                results.append("default answer")
-        return results
-
-
-class FakeProvider:
-    """Mock provider that yields a model in context manager."""
-
-    def __init__(self, model, model_name="fake"):
-        self._model = model
-        self.model_name = model_name
-        self.config = type("C", (), {"model_name": model_name})()
-
-    def load(self, **kwargs):
-        """Context manager that yields the model."""
-
-        class _CM:
-            def __init__(self, model):
-                self._model = model
-
-            def __enter__(self):
-                return self._model
-
-            def __exit__(self, *args):
-                pass
-
-        return _CM(self._model)
-
-
-class FakeIndex:
-    """Mock search backend that returns predefined documents."""
-
-    def __init__(self, docs=None):
-        if docs is None:
-            self._docs = [
-                Document(
-                    id=f"doc{i}",
-                    text=f"Document {i} content about topic",
-                    score=0.9 - i * 0.1,
-                )
-                for i in range(5)
-            ]
-        else:
-            self._docs = docs
-
-    def batch_search(self, embeddings, top_k, **kwargs):
-        return [
-            [
-                SearchResult(document=d, score=d.score, rank=i + 1)
-                for i, d in enumerate(self._docs[:top_k])
-            ]
-            for _ in range(len(embeddings))
-        ]
-
-
-class FakeQueryTransformer:
-    """Mock query transformer that tracks calls."""
-
-    def __init__(self):
-        self.call_count = 0
-        self.last_queries = []
-
-    def batch_transform(self, queries):
-        self.call_count += 1
-        self.last_queries = queries
-        # Return each query as-is (no expansion)
-        return [[q] for q in queries]
+from ragicamp.core.types import Document
+from tests.shared_mocks import (
+    FakeEmbedder,
+    FakeGenerator,
+    FakeIndex,
+    FakeProvider,
+    FakeQueryTransformer,
+)
 
 
 class TestIterativeRAGInitialization:

@@ -14,76 +14,11 @@ Key behaviors tested:
 - Result metadata includes confidence, used_retrieval, num_docs, verification
 """
 
-from contextlib import contextmanager
-
-import numpy as np
 import pytest
 
 from ragicamp.agents.base import Query
 from ragicamp.agents.self_rag import SelfRAGAgent
-from ragicamp.core.types import Document, SearchResult
-
-
-class FakeGenerator:
-    def __init__(self, responses=None):
-        self._responses = responses or {}
-        self._call_count = 0
-        self._prompts_seen = []
-
-    def batch_generate(self, prompts, **kwargs):
-        self._call_count += 1
-        results = []
-        for p in prompts:
-            self._prompts_seen.append(p)
-            matched = False
-            for key, val in self._responses.items():
-                if key in p:
-                    results.append(val)
-                    matched = True
-                    break
-            if not matched:
-                results.append("default answer")
-        return results
-
-
-class FakeEmbedder:
-    def batch_encode(self, texts):
-        return np.random.randn(len(texts), 4).astype("float32")
-
-    def get_dimension(self):
-        return 4
-
-
-class FakeProvider:
-    def __init__(self, model, model_name="fake"):
-        self._model = model
-        self.model_name = model_name
-        self.config = type("C", (), {"model_name": model_name})()
-
-    @contextmanager
-    def load(self, **kwargs):
-        yield self._model
-
-
-class FakeIndex:
-    def __init__(self, docs=None):
-        self._docs = docs or [
-            Document(
-                id=f"doc{i}",
-                text=f"Document {i} about the topic",
-                score=0.9 - i * 0.1,
-            )
-            for i in range(5)
-        ]
-
-    def batch_search(self, embeddings, top_k, **kwargs):
-        return [
-            [
-                SearchResult(document=d, score=d.score, rank=i + 1)
-                for i, d in enumerate(self._docs[:top_k])
-            ]
-            for _ in range(len(embeddings))
-        ]
+from tests.shared_mocks import FakeEmbedder, FakeGenerator, FakeIndex, FakeProvider
 
 
 class TestConfidenceParsing:

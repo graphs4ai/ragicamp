@@ -24,10 +24,19 @@ _NOTEBOOKS_DIR = str(Path(__file__).resolve().parent.parent / "notebooks")
 if _NOTEBOOKS_DIR not in sys.path:
     sys.path.insert(0, _NOTEBOOKS_DIR)
 
-# Import RAGiCamp components
-from ragicamp.core.types import Document
-from ragicamp.datasets.base import QADataset, QAExample
-from ragicamp.metrics.base import Metric
+# Import RAGiCamp components (E402: after sys.path mutation above)
+from ragicamp.core.types import Document  # noqa: E402
+from ragicamp.datasets.base import QADataset, QAExample  # noqa: E402
+from ragicamp.metrics.base import Metric  # noqa: E402
+
+# Import shared agent mocks (defined in tests/shared_mocks.py)
+from tests.shared_mocks import (  # noqa: E402, F401
+    FakeEmbedder,
+    FakeGenerator,
+    FakeIndex,
+    FakeProvider,
+    FakeQueryTransformer,
+)
 
 # === Mock Model ===
 
@@ -290,6 +299,44 @@ def mock_metrics() -> list[MockMetric]:
         MockMetric(name="mock_em"),
         MockMetric(name="mock_f1"),
     ]
+
+
+# === Shared Agent Mock Fixtures ===
+#
+# The mock classes (FakeGenerator, FakeEmbedder, FakeProvider, FakeIndex,
+# FakeQueryTransformer) are defined in tests/shared_mocks.py and imported above.
+# Test files can either use the fixtures below or import the classes directly
+# from tests.shared_mocks.
+
+
+@pytest.fixture
+def fake_generator():
+    """Create a FakeGenerator with default (no pattern) responses."""
+    return FakeGenerator()
+
+
+@pytest.fixture
+def fake_embedder():
+    """Create a FakeEmbedder with default 4-dim output."""
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def fake_index():
+    """Create a FakeIndex with 5 default documents."""
+    return FakeIndex()
+
+
+@pytest.fixture
+def fake_generator_provider(fake_generator):
+    """Create a FakeProvider wrapping a FakeGenerator."""
+    return FakeProvider(fake_generator, "fake-generator")
+
+
+@pytest.fixture
+def fake_embedder_provider(fake_embedder):
+    """Create a FakeProvider wrapping a FakeEmbedder."""
+    return FakeProvider(fake_embedder, "fake-embedder")
 
 
 # === Temporary Files ===
