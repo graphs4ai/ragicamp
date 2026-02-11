@@ -353,7 +353,13 @@ def _build_rag_specs(
         reranker_cfgs = [{"enabled": False, "name": "none"}]
 
     for model, ret_name, top_k, prompt, qt, rr_cfg, dataset in cartesian(
-        models, retriever_names, top_k_values, prompts, query_transforms, reranker_cfgs, datasets,
+        models,
+        retriever_names,
+        top_k_values,
+        prompts,
+        query_transforms,
+        reranker_cfgs,
+        datasets,
     ):
         ret_cfg = retriever_configs.get(ret_name, {})
         embedding_index = ret_cfg.get("embedding_index")
@@ -377,7 +383,14 @@ def _build_rag_specs(
 
         for rrf_k in rrf_k_list:
             name = name_rag(
-                model, prompt, dataset, ret_name, top_k, qt, rr_name, rrf_k=rrf_k,
+                model,
+                prompt,
+                dataset,
+                ret_name,
+                top_k,
+                qt,
+                rr_name,
+                rrf_k=rrf_k,
             )
 
             specs.append(

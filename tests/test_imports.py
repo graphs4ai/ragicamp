@@ -153,7 +153,7 @@ class TestAgentImports:
 
     def test_import_query_and_result(self):
         """Test importing Query and AgentResult."""
-        from ragicamp.agents import Query, AgentResult
+        from ragicamp.agents import AgentResult, Query
 
         assert Query is not None
         assert AgentResult is not None

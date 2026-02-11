@@ -196,12 +196,14 @@ def plan_repairs(study_path: Path) -> list[dict]:
             # No metadata.json at all — try to create one from directory name
             repairs = _plan_missing_metadata(exp_dir.name)
             if repairs:
-                actions.append({
-                    "dir_name": exp_dir.name,
-                    "dir_path": exp_dir,
-                    "create_new": True,
-                    "repairs": repairs,
-                })
+                actions.append(
+                    {
+                        "dir_name": exp_dir.name,
+                        "dir_path": exp_dir,
+                        "create_new": True,
+                        "repairs": repairs,
+                    }
+                )
             continue
 
         repairs = []
@@ -216,7 +218,9 @@ def plan_repairs(study_path: Path) -> list[dict]:
         # --- Fix 1b: Missing type ---
         if not metadata.get("type"):
             exp_type = _infer_exp_type(exp_dir.name)
-            repairs.append(("type", metadata.get("type", ""), exp_type, "inferred from directory name"))
+            repairs.append(
+                ("type", metadata.get("type", ""), exp_type, "inferred from directory name")
+            )
 
         # --- Fix 1c: Missing prompt ---
         if not metadata.get("prompt"):
@@ -249,12 +253,14 @@ def plan_repairs(study_path: Path) -> list[dict]:
             repairs.append(("name", current_name, exp_dir.name, "match directory name"))
 
         if repairs:
-            actions.append({
-                "dir_name": exp_dir.name,
-                "dir_path": exp_dir,
-                "create_new": False,
-                "repairs": repairs,
-            })
+            actions.append(
+                {
+                    "dir_name": exp_dir.name,
+                    "dir_path": exp_dir,
+                    "create_new": False,
+                    "repairs": repairs,
+                }
+            )
 
     return actions
 
@@ -373,7 +379,7 @@ def main():
         print(f"  {count:3d}x  {key}")
 
     # Print details
-    print(f"\nDetails:\n")
+    print("\nDetails:\n")
     for action in actions:
         prefix = "[CREATE]" if action["create_new"] else "[UPDATE]"
         print(f"  {prefix} {action['dir_name']}")

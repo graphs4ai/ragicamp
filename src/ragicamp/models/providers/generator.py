@@ -204,7 +204,7 @@ class VLLMGeneratorWrapper(Generator):
 
             if dist.is_initialized():
                 dist.destroy_process_group()
-        except Exception:
+        except (RuntimeError, ImportError):
             pass
         del self._llm
 

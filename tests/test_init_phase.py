@@ -6,7 +6,6 @@ so that even failed/stalled experiments have complete metadata.
 
 import json
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,7 +13,6 @@ import pytest
 from ragicamp.execution.phases.init_phase import InitHandler
 from ragicamp.spec.experiment import ExperimentSpec
 from ragicamp.state import ExperimentPhase, ExperimentState
-
 
 # ---------------------------------------------------------------------------
 # Helpers

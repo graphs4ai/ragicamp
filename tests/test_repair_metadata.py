@@ -7,22 +7,19 @@ Verifies that the repair logic correctly:
 - Creates metadata.json for experiments missing it
 """
 
+# Import repair helpers — the script is not a package, so we add its dir to
+# sys.path and import the module.
 import json
+import sys
 from pathlib import Path
 
 import pytest
-
-# Import repair helpers — the script is not a package, so we add its dir to
-# sys.path and import the module.
-import importlib
-import sys
 
 _scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
 
 import repair_metadata as rm  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -163,7 +160,9 @@ class TestInferPrompt:
         assert rm._infer_prompt("rag_vllm_test_k5_concise_strict_nq", "nq") == "concise_strict"
 
     def test_extractive_quoted(self):
-        assert rm._infer_prompt("rag_vllm_test_k5_extractive_quoted_nq", "nq") == "extractive_quoted"
+        assert (
+            rm._infer_prompt("rag_vllm_test_k5_extractive_quoted_nq", "nq") == "extractive_quoted"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +199,10 @@ class TestPlanRepairs:
         _create_experiment(
             study_dir,
             "rag_vllm_google_gemma29bit_dense_bge_m3_512_k5_multiquery_fewshot_1_hotpotqa",
-            metadata={"name": "rag_vllm_google_gemma29bit_dense_bge_m3_512_k5_multiquery_fewshot_1_hotpotqa", "model": ""},
+            metadata={
+                "name": "rag_vllm_google_gemma29bit_dense_bge_m3_512_k5_multiquery_fewshot_1_hotpotqa",
+                "model": "",
+            },
         )
 
         actions = rm.plan_repairs(study_dir)
@@ -256,7 +258,10 @@ class TestPlanRepairs:
 
     def test_missing_metadata_creates_new(self, study_dir):
         """Experiment with no metadata.json should get one created."""
-        exp_dir = study_dir / "rag_vllm_metallama_Llama3.23BInstruct_dense_bge_large_512_k10_concise_triviaqa"
+        exp_dir = (
+            study_dir
+            / "rag_vllm_metallama_Llama3.23BInstruct_dense_bge_large_512_k10_concise_triviaqa"
+        )
         exp_dir.mkdir()
 
         actions = rm.plan_repairs(study_dir)
@@ -318,7 +323,11 @@ class TestExecuteRepairs:
         actions = rm.plan_repairs(study_dir)
         rm.execute_repairs(actions)
 
-        meta_path = study_dir / "rag_vllm_microsoft_Phi3mini4kinstruct_dense_bge_large_512_k3_hyde_concise_triviaqa" / "metadata.json"
+        meta_path = (
+            study_dir
+            / "rag_vllm_microsoft_Phi3mini4kinstruct_dense_bge_large_512_k3_hyde_concise_triviaqa"
+            / "metadata.json"
+        )
         metadata = json.loads(meta_path.read_text())
         assert metadata["model"] == "vllm:microsoft/Phi-3-mini-4k-instruct"
 
@@ -388,8 +397,12 @@ class TestExecuteRepairs:
         actions = rm.plan_repairs(study_dir)
         rm.execute_repairs(actions)
 
-        metadata = json.loads((study_dir / "direct_vllm_test_concise_nq" / "metadata.json").read_text())
-        results = json.loads((study_dir / "direct_vllm_test_concise_nq" / "results.json").read_text())
+        metadata = json.loads(
+            (study_dir / "direct_vllm_test_concise_nq" / "metadata.json").read_text()
+        )
+        results = json.loads(
+            (study_dir / "direct_vllm_test_concise_nq" / "results.json").read_text()
+        )
         assert metadata["name"] == "direct_vllm_test_concise_nq"
         assert results["name"] == "direct_vllm_test_concise_nq"
 
@@ -404,7 +417,10 @@ class TestExecuteRepairs:
         meta_path = exp_dir / "metadata.json"
         assert meta_path.exists()
         metadata = json.loads(meta_path.read_text())
-        assert metadata["name"] == "rag_vllm_google_gemma22bit_dense_bge_large_512_k10_concise_triviaqa"
+        assert (
+            metadata["name"]
+            == "rag_vllm_google_gemma22bit_dense_bge_large_512_k10_concise_triviaqa"
+        )
         assert metadata["model"] == "vllm:google/gemma-2-2b-it"
         assert metadata["type"] == "rag"
         assert metadata["dataset"] == "triviaqa"

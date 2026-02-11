@@ -67,7 +67,8 @@ def scan_experiment(exp_dir: Path, verbose: bool = False) -> dict:
 
             # Check for error predictions
             errors = sum(
-                1 for p in preds
+                1
+                for p in preds
                 if "[ERROR" in str(p.get("prediction", ""))
                 or "[ABORTED" in str(p.get("prediction", ""))
                 or p.get("error")
@@ -97,7 +98,8 @@ def scan_experiment(exp_dir: Path, verbose: bool = False) -> dict:
                     data = json.load(f)
                 preds = data.get("predictions", [])
                 errors = sum(
-                    1 for p in preds
+                    1
+                    for p in preds
                     if "[ERROR" in str(p.get("prediction", ""))
                     or "[ABORTED" in str(p.get("prediction", ""))
                 )
@@ -187,7 +189,8 @@ def fix_experiment(exp_dir: Path, verbose: bool = False) -> list[str]:
                     pdata = json.load(f)
                 preds = pdata.get("predictions", [])
                 errors = sum(
-                    1 for p in preds
+                    1
+                    for p in preds
                     if "[ERROR" in str(p.get("prediction", ""))
                     or "[ABORTED" in str(p.get("prediction", ""))
                 )
@@ -221,8 +224,7 @@ def main():
 
     # Find all experiment directories
     exp_dirs = sorted(
-        d for d in args.study_dir.iterdir()
-        if d.is_dir() and (d / "state.json").exists()
+        d for d in args.study_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
     )
 
     if not exp_dirs:

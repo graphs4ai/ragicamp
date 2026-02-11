@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from ragicamp.agents.base import Agent
     from ragicamp.datasets.base import QADataset
-    from ragicamp.state import ExperimentPhase, ExperimentState
     from ragicamp.metrics.base import Metric
     from ragicamp.spec import ExperimentSpec
+    from ragicamp.state import ExperimentPhase, ExperimentState
 
 
 @dataclass
@@ -28,8 +28,8 @@ class ExecutionContext:
     output_path: Path
     agent: Optional["Agent"] = None
     dataset: Optional["QADataset"] = None
-    metrics: Optional[list["Metric"]] = None
-    callbacks: Optional[Any] = None  # ExperimentCallbacks
+    metrics: list["Metric"] | None = None
+    callbacks: Any | None = None  # ExperimentCallbacks
 
     # Runtime configuration
     batch_size: int = 8

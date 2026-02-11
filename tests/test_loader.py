@@ -5,8 +5,6 @@ Tests ExperimentResult parsing and ResultsLoader functionality.
 
 import json
 
-import pytest
-
 from ragicamp.analysis.loader import ExperimentResult, ResultsLoader
 
 
@@ -34,7 +32,9 @@ class TestParseRetrieverName:
     def test_retriever_name_with_extra_segments(self):
         """Test parsing retriever name with extra underscored segments."""
         # Should only match the first 4 segments
-        result = ExperimentResult._parse_retriever_name("simple_minilm_recursive_1024_extra_segment")
+        result = ExperimentResult._parse_retriever_name(
+            "simple_minilm_recursive_1024_extra_segment"
+        )
 
         assert result["corpus"] == "simple"
         assert result["embedding_model"] == "minilm"

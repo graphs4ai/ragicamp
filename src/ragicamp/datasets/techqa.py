@@ -9,7 +9,7 @@ Paper: https://arxiv.org/abs/1911.02984
 """
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from datasets import load_dataset
 
@@ -29,7 +29,7 @@ class TechQADataset(QADataset):
     def __init__(
         self,
         split: str = "train",
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         use_cache: bool = True,
         **kwargs: Any,
     ):

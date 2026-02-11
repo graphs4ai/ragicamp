@@ -5,8 +5,9 @@ lazy loading with context-manager lifecycle.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 
 class ModelProvider(ABC):

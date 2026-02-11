@@ -7,12 +7,10 @@ factory.
 
 import json
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 import optuna
+import pytest
 
 from ragicamp.optimization.optuna_search import (
     _check_context_feasibility,
@@ -25,7 +23,6 @@ from ragicamp.optimization.optuna_search import (
     run_optuna_study,
 )
 from ragicamp.spec.experiment import ExperimentSpec
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -185,7 +182,6 @@ class TestSuggestAgentParams:
         assert params == {}
 
 
-
 # ---------------------------------------------------------------------------
 # _trial_to_spec
 # ---------------------------------------------------------------------------
@@ -207,18 +203,21 @@ class TestTrialToSpec:
             _build_reranker_lookup,
             _build_retriever_lookup,
         )
+
         ret_lookup = _build_retriever_lookup(base_config)
         rr_lookup = _build_reranker_lookup(base_config)
 
-        trial = self._make_trial({
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-        })
+        trial = self._make_trial(
+            {
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+            }
+        )
 
         spec = _trial_to_spec(trial, space, ret_lookup, rr_lookup, base_config)
 
@@ -239,21 +238,24 @@ class TestTrialToSpec:
             _build_reranker_lookup,
             _build_retriever_lookup,
         )
+
         ret_lookup = _build_retriever_lookup(agent_config)
         rr_lookup = _build_reranker_lookup(agent_config)
 
-        trial = self._make_trial({
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "iterative_rag",
-            "max_iterations": 2,
-            "stop_on_sufficient": True,
-        })
+        trial = self._make_trial(
+            {
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "iterative_rag",
+                "max_iterations": 2,
+                "stop_on_sufficient": True,
+            }
+        )
 
         spec = _trial_to_spec(trial, space, ret_lookup, rr_lookup, agent_config)
 
@@ -271,19 +273,22 @@ class TestTrialToSpec:
             _build_reranker_lookup,
             _build_retriever_lookup,
         )
+
         ret_lookup = _build_retriever_lookup(agent_config)
         rr_lookup = _build_reranker_lookup(agent_config)
 
-        trial = self._make_trial({
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "self_rag",
-        })
+        trial = self._make_trial(
+            {
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "self_rag",
+            }
+        )
 
         spec = _trial_to_spec(trial, space, ret_lookup, rr_lookup, agent_config)
 
@@ -298,19 +303,22 @@ class TestTrialToSpec:
             _build_reranker_lookup,
             _build_retriever_lookup,
         )
+
         ret_lookup = _build_retriever_lookup(agent_config)
         rr_lookup = _build_reranker_lookup(agent_config)
 
-        trial = self._make_trial({
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "fixed_rag",
-        })
+        trial = self._make_trial(
+            {
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "fixed_rag",
+            }
+        )
 
         spec = _trial_to_spec(trial, space, ret_lookup, rr_lookup, agent_config)
 
@@ -329,18 +337,21 @@ class TestTrialToSpec:
             _build_reranker_lookup,
             _build_retriever_lookup,
         )
+
         ret_lookup = _build_retriever_lookup(base_config)
         rr_lookup = _build_reranker_lookup(base_config)
 
-        trial = self._make_trial({
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "bge",
-        })
+        trial = self._make_trial(
+            {
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "bge",
+            }
+        )
 
         spec = _trial_to_spec(trial, space, ret_lookup, rr_lookup, base_config)
 
@@ -371,9 +382,7 @@ class TestGetExperimentMetric:
         """Test fallback to predictions.json when results.json missing."""
         exp_dir = tmp_path / "exp2"
         exp_dir.mkdir()
-        (exp_dir / "predictions.json").write_text(
-            json.dumps({"aggregate_metrics": {"f1": 0.72}})
-        )
+        (exp_dir / "predictions.json").write_text(json.dumps({"aggregate_metrics": {"f1": 0.72}}))
 
         value = _get_experiment_metric("exp2", tmp_path, "f1")
         assert value == 0.72
@@ -390,9 +399,7 @@ class TestGetExperimentMetric:
         """Test returns None when the requested metric is not in the file."""
         exp_dir = tmp_path / "exp4"
         exp_dir.mkdir()
-        (exp_dir / "results.json").write_text(
-            json.dumps({"metrics": {"exact_match": 0.70}})
-        )
+        (exp_dir / "results.json").write_text(json.dumps({"metrics": {"exact_match": 0.70}}))
 
         value = _get_experiment_metric("exp4", tmp_path, "f1")
         assert value is None
@@ -438,31 +445,38 @@ class TestSeedFromExisting:
         )
 
     def _write_experiment(
-        self, output_dir, name, metadata, metric_value=0.5,
+        self,
+        output_dir,
+        name,
+        metadata,
+        metric_value=0.5,
     ):
         """Write a fake experiment directory with metadata and results."""
         exp_dir = output_dir / name
         exp_dir.mkdir(parents=True)
         (exp_dir / "metadata.json").write_text(json.dumps(metadata))
-        (exp_dir / "results.json").write_text(
-            json.dumps({"metrics": {"f1": metric_value}})
-        )
+        (exp_dir / "results.json").write_text(json.dumps({"metrics": {"f1": metric_value}}))
 
     def test_seeds_basic_rag_experiment(self, tmp_path, base_config):
         """Test seeding a standard RAG experiment from disk."""
         study = self._make_study()
         space = _extract_search_space(base_config)
 
-        self._write_experiment(tmp_path, "rag_exp_1", {
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-        }, metric_value=0.85)
+        self._write_experiment(
+            tmp_path,
+            "rag_exp_1",
+            {
+                "type": "rag",
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+            },
+            metric_value=0.85,
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", base_config)
 
@@ -476,12 +490,16 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(base_config)
 
-        self._write_experiment(tmp_path, "direct_exp", {
-            "type": "direct",
-            "model": "vllm:test/model-a",
-            "dataset": "nq",
-            "prompt": "concise",
-        })
+        self._write_experiment(
+            tmp_path,
+            "direct_exp",
+            {
+                "type": "direct",
+                "model": "vllm:test/model-a",
+                "dataset": "nq",
+                "prompt": "concise",
+            },
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", base_config)
         assert seeded == 0
@@ -491,16 +509,20 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(base_config)
 
-        self._write_experiment(tmp_path, "rag_other", {
-            "type": "rag",
-            "model": "vllm:other/model",  # Not in search space
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-        })
+        self._write_experiment(
+            tmp_path,
+            "rag_other",
+            {
+                "type": "rag",
+                "model": "vllm:other/model",  # Not in search space
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+            },
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", base_config)
         assert seeded == 0
@@ -534,18 +556,23 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(agent_config)
 
-        self._write_experiment(tmp_path, "iterative_exp", {
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "iterative_rag",
-            "agent_params": {"max_iterations": 2, "stop_on_sufficient": True},
-        }, metric_value=0.90)
+        self._write_experiment(
+            tmp_path,
+            "iterative_exp",
+            {
+                "type": "rag",
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "iterative_rag",
+                "agent_params": {"max_iterations": 2, "stop_on_sufficient": True},
+            },
+            metric_value=0.90,
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", agent_config)
 
@@ -561,18 +588,22 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(agent_config)
 
-        self._write_experiment(tmp_path, "iterative_bad", {
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "iterative_rag",
-            "agent_params": {"max_iterations": 99},  # Not in [1, 2, 3]
-        })
+        self._write_experiment(
+            tmp_path,
+            "iterative_bad",
+            {
+                "type": "rag",
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "iterative_rag",
+                "agent_params": {"max_iterations": 99},  # Not in [1, 2, 3]
+            },
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", agent_config)
         assert seeded == 0
@@ -582,17 +613,21 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(agent_config)
 
-        self._write_experiment(tmp_path, "unknown_agent_exp", {
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            "agent_type": "unknown_agent",
-        })
+        self._write_experiment(
+            tmp_path,
+            "unknown_agent_exp",
+            {
+                "type": "rag",
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                "agent_type": "unknown_agent",
+            },
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", agent_config)
         assert seeded == 0
@@ -602,17 +637,22 @@ class TestSeedFromExisting:
         study = self._make_study()
         space = _extract_search_space(agent_config)
 
-        self._write_experiment(tmp_path, "rag_fixed", {
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-            # agent_type absent → defaults to fixed_rag
-        }, metric_value=0.75)
+        self._write_experiment(
+            tmp_path,
+            "rag_fixed",
+            {
+                "type": "rag",
+                "model": "vllm:test/model-a",
+                "retriever": "dense_bge",
+                "top_k": 5,
+                "prompt": "concise",
+                "query_transform": "none",
+                "dataset": "nq",
+                "reranker": "none",
+                # agent_type absent → defaults to fixed_rag
+            },
+            metric_value=0.75,
+        )
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", agent_config)
 
@@ -626,16 +666,20 @@ class TestSeedFromExisting:
 
         exp_dir = tmp_path / "no_metric"
         exp_dir.mkdir()
-        (exp_dir / "metadata.json").write_text(json.dumps({
-            "type": "rag",
-            "model": "vllm:test/model-a",
-            "retriever": "dense_bge",
-            "top_k": 5,
-            "prompt": "concise",
-            "query_transform": "none",
-            "dataset": "nq",
-            "reranker": "none",
-        }))
+        (exp_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "type": "rag",
+                    "model": "vllm:test/model-a",
+                    "retriever": "dense_bge",
+                    "top_k": 5,
+                    "prompt": "concise",
+                    "query_transform": "none",
+                    "dataset": "nq",
+                    "reranker": "none",
+                }
+            )
+        )
         # No results.json or predictions.json
 
         seeded = _seed_from_existing(study, space, tmp_path, "f1", base_config)
@@ -874,6 +918,7 @@ class TestStratifiedSearch:
 
         # Count trials per combo
         from collections import Counter
+
         counts = Counter(tuple(sorted(fp.items())) for fp in schedule)
 
         # 25 / 6 = 4 remainder 1 → each combo gets 4 or 5

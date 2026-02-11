@@ -16,7 +16,7 @@ Example:
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Optional, Union
+from typing import Any
 
 import openai
 import tiktoken
@@ -29,25 +29,32 @@ logger = get_logger(__name__)
 
 
 class OpenAIModel(LanguageModel):
-    """Language model implementation using OpenAI API.
+    """Language model implementation using OpenAI-compatible APIs.
 
     Supports both synchronous and asynchronous generation.
     Use async methods for efficient parallel API calls.
+
+    Works with any OpenAI-compatible provider (OpenAI, DeepInfra, etc.)
+    by setting the base_url parameter.
     """
 
     def __init__(
         self,
         model_name: str = "gpt-4o-mini",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         max_workers: int = 10,  # Parallel API calls
         max_concurrent_async: int = 20,  # Max concurrent async calls
         **kwargs: Any,
     ):
-        """Initialize OpenAI model.
+        """Initialize OpenAI-compatible model.
 
         Args:
-            model_name: OpenAI model identifier
-            api_key: OpenAI API key (or uses OPENAI_API_KEY env var)
+            model_name: Model identifier (e.g. 'gpt-4o-mini', 'meta-llama/Llama-3.3-70B-Instruct')
+            api_key: API key (or uses OPENAI_API_KEY env var)
+            base_url: API base URL for OpenAI-compatible providers.
+                      E.g. 'https://api.deepinfra.com/v1/openai' for DeepInfra.
+                      If None, uses the default OpenAI endpoint.
             max_workers: Maximum parallel thread-based API calls (default: 10)
             max_concurrent_async: Maximum concurrent async API calls (default: 20)
             **kwargs: Additional configuration
@@ -56,9 +63,15 @@ class OpenAIModel(LanguageModel):
         self.max_workers = max_workers
         self.max_concurrent_async = max_concurrent_async
         self._api_key = api_key
+        self._base_url = base_url
 
+        # Create sync client with optional base_url
+        client_kwargs: dict[str, Any] = {}
         if api_key:
-            openai.api_key = api_key
+            client_kwargs["api_key"] = api_key
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self._sync_client = openai.OpenAI(**client_kwargs)
 
         # Initialize tokenizer for counting
         try:
@@ -67,13 +80,18 @@ class OpenAIModel(LanguageModel):
             self.encoding = tiktoken.get_encoding("cl100k_base")
 
         # Lazy-initialized async client
-        self._async_client: Optional[AsyncOpenAI] = None
+        self._async_client: AsyncOpenAI | None = None
 
     @property
     def async_client(self) -> AsyncOpenAI:
         """Get or create the async OpenAI client."""
         if self._async_client is None:
-            self._async_client = AsyncOpenAI(api_key=self._api_key)
+            client_kwargs: dict[str, Any] = {}
+            if self._api_key:
+                client_kwargs["api_key"] = self._api_key
+            if self._base_url:
+                client_kwargs["base_url"] = self._base_url
+            self._async_client = AsyncOpenAI(**client_kwargs)
         return self._async_client
 
     def _supports_sampling_params(self) -> bool:
@@ -89,10 +107,10 @@ class OpenAIModel(LanguageModel):
     def _single_generate(
         self,
         prompt: str,
-        max_tokens: Optional[int],
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
-        stop: Optional[list[str]],
+        stop: list[str] | None,
         **kwargs: Any,
     ) -> str:
         """Generate text for a single prompt."""
@@ -112,19 +130,19 @@ class OpenAIModel(LanguageModel):
         if stop is not None:
             api_params["stop"] = stop
 
-        response = openai.chat.completions.create(**api_params)
+        response = self._sync_client.chat.completions.create(**api_params)
         return response.choices[0].message.content or ""
 
     def generate(
         self,
-        prompt: Union[str, list[str]],
-        max_tokens: Optional[int] = None,
+        prompt: str | list[str],
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
+        stop: list[str] | None = None,
         parallel: bool = True,
         **kwargs: Any,
-    ) -> Union[str, list[str]]:
+    ) -> str | list[str]:
         """Generate text using OpenAI API.
 
         Args:
@@ -183,7 +201,7 @@ class OpenAIModel(LanguageModel):
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings using OpenAI embeddings API."""
-        response = openai.embeddings.create(model=self.model_name, input=texts)
+        response = self._sync_client.embeddings.create(model=self.model_name, input=texts)
         return [item.embedding for item in response.data]
 
     def count_tokens(self, text: str) -> int:
@@ -197,11 +215,11 @@ class OpenAIModel(LanguageModel):
     async def agenerate_single(
         self,
         prompt: str,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
-        system_message: Optional[str] = None,
+        stop: list[str] | None = None,
+        system_message: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Generate text for a single prompt asynchronously.
@@ -245,11 +263,11 @@ class OpenAIModel(LanguageModel):
     async def agenerate(
         self,
         prompts: list[str],
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
-        system_message: Optional[str] = None,
+        stop: list[str] | None = None,
+        system_message: str | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Generate text for multiple prompts asynchronously with rate limiting.

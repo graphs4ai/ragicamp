@@ -1,10 +1,9 @@
 """Path and directory utilities."""
 
 from pathlib import Path
-from typing import Union
 
 
-def ensure_dir(path: Union[str, Path]) -> Path:
+def ensure_dir(path: str | Path) -> Path:
     """Ensure a directory exists, creating it if necessary.
 
     Args:
@@ -62,7 +61,7 @@ def ensure_output_dirs() -> None:
         Path(dir_path).mkdir(parents=True, exist_ok=True)
 
 
-def safe_write_json(data: dict, path: Union[str, Path], **kwargs) -> Path:
+def safe_write_json(data: dict, path: str | Path, **kwargs) -> Path:
     """Write JSON to file atomically, ensuring directory exists.
 
     Uses atomic write (temp file + rename) to prevent corruption on crash.

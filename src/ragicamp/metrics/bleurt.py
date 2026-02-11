@@ -1,7 +1,7 @@
 """BLEURT metric implementation using PyTorch (via bleurt-pytorch)."""
 
 import gc
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
@@ -28,8 +28,8 @@ class BLEURTMetric(Metric):
         """
         super().__init__(name="bleurt", **kwargs)
         self.model_name = model_name
-        self._scorer: Optional[Any] = None
-        self._tokenizer: Optional[Any] = None
+        self._scorer: Any | None = None
+        self._tokenizer: Any | None = None
 
     def _load_scorer(self) -> None:
         """Load the BLEURT model (lazy loading)."""
@@ -147,7 +147,8 @@ class BLEURTMetric(Metric):
                         if batch_size >= min_batch_size:
                             logger.warning(
                                 "OOM with batch_size=%d, retrying with %d",
-                                old_batch_size, batch_size,
+                                old_batch_size,
+                                batch_size,
                             )
                         else:
                             raise RuntimeError(

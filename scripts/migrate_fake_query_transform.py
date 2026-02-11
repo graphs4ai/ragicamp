@@ -30,7 +30,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 # ---------------------------------------------------------------------------
 # Known query-transform tokens (must match naming.py append logic)
 # ---------------------------------------------------------------------------
@@ -331,10 +330,7 @@ def execute_migration(study_path: Path, actions: list[dict]) -> None:
             # Archive the fake-qt experiment
             archive_dir.mkdir(exist_ok=True)
             shutil.move(str(old_dir), str(archive_dir / action["old_name"]))
-            print(
-                f"  ARCHIVED: {action['old_name']} "
-                f"(kept existing '{new_name}' with better F1)"
-            )
+            print(f"  ARCHIVED: {action['old_name']} (kept existing '{new_name}' with better F1)")
 
 
 # ---------------------------------------------------------------------------

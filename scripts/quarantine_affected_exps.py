@@ -91,17 +91,17 @@ def classify_experiment(exp_dir: Path) -> list[str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Quarantine experiments affected by known bugs"
-    )
+    parser = argparse.ArgumentParser(description="Quarantine experiments affected by known bugs")
     parser.add_argument("study_dir", type=Path, help="Path to study output directory")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "--move", action="store_true",
+        "--move",
+        action="store_true",
         help="Move affected dirs to _quarantined/ subfolder",
     )
     group.add_argument(
-        "--rename", action="store_true",
+        "--rename",
+        action="store_true",
         help="Prefix affected dirs with _q_ in-place",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -113,10 +113,9 @@ def main():
 
     # Find experiment directories (have metadata.json or state.json)
     exp_dirs = sorted(
-        d for d in args.study_dir.iterdir()
-        if d.is_dir()
-        and not d.name.startswith("_")
-        and (d / "metadata.json").exists()
+        d
+        for d in args.study_dir.iterdir()
+        if d.is_dir() and not d.name.startswith("_") and (d / "metadata.json").exists()
     )
 
     if not exp_dirs:

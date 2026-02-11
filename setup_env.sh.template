@@ -8,7 +8,11 @@
 #
 # Note: setup_env.sh is in .gitignore to prevent committing credentials
 
-# OpenAI API Key
+# DeepInfra API Key (preferred for LLM judge — cheaper than OpenAI)
+# Sign up at https://deepinfra.com and get your API key
+export DEEPINFRA_API_KEY="your-deepinfra-api-key-here"
+
+# OpenAI API Key (fallback for LLM judge if DEEPINFRA_API_KEY is not set)
 export OPENAI_API_KEY="your-openai-api-key-here"
 
 # Hugging Face API Token
@@ -22,6 +26,7 @@ export B2_KEY_ID="your-b2-key-id-here"
 export B2_APP_KEY="your-b2-app-key-here"
 
 echo "Environment variables set:"
+echo "  DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:0:10}..."
 echo "  OPENAI_API_KEY: ${OPENAI_API_KEY:0:10}..."
 echo "  HF_TOKEN: ${HF_TOKEN:0:10}..."
 echo "  B2_KEY_ID: ${B2_KEY_ID:0:10}..."

@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 class ExperimentPhase(Enum):
@@ -52,7 +51,7 @@ class ExperimentState:
     predictions_complete: int = 0
     metrics_computed: list[str] = field(default_factory=list)
     metrics_requested: list[str] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
     def save(self, path: Path) -> None:
         """Save state to JSON file atomically."""
@@ -89,9 +88,7 @@ class ExperimentState:
         )
 
     @classmethod
-    def new(
-        cls, total_questions: int = 0, metrics: Optional[list[str]] = None
-    ) -> "ExperimentState":
+    def new(cls, total_questions: int = 0, metrics: list[str] | None = None) -> "ExperimentState":
         """Create a new experiment state."""
         now = datetime.now().isoformat()
         return cls(

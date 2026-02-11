@@ -50,22 +50,32 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 # ============================================================================
 # Constants
 # ============================================================================
 
 SKIP_DIRS = {
-    "_archived_fake_reranked", "_tainted", "_collisions", "analysis",
-    "__pycache__", ".ipynb_checkpoints",
+    "_archived_fake_reranked",
+    "_tainted",
+    "_collisions",
+    "analysis",
+    "__pycache__",
+    ".ipynb_checkpoints",
 }
 
 KNOWN_RERANKER_TOKENS = {
-    "bge", "bgev2", "bgev2m3", "bgebase",
-    "msmarco", "msmarcolarge",
+    "bge",
+    "bgev2",
+    "bgev2m3",
+    "bgebase",
+    "msmarco",
+    "msmarcolarge",
     # Hyphenated forms (collapsed in names)
-    "bge-v2", "bge-base", "ms-marco", "ms-marco-large",
+    "bge-v2",
+    "bge-base",
+    "ms-marco",
+    "ms-marco-large",
 }
 
 KNOWN_QUERY_TRANSFORMS = {"hyde", "multiquery"}
@@ -106,7 +116,7 @@ def _strip_fake_tokens(name: str) -> tuple[str | None, list[str]]:
     if k_idx is None:
         return None, []
 
-    tail = parts[k_idx + 1:]
+    tail = parts[k_idx + 1 :]
     if len(tail) < 2:
         return None, []
 
@@ -142,6 +152,7 @@ def _strip_fake_tokens(name: str) -> tuple[str | None, list[str]]:
 @dataclass
 class Action:
     """A planned rename/archive/delete action."""
+
     old_name: str
     old_dir: Path
     new_name: str
@@ -157,7 +168,7 @@ class Action:
 # ============================================================================
 
 
-def _load_json(path: Path) -> Optional[dict]:
+def _load_json(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -190,7 +201,7 @@ def _get_f1(exp_dir: Path) -> float:
     return 0.0
 
 
-def _get_phase(exp_dir: Path) -> Optional[str]:
+def _get_phase(exp_dir: Path) -> str | None:
     state = _load_json(exp_dir / "state.json")
     if state:
         return state.get("phase")
@@ -272,13 +283,15 @@ def plan_actions(
 
         f1 = _get_f1(exp_dir)
 
-        corrections[corrected].append({
-            "old_name": exp_dir.name,
-            "old_dir": exp_dir,
-            "f1": f1,
-            "stripped": stripped,
-            "phase": phase,
-        })
+        corrections[corrected].append(
+            {
+                "old_name": exp_dir.name,
+                "old_dir": exp_dir,
+                "f1": f1,
+                "stripped": stripped,
+                "phase": phase,
+            }
+        )
 
     # Phase 2: Resolve collisions and plan renames
     for corrected_name, candidates in sorted(corrections.items()):
@@ -290,14 +303,16 @@ def plan_actions(
         # Collect all competitors: candidates + existing on-disk experiment
         all_competitors = list(candidates)
         if target_exists_on_disk:
-            all_competitors.append({
-                "old_name": corrected_name,
-                "old_dir": target_dir,
-                "f1": _get_f1(target_dir),
-                "stripped": [],
-                "phase": _get_phase(target_dir),
-                "is_existing": True,
-            })
+            all_competitors.append(
+                {
+                    "old_name": corrected_name,
+                    "old_dir": target_dir,
+                    "f1": _get_f1(target_dir),
+                    "stripped": [],
+                    "phase": _get_phase(target_dir),
+                    "is_existing": True,
+                }
+            )
 
         # Verify that these are true duplicates (F1 within tolerance)
         f1_values = [c["f1"] for c in all_competitors if c["f1"] > 0]
@@ -319,33 +334,35 @@ def plan_actions(
                 if candidate["old_name"] == corrected_name:
                     # Already has the correct name — nothing to do
                     continue
-                actions.append(Action(
-                    old_name=candidate["old_name"],
-                    old_dir=candidate["old_dir"],
-                    new_name=corrected_name,
-                    action="rename",
-                    detail=(
-                        f"Rename: strip {candidate['stripped']} → '{corrected_name}'"
-                    ),
-                    f1=candidate["f1"],
-                    stripped_tokens=candidate["stripped"],
-                    verified_duplicate=verified,
-                ))
+                actions.append(
+                    Action(
+                        old_name=candidate["old_name"],
+                        old_dir=candidate["old_dir"],
+                        new_name=corrected_name,
+                        action="rename",
+                        detail=(f"Rename: strip {candidate['stripped']} → '{corrected_name}'"),
+                        f1=candidate["f1"],
+                        stripped_tokens=candidate["stripped"],
+                        verified_duplicate=verified,
+                    )
+                )
             else:
                 # Loser in collision
-                actions.append(Action(
-                    old_name=candidate["old_name"],
-                    old_dir=candidate["old_dir"],
-                    new_name=corrected_name,
-                    action="archive_collision",
-                    detail=(
-                        f"Collision loser: f1={candidate['f1']:.4f} vs winner "
-                        f"f1={winner['f1']:.4f} ('{winner['old_name']}')"
-                    ),
-                    f1=candidate["f1"],
-                    stripped_tokens=candidate["stripped"],
-                    verified_duplicate=verified,
-                ))
+                actions.append(
+                    Action(
+                        old_name=candidate["old_name"],
+                        old_dir=candidate["old_dir"],
+                        new_name=corrected_name,
+                        action="archive_collision",
+                        detail=(
+                            f"Collision loser: f1={candidate['f1']:.4f} vs winner "
+                            f"f1={winner['f1']:.4f} ('{winner['old_name']}')"
+                        ),
+                        f1=candidate["f1"],
+                        stripped_tokens=candidate["stripped"],
+                        verified_duplicate=verified,
+                    )
+                )
 
     # Phase 3: Handle incomplete experiments (optional)
     if include_incomplete:
@@ -353,14 +370,16 @@ def plan_actions(
         for exp_dir in incomplete:
             if exp_dir.name not in already_planned:
                 phase = _get_phase(exp_dir) or "unknown"
-                actions.append(Action(
-                    old_name=exp_dir.name,
-                    old_dir=exp_dir,
-                    new_name=exp_dir.name,
-                    action="archive_incomplete",
-                    detail=f"Incomplete experiment: phase={phase}",
-                    f1=_get_f1(exp_dir),
-                ))
+                actions.append(
+                    Action(
+                        old_name=exp_dir.name,
+                        old_dir=exp_dir,
+                        new_name=exp_dir.name,
+                        action="archive_incomplete",
+                        detail=f"Incomplete experiment: phase={phase}",
+                        f1=_get_f1(exp_dir),
+                    )
+                )
 
     return actions
 
@@ -385,11 +404,14 @@ def print_report(actions: list[Action], study_path: Path) -> None:
     incomplete_acts = [a for a in actions if a.action == "archive_incomplete"]
 
     # Count total experiments
-    total = sum(1 for d in study_path.iterdir()
-                if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith("."))
+    total = sum(
+        1
+        for d in study_path.iterdir()
+        if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
+    )
 
     print(f"\n{_BOLD}{'=' * 70}")
-    print(f"  STUDY CLEANUP REPORT")
+    print("  STUDY CLEANUP REPORT")
     print(f"{'=' * 70}{_RESET}\n")
 
     print(f"  Total experiments on disk: {total}")
@@ -402,11 +424,11 @@ def print_report(actions: list[Action], study_path: Path) -> None:
     verified = [a for a in renames + collisions if a.verified_duplicate]
     unverified = [a for a in renames + collisions if not a.verified_duplicate]
     if verified:
-        print(f"\n  {_GREEN}Verified duplicates (F1 within {F1_TOLERANCE}): "
-              f"{len(verified)}{_RESET}")
+        print(
+            f"\n  {_GREEN}Verified duplicates (F1 within {F1_TOLERANCE}): {len(verified)}{_RESET}"
+        )
     if unverified:
-        print(f"  {_YELLOW}Unverified (F1 differs or all zero):     "
-              f"{len(unverified)}{_RESET}")
+        print(f"  {_YELLOW}Unverified (F1 differs or all zero):     {len(unverified)}{_RESET}")
 
     # --- Renames ---
     if renames:
@@ -519,13 +541,15 @@ def execute_actions(
                 print(f"  removed: {fname}")
 
     # Final summary
-    remaining = sum(1 for d in study_path.iterdir()
-                    if d.is_dir() and d.name not in SKIP_DIRS
-                    and not d.name.startswith((".", "_")))
+    remaining = sum(
+        1
+        for d in study_path.iterdir()
+        if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith((".", "_"))
+    )
     print(f"\n  Done: {renamed} renamed, {archived} archived.")
     print(f"  Clean experiments remaining: {remaining}")
     if reset_optuna:
-        print(f"  Optuna DB removed — TPE will re-seed from clean experiments on next run.")
+        print("  Optuna DB removed — TPE will re-seed from clean experiments on next run.")
     print()
 
 
@@ -540,19 +564,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--study", required=True, type=Path,
+        "--study",
+        required=True,
+        type=Path,
         help="Path to study output directory",
     )
     parser.add_argument(
-        "--execute", action="store_true",
+        "--execute",
+        action="store_true",
         help="Apply renames and archive collisions (default: dry-run)",
     )
     parser.add_argument(
-        "--include-incomplete", action="store_true",
+        "--include-incomplete",
+        action="store_true",
         help="Also archive incomplete/failed experiments",
     )
     parser.add_argument(
-        "--reset-optuna", action="store_true",
+        "--reset-optuna",
+        action="store_true",
         help="Remove optuna_study.db and study summaries",
     )
     args = parser.parse_args()

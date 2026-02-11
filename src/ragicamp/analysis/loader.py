@@ -10,7 +10,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 
@@ -30,8 +30,8 @@ class ExperimentResult:
     dataset: str = "unknown"
     prompt: str = "unknown"
     quantization: str = "unknown"
-    retriever: Optional[str] = None
-    top_k: Optional[int] = None
+    retriever: str | None = None
+    top_k: int | None = None
     batch_size: int = 1
     num_questions: int = 0
 
@@ -42,7 +42,7 @@ class ExperimentResult:
     bertscore_precision: float = 0.0
     bertscore_recall: float = 0.0
     bleurt: float = 0.0
-    llm_judge: Optional[float] = None
+    llm_judge: float | None = None
 
     # Metadata
     duration: float = 0.0
@@ -65,7 +65,7 @@ class ExperimentResult:
     )
 
     @staticmethod
-    def _parse_retriever_name(retriever: Optional[str]) -> dict[str, Any]:
+    def _parse_retriever_name(retriever: str | None) -> dict[str, Any]:
         """Parse structured retriever name into components.
 
         Args:
@@ -228,7 +228,7 @@ class ResultsLoader:
         print(f"Loaded {len(results)} experiments")
     """
 
-    def __init__(self, base_dir: Union[str, Path]):
+    def __init__(self, base_dir: str | Path):
         """Initialize loader.
 
         Args:
@@ -293,15 +293,22 @@ class ResultsLoader:
         return results
 
     # Directories that contain deprecated / archived experiments
-    _SKIP_DIRS = frozenset({
-        '_archived_fake_reranked', '_tainted', '_collisions', '_incomplete',
-        'analysis', '__pycache__', '.ipynb_checkpoints',
-    })
+    _SKIP_DIRS = frozenset(
+        {
+            "_archived_fake_reranked",
+            "_tainted",
+            "_collisions",
+            "_incomplete",
+            "analysis",
+            "__pycache__",
+            ".ipynb_checkpoints",
+        }
+    )
 
     def _is_deprecated_path(self, path: Path) -> bool:
         """Return True if *path* is inside a deprecated / archive directory."""
         for part in path.relative_to(self.base_dir).parts:
-            if part in self._SKIP_DIRS or part.startswith('_') or part.startswith('.'):
+            if part in self._SKIP_DIRS or part.startswith("_") or part.startswith("."):
                 return True
         return False
 
@@ -361,7 +368,7 @@ class ResultsLoader:
 
     def load_predictions(
         self, experiment_name: str, normalize: bool = True
-    ) -> Optional[list[dict[str, Any]]]:
+    ) -> list[dict[str, Any]] | None:
         """Load predictions for a specific experiment.
 
         Args:
@@ -412,14 +419,16 @@ class ResultsLoader:
             # Convert doc_scores to retrieved_docs format
             retrieved_docs = []
             for i, score in enumerate(doc_scores):
-                retrieved_docs.append({
-                    "rank": i + 1,
-                    "doc_id": f"doc_{i}",
-                    "content": "",  # Not available in old format
-                    "score": score,
-                    "retrieval_score": score,
-                    "retrieval_rank": i + 1,
-                })
+                retrieved_docs.append(
+                    {
+                        "rank": i + 1,
+                        "doc_id": f"doc_{i}",
+                        "content": "",  # Not available in old format
+                        "score": score,
+                        "retrieval_score": score,
+                        "retrieval_rank": i + 1,
+                    }
+                )
             prediction["retrieved_docs"] = retrieved_docs
 
             # Clean up metadata

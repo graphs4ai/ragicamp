@@ -3,14 +3,13 @@
 import heapq
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Optional
 
 from datasets import load_dataset
 from tqdm import tqdm
 
-from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document
+from ragicamp.corpus.base import CorpusConfig, DocumentCorpus
 
 logger = get_logger(__name__)
 
@@ -150,7 +149,7 @@ class WikipediaCorpus(DocumentCorpus):
         """
         super().__init__(config)
         self._dataset = None
-        self._allowed_titles: Optional[set[str]] = None
+        self._allowed_titles: set[str] | None = None
 
         # Load WikiRank filter if configured
         top_k = self.config.metadata.get("wikirank_top_k")
@@ -159,7 +158,7 @@ class WikipediaCorpus(DocumentCorpus):
             language = self._get_language_from_version()
             self._allowed_titles = _load_wikirank_top_titles(int(top_k), language)
 
-    def load(self, max_docs: Optional[int] = None) -> Iterator[Document]:
+    def load(self, max_docs: int | None = None) -> Iterator[Document]:
         """Load Wikipedia articles.
 
         Args:

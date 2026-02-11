@@ -73,9 +73,7 @@ def trace_experiment(predictions_path: Path | str) -> dict:
         }
 
     # Detect missing expected steps
-    is_rag = exp_type == "rag" or any(
-        s in step_counts for s in [BATCH_ENCODE, BATCH_SEARCH]
-    )
+    is_rag = exp_type == "rag" or any(s in step_counts for s in [BATCH_ENCODE, BATCH_SEARCH])
 
     if is_rag:
         if BATCH_ENCODE not in step_counts and BATCH_SEARCH not in step_counts:
@@ -95,8 +93,7 @@ def trace_experiment(predictions_path: Path | str) -> dict:
     if expected_reranker:
         if RERANK not in step_counts:
             warnings.append(
-                f"reranker='{expected_reranker}' is configured but no "
-                f"'{RERANK}' step was recorded."
+                f"reranker='{expected_reranker}' is configured but no '{RERANK}' step was recorded."
             )
 
     if GENERATE not in step_counts and BATCH_GENERATE not in step_counts:

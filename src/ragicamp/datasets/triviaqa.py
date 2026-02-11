@@ -1,7 +1,7 @@
 """TriviaQA dataset loader."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from datasets import load_dataset
 
@@ -19,7 +19,7 @@ class TriviaQADataset(QADataset):
         self,
         split: str = "train",
         subset: str = "unfiltered",
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         use_cache: bool = True,
         **kwargs: Any,
     ):

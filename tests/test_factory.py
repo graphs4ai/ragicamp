@@ -7,11 +7,11 @@ Tests the new clean architecture factories:
 - MetricFactory: Creates evaluation metrics
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
-from ragicamp.agents import DirectLLMAgent, FixedRAGAgent
+from ragicamp.agents import DirectLLMAgent
 from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ProviderFactory
 
 
@@ -21,14 +21,14 @@ class TestProviderFactory:
     def test_parse_generator_spec_vllm(self):
         """Test parsing vLLM generator spec."""
         config = ProviderFactory.parse_generator_spec("vllm:meta-llama/Llama-3.2-3B")
-        
+
         assert config.model_name == "meta-llama/Llama-3.2-3B"
         assert config.backend == "vllm"
 
     def test_parse_generator_spec_hf(self):
         """Test parsing HuggingFace generator spec."""
         config = ProviderFactory.parse_generator_spec("hf:google/gemma-2-2b-it")
-        
+
         assert config.model_name == "google/gemma-2-2b-it"
         assert config.backend == "hf"
 
@@ -38,14 +38,14 @@ class TestProviderFactory:
             "BAAI/bge-large-en-v1.5",
             backend="sentence_transformers",
         )
-        
+
         assert config.model_name == "BAAI/bge-large-en-v1.5"
         assert config.backend == "sentence_transformers"
 
     def test_create_generator_from_spec(self):
         """Test creating generator provider from spec."""
         provider = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
-        
+
         assert provider.model_name == "meta-llama/Llama-3.2-3B"
         # Provider starts without model loaded (lazy loading)
         assert provider._generator is None
@@ -56,7 +56,7 @@ class TestProviderFactory:
             "BAAI/bge-large-en-v1.5",
             backend="sentence_transformers",
         )
-        
+
         assert provider.model_name == "BAAI/bge-large-en-v1.5"
         # Provider starts without model loaded (lazy loading)
         # When cache is enabled, the provider is wrapped -- check the inner provider
@@ -70,7 +70,7 @@ class TestAgentFactory:
     def test_get_available_agents(self):
         """Test listing available agents."""
         agents = AgentFactory.get_available_agents()
-        
+
         assert "direct_llm" in agents
         assert "fixed_rag" in agents
         assert "iterative_rag" in agents
@@ -78,16 +78,16 @@ class TestAgentFactory:
 
     def test_create_direct_requires_generator(self):
         """Test that create_direct needs generator provider."""
-        from ragicamp.models.providers import GeneratorProvider, GeneratorConfig
-        
+        from ragicamp.models.providers import GeneratorConfig, GeneratorProvider
+
         config = GeneratorConfig(model_name="test", backend="vllm")
         provider = GeneratorProvider(config)
-        
+
         agent = AgentFactory.create_direct(
             name="test_agent",
             generator_provider=provider,
         )
-        
+
         assert isinstance(agent, DirectLLMAgent)
         assert agent.name == "test_agent"
 
@@ -98,7 +98,7 @@ class TestDatasetFactory:
     def test_parse_spec(self):
         """Test parsing dataset spec."""
         config = DatasetFactory.parse_spec("nq", limit=100)
-        
+
         # "nq" is an alias that gets expanded to full name
         assert "natural_questions" in config["name"] or config["name"] == "nq"
         # limit might be stored as "limit" or "num_examples" depending on implementation

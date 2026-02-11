@@ -42,7 +42,7 @@ install:
 	uv sync
 
 download:
-	uv run python scripts/data/download.py --all
+	@echo "Use 'uv run ragicamp index' to build indexes (downloads corpus automatically)"
 
 # ============================================================================
 # SIMPLE (quick dev/validation)
@@ -50,78 +50,81 @@ download:
 
 index-simple:
 	@echo "📚 Building simple index (1 index, 500 docs)..."
-	uv run python scripts/data/build_all_indexes.py --minimal --max-docs 500
+	uv run ragicamp index --corpus simple --embedding minilm --max-docs 500
 
 run-baseline-simple:
 	@echo "🚀 Running simple baseline (10 questions)..."
-	uv run python scripts/experiments/run_study.py conf/study/simple.yaml
+	uv run ragicamp run conf/study/simple.yaml
 
 run-baseline-simple-hf:
 	@echo "🚀 Running simple baseline - HF only, no OpenAI (10 questions)..."
-	uv run python scripts/experiments/run_study.py conf/study/simple_hf.yaml
+	uv run ragicamp run conf/study/simple_hf.yaml
 
 # ============================================================================
 # FULL (production experiments)
 # ============================================================================
 
 index-full:
-	@echo "📚 Building full indexes (4 indexes, all docs)..."
-	uv run python scripts/data/build_all_indexes.py --standard
+	@echo "📚 Building full indexes (3 embeddings)..."
+	uv run ragicamp index --corpus simple --embedding minilm
+	uv run ragicamp index --corpus simple --embedding mpnet
+	uv run ragicamp index --corpus simple --embedding e5
 
 run-baseline-full:
 	@echo "🚀 Running full baseline (100 questions, all variations)..."
-	uv run python scripts/experiments/run_study.py conf/study/full.yaml
+	uv run ragicamp run conf/study/full.yaml
 
 # ============================================================================
 # COMPREHENSIVE BASELINE (all models, all datasets)
 # ============================================================================
 
-# Build all 6 indexes for comprehensive study
+# Build indexes for comprehensive study (simple + en corpora, 3 embeddings)
 index-comprehensive:
 	@echo "📚 Building comprehensive indexes (6 variations)..."
 	@echo "This will take 2-4 hours for English Wikipedia..."
-	uv run python scripts/data/build_all_indexes.py \
-		--corpora wiki_simple wiki_en \
-		--embeddings minilm mpnet e5 \
-		--chunk-configs recursive_512
+	uv run ragicamp index --corpus simple --embedding minilm
+	uv run ragicamp index --corpus simple --embedding mpnet
+	uv run ragicamp index --corpus simple --embedding e5
+	uv run ragicamp index --corpus en --embedding minilm
+	uv run ragicamp index --corpus en --embedding mpnet
+	uv run ragicamp index --corpus en --embedding e5
 
 # Build just Simple Wikipedia indexes (faster, for testing)
 index-simple-wiki:
 	@echo "📚 Building Simple Wikipedia indexes (3 variations)..."
-	uv run python scripts/data/build_all_indexes.py \
-		--corpora wiki_simple \
-		--embeddings minilm mpnet e5 \
-		--chunk-configs recursive_512 recursive_1024
+	uv run ragicamp index --corpus simple --embedding minilm
+	uv run ragicamp index --corpus simple --embedding mpnet
+	uv run ragicamp index --corpus simple --embedding e5
 
 # Run comprehensive baseline study
 run-comprehensive:
 	@echo "🚀 Running comprehensive baseline (full study)..."
 	@echo "This will take 10-20 hours with all models..."
 	@echo "Using --skip-existing to resume safely..."
-	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing
+	uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
 
 # Run with timeout per experiment (e.g. 2 hours max)
 run-comprehensive-safe:
 	@echo "🚀 Running comprehensive baseline with 2h timeout per experiment..."
-	uv run python scripts/experiments/run_study.py conf/study/comprehensive_baseline.yaml --skip-existing --timeout 7200
+	uv run ragicamp run conf/study/comprehensive_baseline.yaml --skip-existing
 
 # ============================================================================
 # EVALUATION (re-run metrics on existing predictions)
 # ============================================================================
 
-# Re-evaluate with specific metrics: make evaluate PATH=outputs/simple METRICS=bertscore,bleurt
+# Re-evaluate with specific metrics: make evaluate DIR=outputs/simple METRICS=bertscore bleurt
 evaluate:
 	@echo "📊 Re-evaluating predictions..."
-	uv run python scripts/experiments/evaluate_predictions.py $(DIR) --metrics $(or $(METRICS),all)
+	uv run ragicamp evaluate $(DIR) --metrics $(or $(METRICS),all)
 
 # Compare results in a table: make compare DIR=outputs/simple
 compare:
-	uv run python scripts/eval/compare.py $(or $(DIR),outputs/simple) $(if $(SORT),--sort $(SORT),)
+	uv run ragicamp compare $(or $(DIR),outputs/simple)
 
 # Examples:
-#   make evaluate PATH=outputs/simple_hf METRICS=bertscore
-#   make evaluate PATH=outputs/simple_hf/direct_hf_google_gemma2bit_default_nq METRICS=llm_judge
-#   make evaluate PATH=outputs/simple METRICS=all
+#   make evaluate DIR=outputs/simple_hf METRICS=bertscore
+#   make evaluate DIR=outputs/simple_hf/direct_hf_google_gemma2bit_default_nq METRICS=llm_judge
+#   make evaluate DIR=outputs/simple METRICS=all
 
 # ============================================================================
 # DEV

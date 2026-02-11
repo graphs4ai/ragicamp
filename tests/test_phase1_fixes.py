@@ -304,7 +304,10 @@ class TestOpenAIModelName:
         mock_tiktoken.encoding_for_model.return_value = MagicMock()
         mock_response = MagicMock()
         mock_response.data = [MagicMock(embedding=[0.1, 0.2, 0.3])]
-        mock_openai.embeddings.create.return_value = mock_response
+        # Mock the OpenAI() client instance that __init__ creates
+        mock_client = MagicMock()
+        mock_client.embeddings.create.return_value = mock_response
+        mock_openai.OpenAI.return_value = mock_client
 
         from ragicamp.models.openai import OpenAIModel
 
@@ -312,7 +315,7 @@ class TestOpenAIModelName:
         model.get_embeddings(["test text"])
 
         # Verify it used model_name, not hardcoded "text-embedding-ada-002"
-        call_kwargs = mock_openai.embeddings.create.call_args
+        call_kwargs = mock_client.embeddings.create.call_args
         assert call_kwargs.kwargs["model"] == "text-embedding-3-large"
 
 

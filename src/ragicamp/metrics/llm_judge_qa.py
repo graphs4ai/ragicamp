@@ -18,7 +18,7 @@ Example:
 """
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.models.base import LanguageModel
@@ -71,7 +71,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         self,
         prediction: str,
         reference: str,
-        question: Optional[str] = None,
+        question: str | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
         """Compute judgment for a single prediction-reference pair (async, 1-to-1).

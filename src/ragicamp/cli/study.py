@@ -10,7 +10,7 @@ The actual implementation is delegated to specialized modules:
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Re-export for backward compatibility
 from ragicamp.config.validation import (
@@ -18,11 +18,11 @@ from ragicamp.config.validation import (
     validate_model_spec,
 )
 from ragicamp.core.constants import Defaults
+from ragicamp.core.logging import add_file_handler, get_logger
 from ragicamp.execution.runner import run_spec
 from ragicamp.indexes.builders import build_embedding_index, build_hierarchical_index
 from ragicamp.models import OpenAIModel
 from ragicamp.spec.builder import build_specs
-from ragicamp.core.logging import add_file_handler, get_logger
 from ragicamp.utils.artifacts import get_artifact_manager
 
 _study_logger = get_logger(__name__)
@@ -248,7 +248,7 @@ def create_generator_provider(spec: str):
     return ProviderFactory.create_generator(spec)
 
 
-def create_dataset(name: str, limit: Optional[int] = None):
+def create_dataset(name: str, limit: int | None = None):
     """Create dataset using DatasetFactory."""
     from ragicamp.factory import DatasetFactory
 
@@ -256,27 +256,72 @@ def create_dataset(name: str, limit: Optional[int] = None):
     return DatasetFactory.create(config)
 
 
-def create_judge_model(llm_judge_config: Optional[dict[str, Any]]):
-    """Create LLM judge model from config."""
+def create_judge_model(llm_judge_config: dict[str, Any] | None):
+    """Create LLM judge model from config.
+
+    Supports OpenAI and DeepInfra (or any OpenAI-compatible provider).
+    Provider is auto-detected from available API keys:
+    - DEEPINFRA_API_KEY → DeepInfra endpoint
+    - OPENAI_API_KEY → OpenAI endpoint
+
+    Config format in YAML:
+        llm_judge:
+          model: "openai:gpt-4o-mini"       # or "deepinfra:meta-llama/Llama-3.3-70B-Instruct"
+          base_url: "https://..."            # optional explicit override
+    """
+    import os
+
     if not llm_judge_config:
         return None
 
     model_spec = llm_judge_config.get("model", "openai:gpt-4o-mini")
+    explicit_base_url = llm_judge_config.get("base_url")
 
-    if model_spec.startswith("openai:"):
-        model_name = model_spec.split(":", 1)[1]
-        return OpenAIModel(model_name=model_name)
-    return None
+    # Parse provider prefix
+    if ":" in model_spec:
+        provider_prefix, model_name = model_spec.split(":", 1)
+    else:
+        provider_prefix, model_name = "openai", model_spec
+
+    # Resolve API key and base_url
+    if explicit_base_url:
+        api_key = os.environ.get("DEEPINFRA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        base_url = explicit_base_url
+    elif provider_prefix == "deepinfra":
+        api_key = os.environ.get("DEEPINFRA_API_KEY")
+        base_url = "https://api.deepinfra.com/v1/openai"
+    else:
+        # Auto-detect: prefer DeepInfra if key exists, else OpenAI
+        deepinfra_key = os.environ.get("DEEPINFRA_API_KEY")
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if deepinfra_key:
+            api_key = deepinfra_key
+            base_url = "https://api.deepinfra.com/v1/openai"
+        elif openai_key:
+            api_key = openai_key
+            base_url = None
+        else:
+            _study_logger.warning(
+                "No API key found for LLM judge (DEEPINFRA_API_KEY or OPENAI_API_KEY)"
+            )
+            return None
+
+    if not api_key:
+        _study_logger.warning("No API key found for LLM judge provider: %s", provider_prefix)
+        return None
+
+    _study_logger.info("LLM judge: %s (base_url=%s)", model_name, base_url or "default")
+    return OpenAIModel(model_name=model_name, api_key=api_key, base_url=base_url)
 
 
 def _run_spec_list(
     specs: list,
     *,
-    limit: Optional[int],
+    limit: int | None,
     metrics: list[str],
     out: Path,
     judge_model: Any = None,
-    llm_judge_config: Optional[dict[str, Any]] = None,
+    llm_judge_config: dict[str, Any] | None = None,
     force: bool = False,
 ) -> dict[str, int]:
     """Run a list of ExperimentSpecs, tracking results.
@@ -323,7 +368,7 @@ def _run_spec_list(
 
 def _build_specs_for_mode(
     config: dict[str, Any],
-    sampling_override: Optional[dict[str, Any]],
+    sampling_override: dict[str, Any] | None,
 ) -> tuple[list, dict[str, Any]]:
     """Build experiment specs based on the active sampling mode.
 
@@ -363,10 +408,10 @@ def run_study(
     dry_run: bool = False,
     skip_existing: bool = True,
     validate_only: bool = False,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     force: bool = False,
-    experiment_filter: Optional[str] = None,
-    sampling_override: Optional[dict[str, Any]] = None,
+    experiment_filter: str | None = None,
+    sampling_override: dict[str, Any] | None = None,
 ) -> None:
     """Run a study from a configuration dictionary.
 

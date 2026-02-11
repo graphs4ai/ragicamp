@@ -1,7 +1,7 @@
 """Dataset factory for creating QA datasets from configuration."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.datasets import (
@@ -23,7 +23,7 @@ class DatasetFactory:
     def parse_spec(
         name: str,
         split: str = "validation",
-        limit: Optional[int] = None,
+        limit: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Parse a dataset name into a config dict.

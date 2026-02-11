@@ -22,10 +22,11 @@ Phases:
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
 from ragicamp.agents.base import Agent
 from ragicamp.core.constants import Defaults
@@ -75,12 +76,12 @@ class _MetricsIncompleteError(Exception):
 class ExperimentCallbacks:
     """Callbacks for monitoring experiment progress."""
 
-    on_phase_start: Optional[Callable[[ExperimentPhase], None]] = None
-    on_phase_end: Optional[Callable[[ExperimentPhase], None]] = None
-    on_batch_start: Optional[Callable[[int, int], None]] = None
-    on_batch_end: Optional[Callable[[int, int, list[str]], None]] = None
-    on_checkpoint: Optional[Callable[[int, Path], None]] = None
-    on_complete: Optional[Callable[["ExperimentResult"], None]] = None
+    on_phase_start: Callable[[ExperimentPhase], None] | None = None
+    on_phase_end: Callable[[ExperimentPhase], None] | None = None
+    on_batch_start: Callable[[int, int], None] | None = None
+    on_batch_end: Callable[[int, int, list[str]], None] | None = None
+    on_checkpoint: Callable[[int, Path], None] | None = None
+    on_complete: Callable[["ExperimentResult"], None] | None = None
 
 
 @dataclass
@@ -91,8 +92,8 @@ class ExperimentResult:
     metrics: dict[str, float]
     num_examples: int
     duration_seconds: float
-    output_path: Optional[Path] = None
-    predictions_path: Optional[Path] = None
+    output_path: Path | None = None
+    predictions_path: Path | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -147,15 +148,15 @@ class Experiment:
     _spec: Optional["ExperimentSpec"] = field(default=None, repr=False)
 
     # Runtime state (not serialized)
-    _state: Optional[ExperimentState] = field(default=None, repr=False)
-    _callbacks: Optional[ExperimentCallbacks] = field(default=None, repr=False)
+    _state: ExperimentState | None = field(default=None, repr=False)
+    _callbacks: ExperimentCallbacks | None = field(default=None, repr=False)
     _batch_size: int = field(default=8, repr=False)
     _checkpoint_every: int = field(default=50, repr=False)
     _start_time: float = field(default=0.0, repr=False)
     _phase_timings: dict[str, float] = field(default_factory=dict, repr=False)
 
     # Phase handlers (lazy initialized)
-    _handlers: Optional[dict[ExperimentPhase, PhaseHandler]] = field(default=None, repr=False)
+    _handlers: dict[ExperimentPhase, PhaseHandler] | None = field(default=None, repr=False)
 
     # =========================================================================
     # Public API
@@ -196,8 +197,8 @@ class Experiment:
         batch_size: int = 8,
         checkpoint_every: int = 50,
         resume: bool = True,
-        callbacks: Optional[ExperimentCallbacks] = None,
-        phases: Optional[list[str]] = None,
+        callbacks: ExperimentCallbacks | None = None,
+        phases: list[str] | None = None,
         **kwargs: Any,
     ) -> ExperimentResult:
         """Run the experiment with phase-aware execution.
@@ -268,7 +269,7 @@ class Experiment:
             self._state.save(self.state_path)
             raise
 
-    def run_phase(self, phase: Union[str, ExperimentPhase]) -> None:
+    def run_phase(self, phase: str | ExperimentPhase) -> None:
         """Run a specific phase only."""
         if isinstance(phase, str):
             phase = ExperimentPhase(phase)
@@ -489,9 +490,9 @@ class Experiment:
         index_name: str,
         index_path: Path,
         retriever_config: dict | None = None,
-        sparse_index_override: Optional[str] = None,
-        rrf_k: Optional[int] = None,
-        alpha_override: Optional[float] = None,
+        sparse_index_override: str | None = None,
+        rrf_k: int | None = None,
+        alpha_override: float | None = None,
     ) -> "Callable[[], Any]":
         """Return a zero-arg callable that loads the search backend from disk.
 
@@ -574,8 +575,8 @@ class Experiment:
     def from_spec(
         cls,
         spec: "ExperimentSpec",
-        output_dir: Union[str, Path],
-        limit: Optional[int] = None,
+        output_dir: str | Path,
+        limit: int | None = None,
         judge_model: Any = None,
     ) -> "Experiment":
         """Create a fully-configured Experiment from an ExperimentSpec.
@@ -596,7 +597,6 @@ class Experiment:
             Fully configured Experiment ready to run
         """
         from ragicamp.factory import AgentFactory, DatasetFactory, MetricFactory, ProviderFactory
-        from ragicamp.indexes import VectorIndex
         from ragicamp.utils.artifacts import get_artifact_manager
 
         _setup_t0 = time.perf_counter()
@@ -720,7 +720,7 @@ class Experiment:
         agent: Agent,
         dataset: QADataset,
         metrics: list[Metric],
-        output_dir: Union[str, Path] = "outputs",
+        output_dir: str | Path = "outputs",
     ) -> "Experiment":
         """Create experiment from pre-built components."""
         return cls(

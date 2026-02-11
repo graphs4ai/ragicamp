@@ -25,7 +25,8 @@ The ``is_hybrid`` flag controls the result of
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ragicamp.core.logging import get_logger
 
@@ -46,9 +47,14 @@ class LazySearchBackend:
     """
 
     # Attributes that live on the proxy itself (not forwarded).
-    _PROXY_ATTRS = frozenset({
-        "_loader", "_backend", "_is_hybrid", "_PROXY_ATTRS",
-    })
+    _PROXY_ATTRS = frozenset(
+        {
+            "_loader",
+            "_backend",
+            "_is_hybrid",
+            "_PROXY_ATTRS",
+        }
+    )
 
     def __init__(self, loader: Callable[[], Any], *, is_hybrid: bool = False) -> None:
         # Use object.__setattr__ to avoid triggering __getattr__

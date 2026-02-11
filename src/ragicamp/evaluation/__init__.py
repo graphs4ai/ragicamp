@@ -1,10 +1,12 @@
 """Evaluation utilities for computing metrics on predictions."""
 
 import json
+from pathlib import Path
 from typing import Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.metrics.base import Metric
+from ragicamp.utils.experiment_io import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -55,9 +57,7 @@ def compute_metrics_from_file(
                     predictions=predictions, references=references, questions=questions
                 )
             else:
-                result = metric.compute_with_details(
-                    predictions=predictions, references=references
-                )
+                result = metric.compute_with_details(predictions=predictions, references=references)
             aggregate_results[result.name] = result.aggregate
             if result.per_item:
                 per_item_results[result.name] = result.per_item
@@ -80,29 +80,14 @@ def compute_metrics_from_file(
                 if i < len(scores):
                     pred["metrics"][metric_name] = scores[i]
 
-        # Save updated predictions
+        # Save updated predictions atomically
         data["aggregate_metrics"] = aggregate_results
         data["predictions"] = preds
 
-        with open(output_path, "w") as f:
-            json.dump(data, f, indent=2)
+        atomic_write_json(data, Path(output_path))
         logger.info("Saved updated predictions to: %s", output_path)
 
     return results
 
 
-# For backwards compatibility
-class Evaluator:
-    """Deprecated: Use compute_metrics_from_file() or Experiment.run() instead."""
-
-    @staticmethod
-    def compute_metrics_from_file(
-        predictions_path: str,
-        metrics: list[Metric],
-        output_path: str | None = None,
-    ) -> dict[str, Any]:
-        """Compute metrics from saved predictions file."""
-        return compute_metrics_from_file(predictions_path, metrics, output_path)
-
-
-__all__ = ["compute_metrics_from_file", "Evaluator"]
+__all__ = ["compute_metrics_from_file"]

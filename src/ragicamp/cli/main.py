@@ -30,7 +30,6 @@ if "VLLM_WORKER_MULTIPROC_METHOD" not in os.environ:
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
 
 from ragicamp.cli.commands import (
     cmd_backup,
@@ -55,10 +54,16 @@ def _add_run_parser(subparsers) -> None:
     p.add_argument("--dry-run", action="store_true", help="Preview only")
     p.add_argument("--skip-existing", action="store_true", help="Skip completed")
     p.add_argument("--validate", action="store_true", help="Validate config only")
-    p.add_argument("--sample", "-s", type=int, metavar="N", help="Sample N experiments (enables search)")
-    p.add_argument("--sample-mode", choices=["random", "tpe"], default="random", help="Sampling mode")
+    p.add_argument(
+        "--sample", "-s", type=int, metavar="N", help="Sample N experiments (enables search)"
+    )
+    p.add_argument(
+        "--sample-mode", choices=["random", "tpe"], default="random", help="Sampling mode"
+    )
     p.add_argument("--sample-seed", type=int, default=None, help="Random seed for sampling")
-    p.add_argument("--optimize-metric", type=str, default="f1", help="Metric to optimize (default: f1)")
+    p.add_argument(
+        "--optimize-metric", type=str, default="f1", help="Metric to optimize (default: f1)"
+    )
     p.add_argument("--limit", type=int, default=None, help="Max examples per experiment")
     p.add_argument("--force", action="store_true", help="Force re-run even if complete/failed")
     p.set_defaults(func=cmd_run)
@@ -68,7 +73,9 @@ def _add_index_parser(subparsers) -> None:
     """Add 'index' subcommand."""
     p = subparsers.add_parser("index", help="Build retrieval index")
     p.add_argument("--corpus", default="simple", help="Corpus: simple, en, or full version string")
-    p.add_argument("--embedding", default="minilm", help="Embedding: minilm, e5, mpnet, or full model name")
+    p.add_argument(
+        "--embedding", default="minilm", help="Embedding: minilm, e5, mpnet, or full model name"
+    )
     p.add_argument("--chunk-size", type=int, default=512, help="Chunk size in chars")
     p.add_argument("--max-docs", type=int, default=None, help="Max documents to index")
     p.set_defaults(func=cmd_index)
@@ -81,7 +88,9 @@ def _add_compare_parser(subparsers) -> None:
     p.add_argument("--top", type=int, default=10, help="Show top N results")
     p.add_argument("--metric", "-m", default="f1", help="Metric to compare")
     p.add_argument(
-        "--group-by", "-g", default="model",
+        "--group-by",
+        "-g",
+        default="model",
         choices=["model", "dataset", "prompt", "retriever", "quantization", "type"],
         help="Dimension to group by",
     )
@@ -96,6 +105,11 @@ def _add_evaluate_parser(subparsers) -> None:
     p.add_argument("--metrics", nargs="+", default=["f1", "exact_match"], help="Metrics to compute")
     p.add_argument("--output", type=Path, help="Output file")
     p.add_argument("--judge-model", default="gpt-4o-mini", help="Model for LLM judge")
+    p.add_argument(
+        "--judge-base-url",
+        default=None,
+        help="Base URL for OpenAI-compatible API (auto-detected from DEEPINFRA_API_KEY)",
+    )
     p.add_argument("--judgment-type", choices=["binary", "ternary"], default="binary")
     p.add_argument("--max-concurrent", type=int, default=20, help="Max concurrent LLM judge calls")
     p.set_defaults(func=cmd_evaluate)
@@ -123,6 +137,11 @@ def _add_metrics_parser(subparsers) -> None:
     p.add_argument("exp_dir", type=Path, help="Experiment directory")
     p.add_argument("--metrics", "-m", required=True, help="Comma-separated metrics")
     p.add_argument("--judge-model", default="gpt-4o-mini", help="Model for LLM judge")
+    p.add_argument(
+        "--judge-base-url",
+        default=None,
+        help="Base URL for OpenAI-compatible API (auto-detected from DEEPINFRA_API_KEY)",
+    )
     p.set_defaults(func=cmd_metrics)
 
 
@@ -174,9 +193,13 @@ def _add_prune_parser(subparsers) -> None:
         "prune",
         help="Remove orphaned remote files that no longer exist locally",
     )
-    p.add_argument("path", type=Path, nargs="?", default=None, help="Local directory to compare against")
+    p.add_argument(
+        "path", type=Path, nargs="?", default=None, help="Local directory to compare against"
+    )
     p.add_argument("--bucket", default="masters-bucket", help="B2 bucket name")
-    p.add_argument("--prefix", "-p", default=None, help="S3 key prefix to prune (default: latest backup)")
+    p.add_argument(
+        "--prefix", "-p", default=None, help="S3 key prefix to prune (default: latest backup)"
+    )
     p.add_argument("--dry-run", action="store_true", help="Preview only, do not delete")
     p.add_argument("--workers", "-w", type=int, default=12, help="Parallel delete threads")
     p.set_defaults(func=cmd_prune)
@@ -219,7 +242,7 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Main entry point."""
     parser = create_parser()
     args = parser.parse_args(argv)

@@ -13,7 +13,6 @@ Example:
     fig.savefig("model_comparison.png")
 """
 
-
 from ragicamp.analysis.comparison import compare_results, pivot_results
 from ragicamp.analysis.loader import ExperimentResult
 

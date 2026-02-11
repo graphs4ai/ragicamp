@@ -201,11 +201,7 @@ class TestBackupSyncLogic:
         mock_paginator = MagicMock()
         mock_s3.get_paginator.return_value = mock_paginator
         mock_paginator.paginate.return_value = [
-            {
-                "Contents": [
-                    {"Key": "test-prefix/artifacts/test.txt", "Size": file_size}
-                ]
-            }
+            {"Contents": [{"Key": "test-prefix/artifacts/test.txt", "Size": file_size}]}
         ]
 
         # Run backup in dry-run mode to avoid actual uploads

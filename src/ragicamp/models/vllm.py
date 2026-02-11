@@ -14,7 +14,7 @@ GPU Memory Partitioning:
 """
 
 import gc
-from typing import Any, Optional, Union
+from typing import Any
 
 from ragicamp.core.constants import Defaults
 from ragicamp.core.logging import get_logger
@@ -54,13 +54,13 @@ class VLLMModel(LanguageModel):
         self,
         model_name: str,
         dtype: str = "bfloat16",
-        quantization: Optional[str] = None,
-        gpu_memory_utilization: Optional[float] = None,
-        max_model_len: Optional[int] = None,
+        quantization: str | None = None,
+        gpu_memory_utilization: float | None = None,
+        max_model_len: int | None = None,
         tensor_parallel_size: int = 1,
         trust_remote_code: bool = True,
         enforce_eager: bool = False,
-        kv_cache_dtype: Optional[str] = None,
+        kv_cache_dtype: str | None = None,
         enable_prefix_caching: bool = True,
         **kwargs: Any,
     ):
@@ -175,13 +175,13 @@ class VLLMModel(LanguageModel):
 
     def generate(
         self,
-        prompt: Union[str, list[str]],
-        max_tokens: Optional[int] = None,
+        prompt: str | list[str],
+        max_tokens: int | None = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
-        stop: Optional[list[str]] = None,
+        stop: list[str] | None = None,
         **kwargs: Any,
-    ) -> Union[str, list[str]]:
+    ) -> str | list[str]:
         """Generate text using vLLM.
 
         Args:

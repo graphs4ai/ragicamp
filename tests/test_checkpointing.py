@@ -6,8 +6,6 @@ API calls. The new implementation handles errors gracefully per-item
 without checkpointing.
 """
 
-from typing import Optional
-
 import pytest
 
 from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
@@ -16,7 +14,7 @@ from ragicamp.metrics.llm_judge_qa import LLMJudgeQAMetric
 class MockAsyncJudgeModel:
     """Mock async LLM judge model for testing."""
 
-    def __init__(self, responses: Optional[list[str]] = None):
+    def __init__(self, responses: list[str] | None = None):
         self.model_name = "mock_judge"
         self.call_count = 0
         self.responses = responses or []

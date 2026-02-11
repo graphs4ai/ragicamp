@@ -1,17 +1,17 @@
 """Formatting utilities for RAG components."""
 
-from typing import Optional
-
 from ragicamp.core.types import Document
 
 # Metrics that should be formatted as percentages (0-1 range → 0-100%)
-PERCENTAGE_METRICS = frozenset({
-    "f1",
-    "exact_match",
-    "bertscore_f1",
-    "bleurt",
-    "llm_judge_qa",
-})
+PERCENTAGE_METRICS = frozenset(
+    {
+        "f1",
+        "exact_match",
+        "bertscore_f1",
+        "bleurt",
+        "llm_judge_qa",
+    }
+)
 
 
 def format_metrics_summary(metrics: dict[str, float]) -> str:
@@ -50,7 +50,7 @@ class ContextFormatter:
         template: str = "[{idx}] {text}",
         separator: str = "\n\n",
         empty_message: str = "No relevant context found.",
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
         include_metadata: bool = False,
     ) -> str:
         """Format a list of documents into a context string.
@@ -153,12 +153,12 @@ class ContextFormatter:
     @staticmethod
     def format_numbered_from_docs(docs: list) -> str:
         """Format documents with .text attribute as numbered passages.
-        
+
         Works with any object that has a .text attribute.
-        
+
         Args:
             docs: List of document-like objects with .text attribute
-        
+
         Returns:
             Numbered list of documents
         """
@@ -167,7 +167,7 @@ class ContextFormatter:
 
         formatted = []
         for i, doc in enumerate(docs, 1):
-            text = doc.text if hasattr(doc, 'text') else str(doc)
+            text = doc.text if hasattr(doc, "text") else str(doc)
             formatted.append(f"--- Passage {i} ---\n{text}")
 
         return "\n\n".join(formatted)

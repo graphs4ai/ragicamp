@@ -6,7 +6,7 @@ reproduce an experiment.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -43,21 +43,23 @@ class ExperimentSpec:
     model: str
     dataset: str
     prompt: str
-    retriever: Optional[str] = None
-    embedding_index: Optional[str] = None  # Actual index path (if different from retriever)
-    sparse_index: Optional[str] = None  # For hybrid retrieval
+    retriever: str | None = None
+    embedding_index: str | None = None  # Actual index path (if different from retriever)
+    sparse_index: str | None = None  # For hybrid retrieval
     top_k: int = 5
-    fetch_k: Optional[int] = None
-    query_transform: Optional[str] = None
-    reranker: Optional[str] = None
-    reranker_model: Optional[str] = None
-    rrf_k: Optional[int] = None
-    alpha: Optional[float] = None  # Dense/sparse blend (0=sparse, 1=dense). None = use retriever default.
+    fetch_k: int | None = None
+    query_transform: str | None = None
+    reranker: str | None = None
+    reranker_model: str | None = None
+    rrf_k: int | None = None
+    alpha: float | None = (
+        None  # Dense/sparse blend (0=sparse, 1=dense). None = use retriever default.
+    )
     batch_size: int = 8
     metrics: list[str] = field(default_factory=list)
     # Singleton experiment fields
-    agent_type: Optional[str] = None
-    hypothesis: Optional[str] = None
+    agent_type: str | None = None
+    hypothesis: str | None = None
     agent_params: tuple[tuple[str, Any], ...] = field(default_factory=tuple)
 
     _VALID_QUERY_TRANSFORMS = {None, "none", "hyde", "multiquery"}
@@ -72,9 +74,7 @@ class ExperimentSpec:
                 f"got '{self.query_transform}'"
             )
         if self.alpha is not None and not (0.0 <= self.alpha <= 1.0):
-            raise ValueError(
-                f"alpha must be between 0.0 and 1.0, got {self.alpha}"
-            )
+            raise ValueError(f"alpha must be between 0.0 and 1.0, got {self.alpha}")
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,53 @@ import yaml
 from ragicamp.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# DeepInfra OpenAI-compatible endpoint
+DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1/openai"
+
+
+def _resolve_judge_config(
+    model_name: str,
+    base_url: str | None = None,
+) -> tuple[str, str | None, str]:
+    """Resolve API key and base_url for the LLM judge.
+
+    Checks DEEPINFRA_API_KEY first, then OPENAI_API_KEY.
+    When DEEPINFRA_API_KEY is found and no explicit base_url is given,
+    automatically sets the DeepInfra endpoint.
+
+    Args:
+        model_name: Model identifier
+        base_url: Explicit base URL override (from --judge-base-url)
+
+    Returns:
+        Tuple of (api_key, base_url, provider_label)
+
+    Raises:
+        SystemExit: If no API key is found
+    """
+    deepinfra_key = os.environ.get("DEEPINFRA_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+
+    if base_url:
+        # Explicit base_url — use whichever key is available
+        api_key = deepinfra_key or openai_key
+        if not api_key:
+            print("Error: No API key found. Set DEEPINFRA_API_KEY or OPENAI_API_KEY.")
+            raise SystemExit(1)
+        return api_key, base_url, "custom"
+
+    if deepinfra_key:
+        return deepinfra_key, DEEPINFRA_BASE_URL, "DeepInfra"
+
+    if openai_key:
+        return openai_key, None, "OpenAI"
+
+    print("Error: No API key found for LLM judge.")
+    print("Set one of:")
+    print("  export DEEPINFRA_API_KEY='your-deepinfra-key'")
+    print("  export OPENAI_API_KEY='your-openai-key'")
+    raise SystemExit(1)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -164,8 +212,6 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
     """Compute metrics on predictions file."""
-    import os
-
     from ragicamp.evaluation import compute_metrics_from_file
     from ragicamp.factory import MetricFactory
 
@@ -174,16 +220,17 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     # Build judge model if needed for LLM metrics
     judge_model = None
     if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
-            print("Set it with: export OPENAI_API_KEY='your-key'")
-            return 1
         from ragicamp.models.openai import OpenAIModel
 
-        judge_model_name = args.judge_model
-        print(f"Using judge model: {judge_model_name} (max_concurrent={args.max_concurrent})")
-        judge_model = OpenAIModel(judge_model_name, temperature=0.0)
+        judge_base_url = getattr(args, "judge_base_url", None)
+        api_key, base_url, provider = _resolve_judge_config(args.judge_model, judge_base_url)
+        print(
+            f"Using judge model: {args.judge_model} via {provider}"
+            f" (max_concurrent={args.max_concurrent})"
+        )
+        judge_model = OpenAIModel(
+            args.judge_model, api_key=api_key, base_url=base_url, temperature=0.0
+        )
 
     metrics = MetricFactory.create(metric_names, judge_model=judge_model)
 
@@ -299,8 +346,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
 def cmd_metrics(args: argparse.Namespace) -> int:
     """Recompute metrics for an experiment."""
-    import os
-
     from ragicamp.evaluation import compute_metrics_from_file
     from ragicamp.factory import MetricFactory
 
@@ -317,14 +362,14 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     # Build judge model if needed
     judge_model = None
     if any(m in ("llm_judge", "llm_judge_qa") for m in metric_names):
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            print("Error: OPENAI_API_KEY not set. Required for llm_judge_qa.")
-            print("Set it with: export OPENAI_API_KEY='your-key'")
-            return 1
         from ragicamp.models.openai import OpenAIModel
 
-        judge_model = OpenAIModel(args.judge_model, temperature=0.0)
+        judge_base_url = getattr(args, "judge_base_url", None)
+        api_key, base_url, provider = _resolve_judge_config(args.judge_model, judge_base_url)
+        print(f"Using judge model: {args.judge_model} via {provider}")
+        judge_model = OpenAIModel(
+            args.judge_model, api_key=api_key, base_url=base_url, temperature=0.0
+        )
 
     metrics = MetricFactory.create(metric_names, judge_model=judge_model)
 

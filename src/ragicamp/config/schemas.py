@@ -254,12 +254,8 @@ class ExperimentConfig(BaseModel):
     metrics: list[str | dict[str, Any]] = Field(..., description="Metrics configuration")
 
     # Optional fields
-    judge_model: ModelConfig | None = Field(
-        default=None, description="Judge model for LLM metrics"
-    )
-    retriever: RetrieverConfig | None = Field(
-        default=None, description="Retriever configuration"
-    )
+    judge_model: ModelConfig | None = Field(default=None, description="Judge model for LLM metrics")
+    retriever: RetrieverConfig | None = Field(default=None, description="Retriever configuration")
     evaluation: EvaluationConfig = Field(
         default_factory=EvaluationConfig, description="Evaluation settings"
     )

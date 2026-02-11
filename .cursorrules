@@ -329,8 +329,8 @@ make index-small       # Create small index
 - ✅ Consolidated documentation
 - ✅ Robust CI/CD workflows
 
-**Key Agents:** DirectLLM, FixedRAG, BanditRAG, MDPRAG
-**Key Metrics:** EM, F1, BERTScore, BLEURT, Ragas (faithfulness, relevancy)
+**Key Agents:** DirectLLM, FixedRAG, IterativeRAG, SelfRAG
+**Key Metrics:** EM, F1, BERTScore, BLEURT, LLM Judge, Faithfulness
 
 ---
 

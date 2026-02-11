@@ -59,13 +59,15 @@ class MetricsHandler(PhaseHandler):
                 state.save(state_path)
 
         # Use shared metrics computation (handles batching, GPU cleanup, etc.)
-        aggregate_results, per_item_metrics, computed, failed, metric_timings = compute_metrics_batched(
-            metrics=context.metrics,
-            predictions=predictions,
-            references=references,
-            questions=questions,
-            already_computed=state.metrics_computed,
-            on_metric_complete=on_metric_complete,
+        aggregate_results, per_item_metrics, computed, failed, metric_timings = (
+            compute_metrics_batched(
+                metrics=context.metrics,
+                predictions=predictions,
+                references=references,
+                questions=questions,
+                already_computed=state.metrics_computed,
+                on_metric_complete=on_metric_complete,
+            )
         )
 
         # Update predictions with per-item metrics

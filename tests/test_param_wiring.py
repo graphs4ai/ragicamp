@@ -27,7 +27,6 @@ import pytest
 
 from ragicamp.spec import ExperimentSpec, build_specs
 
-
 # ============================================================================
 # 1. Legacy reranker YAML format
 # ============================================================================
@@ -187,10 +186,14 @@ class TestQueryTransformWiring:
         mock_index.documents = []
         mock_embedder = MagicMock()
         mock_embedder.model_name = "mock"
-        mock_embedder.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
+        mock_embedder.load = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock())
+        )
         mock_gen = MagicMock()
         mock_gen.model_name = "mock"
-        mock_gen.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
+        mock_gen.load = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock())
+        )
 
         agent = AgentFactory.from_spec(
             spec=spec,
@@ -224,10 +227,14 @@ class TestQueryTransformWiring:
         mock_index.documents = []
         mock_embedder = MagicMock()
         mock_embedder.model_name = "mock"
-        mock_embedder.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
+        mock_embedder.load = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock())
+        )
         mock_gen = MagicMock()
         mock_gen.model_name = "mock"
-        mock_gen.load = MagicMock(return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock()))
+        mock_gen.load = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock())
+        )
 
         agent = AgentFactory.from_spec(
             spec=spec,
@@ -326,8 +333,15 @@ class TestRunnerMetadataCompleteness:
         # spec.to_dict() must include ALL these fields
         d = spec.to_dict()
         required_fields = [
-            "model", "dataset", "prompt", "retriever", "top_k",
-            "embedding_index", "reranker", "reranker_model", "hypothesis",
+            "model",
+            "dataset",
+            "prompt",
+            "retriever",
+            "top_k",
+            "embedding_index",
+            "reranker",
+            "reranker_model",
+            "hypothesis",
         ]
         for field_name in required_fields:
             assert field_name in d, (
@@ -342,6 +356,7 @@ class TestRunnerMetadataCompleteness:
     def test_run_metrics_only_includes_spec_metadata_in_results(self):
         """run_metrics_only must include spec.to_dict() in results.json."""
         import tempfile
+
         from ragicamp.execution.runner import run_metrics_only
 
         spec = ExperimentSpec(
@@ -396,9 +411,7 @@ class TestRunnerMetadataCompleteness:
             with open(results_file) as f:
                 results = json.load(f)
 
-            assert "metadata" in results, (
-                "results.json must contain 'metadata' key from spec"
-            )
+            assert "metadata" in results, "results.json must contain 'metadata' key from spec"
             meta = results["metadata"]
             assert meta.get("model") == "vllm:test/model"
             assert meta.get("dataset") == "nq"
@@ -531,8 +544,7 @@ class TestStringFormatRetrievers:
         specs = build_specs(config)
 
         assert len(specs) >= 1, (
-            "String-format retrievers must produce RAG specs, not silently "
-            "default to 0 experiments"
+            "String-format retrievers must produce RAG specs, not silently default to 0 experiments"
         )
         assert specs[0].retriever == "dense_bge"
 
@@ -634,10 +646,11 @@ class TestEmbeddingIndexPrecedence:
         )
 
         # Mock the artifact manager and config
-        with patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am, \
-             patch("ragicamp.factory.providers.ProviderFactory.create_generator"), \
-             patch("ragicamp.factory.providers.ProviderFactory.create_embedder"):
-
+        with (
+            patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am,
+            patch("ragicamp.factory.providers.ProviderFactory.create_generator"),
+            patch("ragicamp.factory.providers.ProviderFactory.create_embedder"),
+        ):
             mock_manager = MagicMock()
             mock_am.return_value = mock_manager
             mock_manager.get_retriever_path.return_value = Path("/tmp/retriever")
@@ -652,8 +665,10 @@ class TestEmbeddingIndexPrecedence:
             mock_config_path = MagicMock()
             mock_config_path.exists.return_value = True
 
-            with patch("builtins.open", create=True) as mock_open, \
-                 patch("json.load", return_value=config_data):
+            with (
+                patch("builtins.open", create=True) as mock_open,
+                patch("json.load", return_value=config_data),
+            ):
                 mock_open.return_value.__enter__ = lambda s: s
                 mock_open.return_value.__exit__ = MagicMock()
 
@@ -675,11 +690,12 @@ class TestEmbeddingIndexPrecedence:
         """_build_index_loader must use sparse_index_override when provided."""
         from ragicamp.experiment import Experiment
 
-        with patch("ragicamp.indexes.vector_index.VectorIndex.load") as mock_vi, \
-             patch("ragicamp.indexes.sparse.SparseIndex.load") as mock_si, \
-             patch("ragicamp.retrievers.hybrid.HybridSearcher"), \
-             patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am:
-
+        with (
+            patch("ragicamp.indexes.vector_index.VectorIndex.load") as mock_vi,
+            patch("ragicamp.indexes.sparse.SparseIndex.load") as mock_si,
+            patch("ragicamp.retrievers.hybrid.HybridSearcher"),
+            patch("ragicamp.utils.artifacts.get_artifact_manager") as mock_am,
+        ):
             mock_vi.return_value = MagicMock(documents=[])
             mock_si.return_value = MagicMock()
             mock_am.return_value.get_sparse_index_path.return_value = Path("/tmp/sparse")

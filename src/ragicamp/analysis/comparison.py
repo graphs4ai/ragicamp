@@ -8,7 +8,8 @@ Provides utilities for:
 """
 
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from ragicamp.analysis.loader import ExperimentResult
 
@@ -91,7 +92,7 @@ def best_by(
     results: list[ExperimentResult],
     metric: str = "f1",
     n: int = 10,
-    filter_fn: Optional[Callable[[ExperimentResult], bool]] = None,
+    filter_fn: Callable[[ExperimentResult], bool] | None = None,
 ) -> list[ExperimentResult]:
     """Get the top N results by a metric.
 

@@ -1,6 +1,5 @@
 """Tests for LazySearchBackend proxy."""
 
-
 from ragicamp.retrievers.lazy import LazySearchBackend
 
 

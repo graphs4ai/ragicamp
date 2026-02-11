@@ -72,14 +72,20 @@ class TestGPUProfileFrozenDataclass:
 
     def test_immutable(self):
         """Test that frozen dataclass prevents field modification."""
-        profile = GPUProfile(tier="high", gpu_mem_gb=200.0, max_num_seqs=512, max_num_batched_tokens=32768)
+        profile = GPUProfile(
+            tier="high", gpu_mem_gb=200.0, max_num_seqs=512, max_num_batched_tokens=32768
+        )
         with pytest.raises(Exception):
             profile.tier = "low"
 
     def test_hashable_and_equal(self):
         """Test that frozen dataclass is hashable and supports equality."""
-        p1 = GPUProfile(tier="mid", gpu_mem_gb=100.0, max_num_seqs=256, max_num_batched_tokens=16384)
-        p2 = GPUProfile(tier="mid", gpu_mem_gb=100.0, max_num_seqs=256, max_num_batched_tokens=16384)
+        p1 = GPUProfile(
+            tier="mid", gpu_mem_gb=100.0, max_num_seqs=256, max_num_batched_tokens=16384
+        )
+        p2 = GPUProfile(
+            tier="mid", gpu_mem_gb=100.0, max_num_seqs=256, max_num_batched_tokens=16384
+        )
         assert p1 == p2
         assert hash(p1) == hash(p2)
 

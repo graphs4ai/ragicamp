@@ -1,7 +1,7 @@
 """Natural Questions dataset loader."""
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from datasets import load_dataset
 
@@ -18,7 +18,7 @@ class NaturalQuestionsDataset(QADataset):
     def __init__(
         self,
         split: str = "train",
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         use_cache: bool = True,
         **kwargs: Any,
     ):

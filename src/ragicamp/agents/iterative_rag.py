@@ -366,7 +366,7 @@ class IterativeRAGAgent(Agent):
                 REFINEMENT_PROMPT.format(
                     query=state.query.text,
                     previous_query=state.current_text,
-                    context=context[:Defaults.MAX_CONTEXT_CHARS],
+                    context=context[: Defaults.MAX_CONTEXT_CHARS],
                 )
             )
 

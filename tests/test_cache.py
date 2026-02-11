@@ -7,17 +7,15 @@ Tests cover:
     - Factory integration: RAGICAMP_CACHE env var toggling
 """
 
-import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
 from ragicamp.cache.embedding_store import EmbeddingStore, _text_hash
-
 
 # ============================================================================
 # Fixtures

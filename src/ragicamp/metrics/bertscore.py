@@ -2,7 +2,7 @@
 
 import gc
 import os
-from typing import Any, Optional
+from typing import Any
 
 # Fix matplotlib backend BEFORE any imports that might use it
 # This prevents errors when running in non-interactive environments (scripts vs notebooks)
@@ -31,7 +31,7 @@ class BERTScoreMetric(Metric):
         """
         super().__init__(name="bertscore", **kwargs)
         self.model_type = model_type
-        self._scorer: Optional[Any] = None  # Lazy loaded
+        self._scorer: Any | None = None  # Lazy loaded
 
     def _load_scorer(self) -> None:
         """Load the BERTScore model (lazy loading)."""

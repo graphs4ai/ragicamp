@@ -4,12 +4,9 @@ Covers RetrievalStore (SQLite KV) and the cache-aware batch_embed_and_search
 integration in the agent pipeline.
 """
 
-import json
-
 import pytest
 
 from ragicamp.cache.retrieval_store import RetrievalStore
-
 
 # ---------------------------------------------------------------------------
 # RetrievalStore
@@ -90,7 +87,9 @@ class TestRetrievalStore:
         store.put_batch("dense_bge", ["query1"], [sample_results[0]], top_k=5)
 
         cached, hit_mask = store.get_batch(
-            "dense_bge", ["query1", "query2"], top_k=5,
+            "dense_bge",
+            ["query1", "query2"],
+            top_k=5,
         )
 
         assert hit_mask == [True, False]

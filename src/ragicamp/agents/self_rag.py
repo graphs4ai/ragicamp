@@ -405,7 +405,7 @@ class SelfRAGAgent(Agent):
             state = retrieval_group[idx]
             verify_prompts.append(
                 VERIFICATION_PROMPT.format(
-                    context=state.context_text[:Defaults.MAX_VERIFICATION_CONTEXT_CHARS],
+                    context=state.context_text[: Defaults.MAX_VERIFICATION_CONTEXT_CHARS],
                     query=state.query.text,
                     answer=state.answer,
                 )

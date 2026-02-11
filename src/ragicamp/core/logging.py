@@ -16,7 +16,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Union
 
 # Default format for console output
 DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
@@ -56,7 +55,7 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
-def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
+def get_logger(name: str, level: int | None = None) -> logging.Logger:
     """Get a configured logger for a module.
 
     Args:
@@ -83,9 +82,9 @@ def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
 
 
 def configure_logging(
-    level: Optional[Union[int, str]] = None,
-    format_string: Optional[str] = None,
-    log_file: Optional[Union[str, Path]] = None,
+    level: int | str | None = None,
+    format_string: str | None = None,
+    log_file: str | Path | None = None,
     use_colors: bool = True,
     quiet: bool = False,
 ) -> None:
@@ -258,7 +257,7 @@ class LogContext:
 
 
 def add_file_handler(
-    log_file: Union[str, Path],
+    log_file: str | Path,
     level: int = logging.DEBUG,
 ) -> Path:
     """Add a file handler to the ragicamp root logger.
@@ -298,7 +297,7 @@ def add_file_handler(
 
 def create_experiment_logger(
     experiment_name: str,
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
     level: int = logging.INFO,
 ) -> logging.Logger:
     """Create a logger for a specific experiment.

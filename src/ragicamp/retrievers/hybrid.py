@@ -4,7 +4,6 @@ Uses Reciprocal Rank Fusion (RRF) to merge results.
 Works with the clean VectorIndex architecture.
 """
 
-
 from ragicamp.core.logging import get_logger
 from ragicamp.core.types import Document, SearchResult
 from ragicamp.indexes.sparse import SparseIndex
@@ -143,8 +142,8 @@ class HybridSearcher:
                 doc_id = doc.id
                 if doc_id not in doc_map:
                     doc_map[doc_id] = doc
-                rrf_scores[doc_id] = (
-                    rrf_scores.get(doc_id, 0) + (1 - self.alpha) / (self.rrf_k + sparse_rank)
+                rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + (1 - self.alpha) / (
+                    self.rrf_k + sparse_rank
                 )
 
         # Sort by RRF score descending and build final results

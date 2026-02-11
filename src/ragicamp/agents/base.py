@@ -325,7 +325,7 @@ def batch_transform_embed_and_search(
         candidates: list[tuple[float, Any]] = []  # (score, SearchResult)
         for i in range(start, end):
             for sr in flat_retrievals[i]:
-                content_key = hash(sr.document.text) if sr.document and sr.document.text else ""
+                content_key = sr.document.text if sr.document and sr.document.text else ""
                 if content_key not in seen_contents:
                     seen_contents.add(content_key)
                     candidates.append((sr.score if sr.score is not None else 0.0, sr))

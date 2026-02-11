@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 class GenerationHandler(PhaseHandler):
     """Handler for the GENERATING phase.
-    
+
     Simply calls agent.run(queries) - the agent manages everything:
     - Model loading/unloading
     - Batching strategy
@@ -48,7 +48,7 @@ class GenerationHandler(PhaseHandler):
         # Load questions
         with open(questions_path) as f:
             q_data = json.load(f)
-        
+
         # Convert to Query objects
         queries = [
             Query(
@@ -62,7 +62,7 @@ class GenerationHandler(PhaseHandler):
         # Load existing predictions to skip completed
         completed_idx: set[int] = set()
         predictions_data: dict[str, Any] = {"experiment": spec.name, "predictions": []}
-        
+
         if predictions_path.exists():
             with open(predictions_path) as f:
                 predictions_data = json.load(f)
@@ -70,7 +70,7 @@ class GenerationHandler(PhaseHandler):
             logger.info("Resuming: %d/%d complete", len(completed_idx), len(queries))
 
         pending = [q for q in queries if q.idx not in completed_idx]
-        
+
         if not pending:
             logger.info("All predictions complete")
             return state
@@ -105,18 +105,18 @@ class GenerationHandler(PhaseHandler):
         # Final save
         state.predictions_complete = len(predictions_data["predictions"])
         self._save_predictions(predictions_data, predictions_path)
-        
+
         # Clean up checkpoint
         if checkpoint_path.exists():
             checkpoint_path.unlink()
-        
+
         _phase_s = _time.perf_counter() - _phase_t0
         logger.info("Generated %d predictions in %.1fs", len(results), _phase_s)
         return state
 
     def _result_to_prediction(self, result: AgentResult) -> dict[str, Any]:
         """Convert AgentResult to prediction format.
-        
+
         Uses AgentResult.to_dict() which properly serializes:
         - Steps with timing info
         - Retrieved docs with scores and content

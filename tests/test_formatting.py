@@ -35,7 +35,7 @@ class TestFormatMetricsSummary:
         """Test that percentage metrics are formatted as percentages."""
         metrics = {"f1": 0.853, "exact_match": 0.75}
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=85.3%" in result
         assert "exact_match=75.0%" in result
 
@@ -43,7 +43,7 @@ class TestFormatMetricsSummary:
         """Test that non-percentage metrics are formatted as floats."""
         metrics = {"loss": 0.123456, "latency": 0.789}
         result = format_metrics_summary(metrics)
-        
+
         assert "loss=0.123" in result
         assert "latency=0.789" in result
 
@@ -56,7 +56,7 @@ class TestFormatMetricsSummary:
             "latency": 0.456,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=85.0%" in result
         assert "exact_match=90.0%" in result
         assert "loss=0.123" in result
@@ -66,14 +66,14 @@ class TestFormatMetricsSummary:
         """Test formatting with empty metrics dict."""
         metrics = {}
         result = format_metrics_summary(metrics)
-        
+
         assert result == "no metrics"
 
     def test_zero_values(self):
         """Test formatting with zero values."""
         metrics = {"f1": 0.0, "loss": 0.0}
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=0.0%" in result
         assert "loss=0.000" in result
 
@@ -81,7 +81,7 @@ class TestFormatMetricsSummary:
         """Test formatting with value of 1.0 for percentage metric."""
         metrics = {"exact_match": 1.0}
         result = format_metrics_summary(metrics)
-        
+
         assert result == "exact_match=100.0%"
 
     def test_all_percentage_metrics(self):
@@ -94,7 +94,7 @@ class TestFormatMetricsSummary:
             "llm_judge_qa": 0.9,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=50.0%" in result
         assert "exact_match=60.0%" in result
         assert "bertscore_f1=70.0%" in result
@@ -110,7 +110,7 @@ class TestFormatMetricsSummary:
             "loss": 0.123,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=85.0%" in result
         assert "loss=0.123" in result
         assert "status" not in result
@@ -125,7 +125,7 @@ class TestFormatMetricsSummary:
             "exact_match": 0.90,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=85.0%" in result
         assert "exact_match=90.0%" in result
         assert "loss" not in result
@@ -138,7 +138,7 @@ class TestFormatMetricsSummary:
             "count": 5,  # int non-zero
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=100.0%" in result
         assert "loss=0.000" in result
         assert "count=5.000" in result  # int is formatted as float
@@ -150,7 +150,7 @@ class TestFormatMetricsSummary:
             "loss": 0.123456789,  # Should round to 0.123
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=85.4%" in result
         assert "loss=0.123" in result
 
@@ -161,7 +161,7 @@ class TestFormatMetricsSummary:
             "loss": -0.123,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=-50.0%" in result
         assert "loss=-0.123" in result
 
@@ -172,7 +172,7 @@ class TestFormatMetricsSummary:
             "loss": 0.000001,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=0.0%" in result
         assert "loss=0.000" in result
 
@@ -183,7 +183,7 @@ class TestFormatMetricsSummary:
             "loss": 100.0,
         }
         result = format_metrics_summary(metrics)
-        
+
         assert "f1=150.0%" in result
         assert "loss=100.000" in result
 
@@ -198,7 +198,7 @@ class TestContextFormatter:
             Document(id="2", text="Second document", metadata={}, score=None),
         ]
         result = ContextFormatter.format_documents(docs)
-        
+
         assert "[1] First document" in result
         assert "[2] Second document" in result
 
@@ -206,7 +206,7 @@ class TestContextFormatter:
         """Test formatting with empty document list."""
         docs = []
         result = ContextFormatter.format_documents(docs)
-        
+
         assert result == "No relevant context found."
 
     def test_format_documents_custom_template(self):
@@ -217,7 +217,7 @@ class TestContextFormatter:
         result = ContextFormatter.format_documents(
             docs, template="Doc {idx} (score={score:.2f}): {text}"
         )
-        
+
         assert result == "Doc 1 (score=0.90): Test"
 
     def test_format_documents_custom_separator(self):
@@ -227,16 +227,14 @@ class TestContextFormatter:
             Document(id="2", text="Second", metadata={}, score=None),
         ]
         result = ContextFormatter.format_documents(docs, separator=" | ")
-        
+
         assert result == "[1] First | [2] Second"
 
     def test_format_documents_custom_empty_message(self):
         """Test formatting with custom empty message."""
         docs = []
-        result = ContextFormatter.format_documents(
-            docs, empty_message="No docs available"
-        )
-        
+        result = ContextFormatter.format_documents(docs, empty_message="No docs available")
+
         assert result == "No docs available"
 
     def test_format_documents_max_length(self):
@@ -250,7 +248,7 @@ class TestContextFormatter:
             ),
         ]
         result = ContextFormatter.format_documents(docs, max_length=20)
-        
+
         assert result == "[1] This is a very long ..."
         # Text part is truncated with " ..."
         text_part = result.split("] ")[1]
@@ -262,7 +260,7 @@ class TestContextFormatter:
             Document(id="1", text="Short", metadata={}, score=None),
         ]
         result = ContextFormatter.format_documents(docs, max_length=20)
-        
+
         assert result == "[1] Short"
 
     def test_format_documents_include_metadata(self):
@@ -278,7 +276,7 @@ class TestContextFormatter:
         result = ContextFormatter.format_documents(
             docs, template="{idx}: {text} (title={title}, source={source})", include_metadata=True
         )
-        
+
         assert "title=Test Title" in result
         assert "source=test.txt" in result
 
@@ -289,7 +287,7 @@ class TestContextFormatter:
             Document(id="2", text="Second", metadata={}, score=0.85),
         ]
         result = ContextFormatter.format_documents(docs)
-        
+
         # Default template includes score via {score} placeholder
         assert "[1] First" in result
         assert "[2] Second" in result
@@ -299,10 +297,8 @@ class TestContextFormatter:
         docs = [
             Document(id="1", text="Test", metadata={}, score=None),
         ]
-        result = ContextFormatter.format_documents(
-            docs, template="Score: {score}"
-        )
-        
+        result = ContextFormatter.format_documents(docs, template="Score: {score}")
+
         assert result == "Score: 0.0"
 
     def test_format_with_scores(self):
@@ -311,7 +307,7 @@ class TestContextFormatter:
             Document(id="1", text="Example", metadata={}, score=0.856),
         ]
         result = ContextFormatter.format_with_scores(docs)
-        
+
         assert "[1] (score: 0.856) Example" in result
 
     def test_format_with_scores_no_show(self):
@@ -320,7 +316,7 @@ class TestContextFormatter:
             Document(id="1", text="Example", metadata={}, score=0.856),
         ]
         result = ContextFormatter.format_with_scores(docs, show_score=False)
-        
+
         assert result == "[1] Example"
 
     def test_format_with_scores_custom_format(self):
@@ -329,7 +325,7 @@ class TestContextFormatter:
             Document(id="1", text="Example", metadata={}, score=0.856),
         ]
         result = ContextFormatter.format_with_scores(docs, score_format="{score:.1f}")
-        
+
         assert "[1] (score: 0.9) Example" in result
 
     def test_format_numbered(self):
@@ -339,7 +335,7 @@ class TestContextFormatter:
             Document(id="2", text="Second document", metadata={}, score=None),
         ]
         result = ContextFormatter.format_numbered(docs)
-        
+
         assert "--- Passage 1 ---" in result
         assert "First document" in result
         assert "--- Passage 2 ---" in result
@@ -349,18 +345,19 @@ class TestContextFormatter:
         """Test format_numbered with empty list."""
         docs = []
         result = ContextFormatter.format_numbered(docs)
-        
+
         assert result == "No relevant passages found."
 
     def test_format_numbered_from_docs(self):
         """Test format_numbered_from_docs method."""
+
         class DocLike:
             def __init__(self, text):
                 self.text = text
-        
+
         docs = [DocLike("First"), DocLike("Second")]
         result = ContextFormatter.format_numbered_from_docs(docs)
-        
+
         assert "--- Passage 1 ---" in result
         assert "First" in result
         assert "--- Passage 2 ---" in result
@@ -370,18 +367,19 @@ class TestContextFormatter:
         """Test format_numbered_from_docs with empty list."""
         docs = []
         result = ContextFormatter.format_numbered_from_docs(docs)
-        
+
         assert result == "No relevant passages found."
 
     def test_format_numbered_from_docs_no_text_attr(self):
         """Test format_numbered_from_docs with object without text attribute."""
+
         class DocLike:
             def __init__(self, content):
                 self.content = content
-        
+
         docs = [DocLike("Test")]
         result = ContextFormatter.format_numbered_from_docs(docs)
-        
+
         # Should convert to string
         assert "--- Passage 1 ---" in result
 
@@ -396,7 +394,7 @@ class TestContextFormatter:
             ),
         ]
         result = ContextFormatter.format_with_titles(docs)
-        
+
         assert "[1] Title: Document Title" in result
         assert "Content: Content here" in result
 
@@ -406,7 +404,7 @@ class TestContextFormatter:
             Document(id="1", text="Content", metadata={}, score=None),
         ]
         result = ContextFormatter.format_with_titles(docs)
-        
+
         assert "[1] Title: Document 1" in result
         assert "Content: Content" in result
 
@@ -421,14 +419,14 @@ class TestContextFormatter:
             ),
         ]
         result = ContextFormatter.format_with_titles(docs, title_key="heading")
-        
+
         assert "Title: Custom Heading" in result
 
     def test_format_with_titles_empty(self):
         """Test format_with_titles with empty list."""
         docs = []
         result = ContextFormatter.format_with_titles(docs)
-        
+
         assert result == "No relevant context found."
 
     def test_format_with_titles_multiple_docs(self):
@@ -448,7 +446,7 @@ class TestContextFormatter:
             ),
         ]
         result = ContextFormatter.format_with_titles(docs)
-        
+
         assert "[1] Title: First Title" in result
         assert "First content" in result
         assert "[2] Title: Second Title" in result

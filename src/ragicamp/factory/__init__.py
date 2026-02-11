@@ -9,14 +9,14 @@ Clean architecture:
 Example:
     from ragicamp.factory import ProviderFactory, AgentFactory
     from ragicamp.indexes import VectorIndex
-    
+
     # Create providers
     embedder = ProviderFactory.create_embedder("BAAI/bge-large-en")
     generator = ProviderFactory.create_generator("vllm:meta-llama/Llama-3.2-3B")
-    
+
     # Load index
     index = VectorIndex.load("my_index")
-    
+
     # Create agent
     agent = AgentFactory.create_rag(
         agent_type="fixed_rag",
@@ -25,7 +25,7 @@ Example:
         generator_provider=generator,
         index=index,
     )
-    
+
     # Run
     results = agent.run(queries)
 """

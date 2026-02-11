@@ -12,7 +12,7 @@ Usage:
         logger.error("RAGiCamp error: %s", e)
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class RAGiCampError(Exception):
@@ -27,8 +27,8 @@ class RAGiCampError(Exception):
     def __init__(
         self,
         message: str,
-        details: Optional[dict[str, Any]] = None,
-        cause: Optional[Exception] = None,
+        details: dict[str, Any] | None = None,
+        cause: Exception | None = None,
     ):
         self.message = message
         self.details = details or {}
