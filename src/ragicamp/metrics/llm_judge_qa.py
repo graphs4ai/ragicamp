@@ -244,6 +244,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             return ("incorrect", 0.0)
 
         # Default to incorrect if can't parse (conservative)
+        logger.warning("Could not parse judgment (defaulting to incorrect): %.120s", judgment_text)
         return ("incorrect", 0.0)
 
 

@@ -135,7 +135,15 @@ class OpenAIModel(LanguageModel):
             api_params["stop"] = stop
 
         response = self._sync_client.chat.completions.create(**api_params)
-        return response.choices[0].message.content or ""
+        content = response.choices[0].message.content
+        if not content:
+            logger.warning(
+                "Empty response from %s (finish_reason=%s, prompt=%.80s...)",
+                self.model_name,
+                response.choices[0].finish_reason,
+                prompt[:80],
+            )
+        return content or ""
 
     def generate(
         self,
@@ -264,7 +272,15 @@ class OpenAIModel(LanguageModel):
             api_params["stop"] = stop
 
         response = await self.async_client.chat.completions.create(**api_params)
-        return response.choices[0].message.content or ""
+        content = response.choices[0].message.content
+        if not content:
+            logger.warning(
+                "Empty response from %s (finish_reason=%s, prompt=%.80s...)",
+                self.model_name,
+                response.choices[0].finish_reason,
+                prompt[:80],
+            )
+        return content or ""
 
     async def agenerate(
         self,
