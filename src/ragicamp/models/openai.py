@@ -125,8 +125,12 @@ class OpenAIModel(LanguageModel):
             api_params["temperature"] = temperature
             api_params["top_p"] = top_p
         if max_tokens is not None:
-            # Use max_completion_tokens for newer models (o1, o3, etc.)
-            api_params["max_completion_tokens"] = max_tokens
+            # Reasoning models (o1, o3) require max_completion_tokens;
+            # third-party providers (DeepInfra, etc.) only understand max_tokens.
+            if self._supports_sampling_params():
+                api_params["max_tokens"] = max_tokens
+            else:
+                api_params["max_completion_tokens"] = max_tokens
         if stop is not None:
             api_params["stop"] = stop
 
@@ -252,8 +256,10 @@ class OpenAIModel(LanguageModel):
             api_params["temperature"] = temperature
             api_params["top_p"] = top_p
         if max_tokens is not None:
-            # Use max_completion_tokens for newer models (o1, o3, etc.)
-            api_params["max_completion_tokens"] = max_tokens
+            if self._supports_sampling_params():
+                api_params["max_tokens"] = max_tokens
+            else:
+                api_params["max_completion_tokens"] = max_tokens
         if stop is not None:
             api_params["stop"] = stop
 
