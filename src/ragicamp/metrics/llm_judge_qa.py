@@ -70,43 +70,39 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
     async def acompute_single(
         self,
         prediction: str,
-        reference: str,
+        reference: str | list[str],
         question: str | None = None,
         **kwargs: Any,
     ) -> dict[str, float]:
-        """Compute judgment for a single prediction-reference pair (async, 1-to-1).
+        """Compute judgment for a single prediction against one or more references.
 
         Args:
             prediction: Predicted answer
-            reference: Single reference answer
+            reference: Reference answer(s) — str or list of valid answers
             question: Question for context (highly recommended)
             **kwargs: Additional parameters
 
         Returns:
             Dict with score and category info
         """
-        # Create judgment prompt with single reference
         prompt = self._create_judgment_prompt(
             question=question,
             prediction=prediction,
             reference=reference,
         )
 
-        # Call LLM asynchronously
-        # Use 500 tokens to avoid truncation errors
         if hasattr(self.judge_model, "agenerate_single"):
             judgment = await self.judge_model.agenerate_single(
                 prompt,
                 temperature=0.0,
-                max_tokens=500,
+                max_tokens=50,
             )
         else:
-            # Fallback to sync if async not available
             import asyncio
 
             loop = asyncio.get_event_loop()
             judgment = await loop.run_in_executor(
-                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=500)
+                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=50)
             )
 
         # Extract categorical judgment
@@ -153,54 +149,35 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
         return aggregated
 
-    def _create_judgment_prompt(self, question: str, prediction: str, reference: str) -> str:
-        """Create a clear prompt for categorical QA judgment (1-to-1).
+    def _create_judgment_prompt(
+        self, question: str, prediction: str, reference: str | list[str]
+    ) -> str:
+        """Create a compact prompt for categorical QA judgment.
 
         Args:
             question: The question being answered
             prediction: The predicted answer
-            reference: Single reference answer
+            reference: Valid answer(s) — str or list of acceptable answers
         """
+        # Normalize references to a formatted string
+        if isinstance(reference, list):
+            ref_str = " | ".join(reference)
+        else:
+            ref_str = reference
+
         if self.judgment_type == "binary":
-            categories_desc = """
-- CORRECT: The prediction accurately answers the question with the same information as the reference
-- INCORRECT: The prediction is wrong, incomplete, or doesn't match the reference
-"""
-            output_format = "First line: JUDGMENT: [CORRECT/INCORRECT]"
-        else:  # ternary
-            categories_desc = """
-- CORRECT: The prediction accurately answers the question with the same core information as the reference
-- PARTIALLY_CORRECT: The prediction contains the right information but with extra/missing details, or is close but not exact
-- INCORRECT: The prediction is fundamentally wrong or completely misses the reference answer
-"""
-            output_format = "First line: JUDGMENT: [CORRECT/PARTIALLY_CORRECT/INCORRECT]"
+            categories = "CORRECT or INCORRECT"
+        else:
+            categories = "CORRECT, PARTIALLY_CORRECT, or INCORRECT"
 
-        prompt = f"""You are an expert evaluator for question-answering systems. Evaluate if the predicted answer is correct compared to the reference answer.
-
-Question: {question}
-
-Reference Answer: {reference}
-
-Predicted Answer: {prediction}
-
-Task: Determine if the predicted answer is semantically correct compared to the reference answer.
-
-Categories:
-{categories_desc}
-
-Instructions:
-1. Focus on semantic correctness, not exact wording
-2. Consider that answers may be phrased differently but still correct
-3. For dates, numbers, names: small variations matter (e.g., "1776" vs "1777" is incorrect)
-4. For descriptive answers: core meaning should match
-
-Output Format:
-{output_format}
-Second line: Brief 1-sentence explanation
-
-Your evaluation:"""
-
-        return prompt
+        return (
+            f"Judge if the prediction answers the question correctly "
+            f"based on the valid answer(s). Focus on semantic match, not wording.\n\n"
+            f"Q: {question}\n"
+            f"Valid: {ref_str}\n"
+            f"Pred: {prediction}\n\n"
+            f"JUDGMENT: [{categories}]\nReason:"
+        )
 
     def _extract_judgment(self, judgment_text: str) -> tuple:
         """Extract categorical judgment and convert to score.

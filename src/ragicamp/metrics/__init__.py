@@ -156,8 +156,8 @@ def compute_metrics_batched(
     has_multi = _has_multi_references(references)
 
     if has_multi:
-        # Expand for multi-reference evaluation
-        expanded_preds, expanded_refs, expanded_questions, pred_indices, _ = (
+        # Expand for multi-reference evaluation (used by non-LLM metrics)
+        expanded_preds, expanded_refs, _, pred_indices, _ = (
             _expand_for_multi_reference(predictions, references, questions)
         )
         logger.info(
@@ -169,7 +169,6 @@ def compute_metrics_batched(
         # Simple case: 1-to-1
         expanded_preds = predictions
         expanded_refs = references
-        expanded_questions = questions
         pred_indices = list(range(len(predictions)))
 
     for metric in metrics:
@@ -185,15 +184,20 @@ def compute_metrics_batched(
             # Call metric with compute_with_details() to get per-item scores
             # directly from the return value, avoiding the stateful
             # _last_per_item side-channel (4.13 fix).
-            if metric.name in ("llm_judge", "llm_judge_qa"):
-                if expanded_questions is None:
+            is_llm_judge = metric.name in ("llm_judge", "llm_judge_qa")
+
+            if is_llm_judge:
+                if questions is None:
                     logger.warning("%s requires questions, skipping", metric.name)
                     failed.append(metric.name)
                     continue
+                # LLM judge handles multi-reference internally: all valid
+                # answers are listed in a single prompt, avoiding N separate
+                # API calls per question. Pass original (non-expanded) data.
                 metric_result = metric.compute_with_details(
-                    predictions=expanded_preds,
-                    references=expanded_refs,
-                    questions=expanded_questions,
+                    predictions=predictions,
+                    references=references,
+                    questions=questions,
                 )
             else:
                 metric_result = metric.compute_with_details(
@@ -203,8 +207,8 @@ def compute_metrics_batched(
             scores = {metric_result.name: metric_result.aggregate}
             expanded_per_item = metric_result.per_item
 
-            # Aggregate if multi-reference
-            if has_multi and expanded_per_item:
+            # Aggregate if multi-reference (not needed for LLM judge)
+            if has_multi and expanded_per_item and not is_llm_judge:
                 aggregated_per_item = _aggregate_multi_reference_scores(
                     expanded_per_item, pred_indices, len(predictions)
                 )
