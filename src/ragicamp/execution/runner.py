@@ -40,6 +40,7 @@ def run_metrics_only(
     metrics: list[str],
     judge_model: Any = None,
     spec: "ExperimentSpec | None" = None,
+    force: bool = False,
 ) -> str:
     """Run metrics computation only - no model needed.
 
@@ -52,6 +53,7 @@ def run_metrics_only(
         metrics: List of metric names to compute
         judge_model: Optional LLM judge model for llm_judge metric
         spec: Optional ExperimentSpec for enriching results metadata
+        force: Recompute metrics even if already present
 
     Returns:
         Status string
@@ -89,12 +91,13 @@ def run_metrics_only(
             state.save(io.state_path)
 
     # Use shared metrics computation
+    already_computed = [] if force else state.metrics_computed
     aggregate_results, per_item_metrics, computed, failed, _timings = compute_metrics_batched(
         metrics=metric_objs,
         predictions=predictions,
         references=references,
         questions=questions,
-        already_computed=state.metrics_computed,
+        already_computed=already_computed,
         on_metric_complete=on_metric_complete,
     )
 
@@ -485,6 +488,7 @@ def run_spec(
                 metrics=metrics,
                 judge_model=judge_model,
                 spec=spec,
+                force=force,
             )
         else:
             # Full path - load model, run generation + metrics

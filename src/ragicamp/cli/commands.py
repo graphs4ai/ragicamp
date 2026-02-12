@@ -740,6 +740,7 @@ def cmd_compute_metrics(args: argparse.Namespace) -> int:
                 output_path=exp_dir,
                 metrics=metric_names,
                 judge_model=judge_model,
+                force=force,
             )
             if status == "failed":
                 print("  FAILED")

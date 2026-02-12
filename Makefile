@@ -120,8 +120,9 @@ evaluate:
 # Batch compute metrics: make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa
 # With judge model:      make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa JUDGE_MODEL=deepseek-ai/DeepSeek-V3.2
 # Dry run:               make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa DRY_RUN=1
+# Force recompute:       make compute-metrics DIR=outputs/simple METRICS=llm_judge_qa FORCE=1
 compute-metrics:
-	uv run ragicamp compute-metrics $(DIR) --metrics $(METRICS) $(if $(JUDGE_MODEL),--judge-model $(JUDGE_MODEL)) $(if $(DRY_RUN),--dry-run)
+	uv run ragicamp compute-metrics $(DIR) --metrics $(METRICS) $(if $(JUDGE_MODEL),--judge-model $(JUDGE_MODEL)) $(if $(DRY_RUN),--dry-run) $(if $(FORCE),--force)
 
 # Compare results in a table: make compare DIR=outputs/simple
 compare:
