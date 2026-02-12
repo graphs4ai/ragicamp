@@ -105,7 +105,6 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             Dict with score and category info
         """
         prompt = self._create_judgment_prompt(
-            question=question,
             prediction=prediction,
             reference=reference,
         )
@@ -180,16 +179,14 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         return aggregated
 
     def _create_judgment_prompt(
-        self, question: str, prediction: str, reference: str | list[str]
+        self, prediction: str, reference: str | list[str], **_kwargs: Any
     ) -> str:
-        """Create a compact prompt for categorical QA judgment.
+        """Create a compact prompt for semantic equivalence judgment.
 
         Args:
-            question: The question being answered
             prediction: The predicted answer
             reference: Valid answer(s) — str or list of acceptable answers
         """
-        # Normalize references to a formatted string
         if isinstance(reference, list):
             ref_str = " | ".join(reference)
         else:
@@ -201,12 +198,11 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             categories = "CORRECT, PARTIALLY_CORRECT, or INCORRECT"
 
         return (
-            f"Judge if the prediction answers the question correctly "
-            f"based on the valid answer(s). Focus on semantic match, not wording.\n\n"
-            f"Q: {question}\n"
+            f"Is the following prediction semantically equivalent "
+            f"to any of the valid answers?\n\n"
             f"Valid: {ref_str}\n"
             f"Pred: {prediction}\n\n"
-            f"Reply with {categories} as your first word, then a brief reason."
+            f"Reply {categories} then a brief reason."
         )
 
     def _extract_judgment(self, judgment_text: str) -> tuple:
