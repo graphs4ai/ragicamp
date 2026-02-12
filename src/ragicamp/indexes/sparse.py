@@ -68,9 +68,8 @@ class SparseIndex:
         self._vectorizer: Any = None
         self._doc_vectors: Any = None
 
-        # BM25 components
+        # BM25 component (bm25s library)
         self._bm25: Any = None
-        self._tokenized_corpus: list[list[str]] | None = None
 
     def build(self, documents: list[Document], show_progress: bool = True) -> None:
         """Build sparse index from documents.
@@ -114,22 +113,19 @@ class SparseIndex:
         logger.info("TF-IDF: %d features", self._doc_vectors.shape[1])
 
     def _build_bm25(self, texts: list[str], show_progress: bool = True) -> None:
-        """Build BM25 index."""
-        from rank_bm25 import BM25Okapi
+        """Build BM25 index using bm25s (vectorized sparse matrices)."""
+        import bm25s
 
-        logger.info("Tokenizing corpus for BM25...")
+        logger.info("Tokenizing %d documents for BM25...", len(texts))
+        corpus_tokens = bm25s.tokenize(
+            texts, stopwords=None, stemmer=None, show_progress=show_progress,
+        )
+        logger.info("Tokenization complete, vocab size: %d", len(corpus_tokens.vocab))
 
-        # Simple whitespace tokenization (BM25Okapi expects list of token lists)
-        if show_progress and len(texts) > 10000:
-            self._tokenized_corpus = [
-                text.lower().split() for text in tqdm(texts, desc="Tokenizing for BM25")
-            ]
-        else:
-            self._tokenized_corpus = [text.lower().split() for text in texts]
-
-        logger.info("Building BM25 index...")
-        self._bm25 = BM25Okapi(self._tokenized_corpus)
-        logger.info("BM25 index built")
+        logger.info("Building BM25 sparse index...")
+        self._bm25 = bm25s.BM25()
+        self._bm25.index(corpus_tokens, show_progress=show_progress)
+        logger.info("BM25 index built (scipy sparse matrices)")
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[int, float]]:
         """Search sparse index.
@@ -162,15 +158,37 @@ class SparseIndex:
         ]
 
     def _search_bm25(self, query: str, top_k: int) -> list[tuple[int, float]]:
-        """Search using BM25."""
+        """Search using BM25 (delegates to batch)."""
         if self._bm25 is None:
             return []
+        return self._batch_search_bm25([query], top_k)[0]
 
-        tokenized_query = query.lower().split()
-        scores = self._bm25.get_scores(tokenized_query)
+    def _batch_search_bm25(
+        self, queries: list[str], top_k: int
+    ) -> list[list[tuple[int, float]]]:
+        """Vectorized batch BM25 search using bm25s.retrieve()."""
+        import bm25s
 
-        top_indices = np.argsort(scores)[-top_k:][::-1]
-        return [(int(idx), float(scores[idx])) for idx in top_indices if scores[idx] > 0.0]
+        if self._bm25 is None:
+            return [[] for _ in queries]
+
+        query_tokens = bm25s.tokenize(
+            queries, stopwords=None, stemmer=None, show_progress=False,
+        )
+        results_array, scores_array = self._bm25.retrieve(query_tokens, k=top_k)
+
+        all_results: list[list[tuple[int, float]]] = []
+        for i in range(len(queries)):
+            query_results: list[tuple[int, float]] = []
+            for j in range(top_k):
+                doc_idx = int(results_array[i, j])
+                score = float(scores_array[i, j])
+                if doc_idx < 0 or score <= 0.0:
+                    continue
+                query_results.append((doc_idx, score))
+            all_results.append(query_results)
+
+        return all_results
 
     def batch_search(self, queries: list[str], top_k: int = 10) -> list[list[tuple[int, float]]]:
         """Batch search for multiple queries.
@@ -185,8 +203,7 @@ class SparseIndex:
         if self.method == SparseMethod.TFIDF:
             return self._batch_search_tfidf(queries, top_k)
         else:
-            # BM25 doesn't have efficient batch search, fall back to sequential
-            return [self._search_bm25(q, top_k) for q in queries]
+            return self._batch_search_bm25(queries, top_k)
 
     def _batch_search_tfidf(self, queries: list[str], top_k: int) -> list[list[tuple[int, float]]]:
         """Batch TF-IDF search."""
@@ -256,10 +273,8 @@ class SparseIndex:
             with open(path / "doc_vectors.pkl", "wb") as f:
                 pickle.dump(self._doc_vectors, f)
         else:
-            with open(path / "bm25.pkl", "wb") as f:
-                pickle.dump(self._bm25, f)
-            with open(path / "tokenized_corpus.pkl", "wb") as f:
-                pickle.dump(self._tokenized_corpus, f)
+            # bm25s native save (scipy sparse matrices + vocab_dict)
+            self._bm25.save(str(path / "bm25s_data"))
 
         logger.info("Saved sparse index to: %s", path)
         return path
@@ -314,10 +329,19 @@ class SparseIndex:
             with open(path / "doc_vectors.pkl", "rb") as f:
                 index._doc_vectors = pickle.load(f)
         else:
-            with open(path / "bm25.pkl", "rb") as f:
-                index._bm25 = pickle.load(f)
-            with open(path / "tokenized_corpus.pkl", "rb") as f:
-                index._tokenized_corpus = pickle.load(f)
+            import bm25s
+
+            bm25_dir = path / "bm25s_data"
+
+            # Detect old rank_bm25 pickle format
+            if (path / "bm25.pkl").exists() and not bm25_dir.exists():
+                raise ValueError(
+                    f"BM25 index at {path} uses the old rank_bm25 pickle format. "
+                    "Delete the sparse index directory and rebuild with: "
+                    "make index-full (or make index-simple)"
+                )
+
+            index._bm25 = bm25s.BM25.load(str(bm25_dir), mmap=True)
 
         logger.info(
             "Loaded sparse index: %s (%s, %d docs)",

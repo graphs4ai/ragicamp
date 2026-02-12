@@ -434,6 +434,20 @@ wheels = [
 ]
 
 [[package]]
+name = "bm25s"
+version = "0.2.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/99/72/5ad06c30991ba494242785a3ab8987deb01c07dfc1c492847bde221e62bf/bm25s-0.2.14.tar.gz", hash = "sha256:7b6717770fffbdb3b962e5fe8ef1e6eac7f285d0fbc14484b321e136df837139", size = 59266, upload-time = "2025-09-08T17:06:30.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/3e/e3ae2f0fb0f8f46f9c787fa419ca5203ff850d0630749a26baf0a6570453/bm25s-0.2.14-py3-none-any.whl", hash = "sha256:76cdb70ae40747941b150a1ec16a9c20c576d6534d0a3c3eebb303c779b3cf65", size = 55128, upload-time = "2025-09-08T17:06:29.324Z" },
+]
+
+[[package]]
 name = "boto3"
 version = "1.42.39"
 source = { registry = "https://pypi.org/simple" }
@@ -4908,6 +4922,7 @@ dependencies = [
     { name = "bert-score" },
     { name = "bitsandbytes" },
     { name = "bleurt-pytorch" },
+    { name = "bm25s" },
     { name = "boto3" },
     { name = "datasets" },
     { name = "faiss-cpu" },
@@ -4921,7 +4936,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "ragas" },
-    { name = "rank-bm25" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "seaborn" },
@@ -4949,6 +4963,7 @@ requires-dist = [
     { name = "bert-score", specifier = ">=0.3.13" },
     { name = "bitsandbytes", specifier = ">=0.41.0" },
     { name = "bleurt-pytorch", specifier = ">=0.0.1" },
+    { name = "bm25s", specifier = ">=0.2.0" },
     { name = "boto3", specifier = ">=1.42.39" },
     { name = "datasets", specifier = ">=2.10.0" },
     { name = "faiss-cpu", specifier = ">=1.7.4" },
@@ -4965,7 +4980,6 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ragas", specifier = ">=0.1.0" },
-    { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "scikit-learn", specifier = ">=1.2.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -4978,18 +4992,6 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.15.0" },
 ]
 provides-extras = ["dev"]
-
-[[package]]
-name = "rank-bm25"
-version = "0.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/0a/f9579384aa017d8b4c15613f86954b92a95a93d641cc849182467cf0bb3b/rank_bm25-0.2.2.tar.gz", hash = "sha256:096ccef76f8188563419aaf384a02f0ea459503fdf77901378d4fd9d87e5e51d", size = 8347, upload-time = "2022-02-16T12:10:52.196Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/21/f691fb2613100a62b3fa91e9988c991e9ca5b89ea31c0d3152a3210344f9/rank_bm25-0.2.2-py3-none-any.whl", hash = "sha256:7bd4a95571adadfc271746fa146a4bcfd89c0cf731e49c3d1ad863290adbe8ae", size = 8584, upload-time = "2022-02-16T12:10:50.626Z" },
-]
 
 [[package]]
 name = "ray"
