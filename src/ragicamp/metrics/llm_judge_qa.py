@@ -113,7 +113,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             judgment = await self.judge_model.agenerate_single(
                 prompt,
                 temperature=0.0,
-                max_tokens=1024,
+                max_tokens=None,
             )
         else:
             import asyncio
