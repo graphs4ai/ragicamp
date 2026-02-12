@@ -13,6 +13,8 @@ For experiment specification and building, see the spec/ package.
 """
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -242,6 +244,24 @@ def run_generation(
 # =============================================================================
 
 
+def _kill_process_group(pid: int) -> None:
+    """Kill all processes in the process group of the given PID.
+
+    Used to clean up orphaned grandchild processes (e.g., vLLM EngineCore)
+    after a subprocess exits. Safe to call even if processes are already dead.
+    """
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    # Give processes a moment to exit gracefully, then force kill
+    try:
+        time.sleep(0.5)
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
 def run_spec_subprocess(
     spec: ExperimentSpec,
     limit: int | None,
@@ -337,6 +357,7 @@ def run_spec_subprocess(
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,  # Isolate in own process group
             )
 
             def _tee(stream: IO[str], console: IO[str], log: IO[str]) -> None:
@@ -352,13 +373,18 @@ def run_spec_subprocess(
             proc.wait(timeout=timeout)
             tee_thread.join(timeout=5)
 
+        # Kill any orphaned children (e.g., vLLM EngineCore) that survived
+        # the subprocess exit. The process group ID equals proc.pid because
+        # we used start_new_session=True.
+        _kill_process_group(proc.pid)
+
         if proc.returncode == 0:
             return "ran"
         else:
             return "failed"
 
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _kill_process_group(proc.pid)
         proc.wait()
         tee_thread.join(timeout=5)
         logger.warning("Timeout after %ds", timeout)
