@@ -198,69 +198,69 @@ class IterativeRAGAgent(Agent):
         }
         converged: dict[int, _QueryState] = {}
 
-        # Open provider sessions so that embedder, generator and reranker are
-        # loaded once and reused across iterations (ref-counting prevents
-        # unload until the outermost context exits).
-        with ExitStack() as stack:
-            stack.enter_context(self.embedder_provider.load())
-            stack.enter_context(self.generator_provider.load())
-            if self.reranker_provider is not None:
-                stack.enter_context(self.reranker_provider.load())
+        # NOTE: We intentionally do NOT pre-load embedder + generator together.
+        # Each phase loads/unloads models independently so they don't compete
+        # for GPU memory on single-GPU setups (generator + embedder both at 95%
+        # would OOM).  This means each iteration does a load/unload cycle, but
+        # it's the only safe approach for single-GPU.
 
-            # --- Iteration loop (batched) ---
-            for iteration in range(self.max_iterations):
-                if not active:
-                    break
+        # --- Iteration loop (batched) ---
+        for iteration in range(self.max_iterations):
+            if not active:
+                break
 
-                logger.info(
-                    "=== Iteration %d: %d active queries ===",
-                    iteration,
-                    len(active),
-                )
-                _iter_t0 = _pc()
+            logger.info(
+                "=== Iteration %d: %d active queries ===",
+                iteration,
+                len(active),
+            )
+            _iter_t0 = _pc()
 
-                # Phase 1: Batch embed + search  (1 embedder load)
+            # Phase 1: Batch embed + search  (embedder load/unload)
+            with ExitStack() as stack:
+                if self.reranker_provider is not None:
+                    stack.enter_context(self.reranker_provider.load())
                 _phase_t0 = _pc()
                 self._phase_embed_and_search(active, iteration)
                 logger.info(
                     "Iteration %d embed+search completed in %.1fs", iteration, _pc() - _phase_t0
                 )
 
-                # Last iteration: skip refinement, go straight to final generation
-                if iteration == self.max_iterations - 1:
-                    for state in active.values():
-                        state.iterations_info[-1]["stopped"] = "max_iterations"
-                    break
+            # Last iteration: skip refinement, go straight to final generation
+            if iteration == self.max_iterations - 1:
+                for state in active.values():
+                    state.iterations_info[-1]["stopped"] = "max_iterations"
+                break
 
-                # Phase 2: Batch sufficiency check + refine  (1 generator load)
-                _phase_t0 = _pc()
-                if self.stop_on_sufficient:
-                    newly_sufficient = self._phase_evaluate_and_refine(
-                        active,
-                        iteration,
-                    )
-                    # Move converged queries out of the active set
-                    for idx in newly_sufficient:
-                        converged[idx] = active.pop(idx)
-                else:
-                    # No sufficiency check -- just refine all
-                    self._phase_refine_only(active, iteration)
-                logger.info(
-                    "Iteration %d evaluate+refine completed in %.1fs",
-                    iteration,
-                    _pc() - _phase_t0,
-                )
-
-                logger.info("Iteration %d total: %.1fs", iteration, _pc() - _iter_t0)
-
-            # Merge remaining active into converged
-            converged.update(active)
-
-            # Phase 3: Batch generate ALL final answers  (1 generator load)
-            logger.info("=== Final generation: %d queries ===", len(converged))
+            # Phase 2: Batch sufficiency check + refine  (generator load/unload)
             _phase_t0 = _pc()
-            new_results = self._phase_generate_answers(converged, pending)
-            logger.info("Final generation completed in %.1fs", _pc() - _phase_t0)
+            if self.stop_on_sufficient:
+                newly_sufficient = self._phase_evaluate_and_refine(
+                    active,
+                    iteration,
+                )
+                # Move converged queries out of the active set
+                for idx in newly_sufficient:
+                    converged[idx] = active.pop(idx)
+            else:
+                # No sufficiency check -- just refine all
+                self._phase_refine_only(active, iteration)
+            logger.info(
+                "Iteration %d evaluate+refine completed in %.1fs",
+                iteration,
+                _pc() - _phase_t0,
+            )
+
+            logger.info("Iteration %d total: %.1fs", iteration, _pc() - _iter_t0)
+
+        # Merge remaining active into converged
+        converged.update(active)
+
+        # Phase 3: Batch generate ALL final answers  (generator load/unload)
+        logger.info("=== Final generation: %d queries ===", len(converged))
+        _phase_t0 = _pc()
+        new_results = self._phase_generate_answers(converged, pending)
+        logger.info("Final generation completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:

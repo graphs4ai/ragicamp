@@ -214,45 +214,45 @@ class SelfRAGAgent(Agent):
         # Initialise per-query state
         states: dict[int, _QueryState] = {q.idx: _QueryState(query=q) for q in pending}
 
-        # Open provider sessions so assess → HyDE → generate → verify all
-        # reuse the already-loaded models (ref-counting prevents unload until
-        # the outermost context exits).
-        with ExitStack() as stack:
-            stack.enter_context(self.generator_provider.load())
-            if self.reranker_provider is not None:
-                stack.enter_context(self.reranker_provider.load())
+        # NOTE: We intentionally do NOT pre-load the generator in an ExitStack.
+        # Each phase loads/unloads models independently so they don't compete
+        # for GPU memory on single-GPU setups (generator + embedder both at 95%
+        # would OOM).
 
-            # Phase 1: Batch assess  (1 generator load)
-            _phase_t0 = _pc()
-            self._phase_assess(states)
-            logger.info("Phase 1 (assess) completed in %.1fs", _pc() - _phase_t0)
+        # Phase 1: Batch assess  (generator load/unload)
+        _phase_t0 = _pc()
+        self._phase_assess(states)
+        logger.info("Phase 1 (assess) completed in %.1fs", _pc() - _phase_t0)
 
-            # Split into retrieval / direct groups
-            retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
-            direct_group = {idx: s for idx, s in states.items() if not s.needs_retrieval}
+        # Split into retrieval / direct groups
+        retrieval_group = {idx: s for idx, s in states.items() if s.needs_retrieval}
+        direct_group = {idx: s for idx, s in states.items() if not s.needs_retrieval}
 
-            logger.info(
-                "SelfRAG split: %d retrieval, %d direct",
-                len(retrieval_group),
-                len(direct_group),
-            )
+        logger.info(
+            "SelfRAG split: %d retrieval, %d direct",
+            len(retrieval_group),
+            len(direct_group),
+        )
 
-            # Phase 2: Batch retrieve  (1 embedder load, only for retrieval group)
-            if retrieval_group:
+        # Phase 2: Batch retrieve  (embedder load/unload, only for retrieval group)
+        if retrieval_group:
+            with ExitStack() as stack:
+                if self.reranker_provider is not None:
+                    stack.enter_context(self.reranker_provider.load())
                 _phase_t0 = _pc()
                 self._phase_retrieve(retrieval_group)
                 logger.info("Phase 2 (retrieve) completed in %.1fs", _pc() - _phase_t0)
 
-            # Build prompts for all queries
-            for state in retrieval_group.values():
-                state.prompt = self.prompt_builder.build_rag(state.query.text, state.context_text)
-            for state in direct_group.values():
-                state.prompt = self.prompt_builder.build_direct(state.query.text)
+        # Build prompts for all queries
+        for state in retrieval_group.values():
+            state.prompt = self.prompt_builder.build_rag(state.query.text, state.context_text)
+        for state in direct_group.values():
+            state.prompt = self.prompt_builder.build_direct(state.query.text)
 
-            # Phase 3: Batch generate + verify + fallback  (1 generator load)
-            _phase_t0 = _pc()
-            self._phase_generate_and_verify(states, retrieval_group, direct_group)
-            logger.info("Phase 3 (generate+verify) completed in %.1fs", _pc() - _phase_t0)
+        # Phase 3: Batch generate + verify + fallback  (generator load/unload)
+        _phase_t0 = _pc()
+        self._phase_generate_and_verify(states, retrieval_group, direct_group)
+        logger.info("Phase 3 (generate+verify) completed in %.1fs", _pc() - _phase_t0)
 
         # Build results in original query order
         new_results = self._build_results(states, pending)

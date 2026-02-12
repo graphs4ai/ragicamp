@@ -141,12 +141,12 @@ class FixedRAGAgent(Agent):
         logger.info("Processing %d queries with phase-based execution", len(pending))
         _run_t0 = _pc()
 
-        # Open provider sessions so that HyDE (which calls generator_provider.load()
-        # internally) and reranking reuse the already-loaded models instead of
-        # doing a full load/unload cycle each time.
+        # NOTE: We intentionally do NOT pre-load the generator in an ExitStack.
+        # HyDE/multiquery call generator_provider.load() internally and unload
+        # after, freeing GPU memory before the embedder loads.  Pre-loading
+        # would keep the generator on GPU (~170 GiB at 95%) while the embedder
+        # also tries to load at 95%, causing OOM on single-GPU setups.
         with ExitStack() as stack:
-            if self.query_transformer is not None:
-                stack.enter_context(self.generator_provider.load())
             if self.reranker_provider is not None:
                 stack.enter_context(self.reranker_provider.load())
 
@@ -157,11 +157,11 @@ class FixedRAGAgent(Agent):
             retrievals, embed_steps = self._phase_retrieve(query_texts, show_progress)
             logger.info("Phase 1 (retrieve) completed in %.1fs", _pc() - _phase_t0)
 
-            # Phase 3: Generate (generator loaded)
-            logger.info("=== Phase 2: Generating ===")
-            _phase_t0 = _pc()
-            new_results = self._phase_generate(pending, retrievals, embed_steps, show_progress)
-            logger.info("Phase 2 (generate) completed in %.1fs", _pc() - _phase_t0)
+        # Phase 3: Generate (generator loaded separately — no overlap with embedder)
+        logger.info("=== Phase 2: Generating ===")
+        _phase_t0 = _pc()
+        new_results = self._phase_generate(pending, retrievals, embed_steps, show_progress)
+        logger.info("Phase 2 (generate) completed in %.1fs", _pc() - _phase_t0)
 
         # Stream results and checkpoint
         for result in new_results:
