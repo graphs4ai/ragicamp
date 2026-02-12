@@ -140,7 +140,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         """Call the judge model, handling sync/async transparently."""
         if hasattr(self.judge_model, "agenerate_single"):
             return await self.judge_model.agenerate_single(
-                prompt, temperature=0.0, max_tokens=None,
+                prompt, temperature=0.0, max_tokens=16384,
             )
         import asyncio
 
