@@ -109,19 +109,13 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             reference=reference,
         )
 
-        if hasattr(self.judge_model, "agenerate_single"):
-            judgment = await self.judge_model.agenerate_single(
-                prompt,
-                temperature=0.0,
-                max_tokens=None,
-            )
-        else:
-            import asyncio
+        judgment = await self._call_judge(prompt)
 
-            loop = asyncio.get_event_loop()
-            judgment = await loop.run_in_executor(
-                None, lambda: self.judge_model.generate(prompt, temperature=0.0, max_tokens=50)
-            )
+        # Retry once on empty response (reasoning models sometimes exhaust
+        # their thinking budget and produce no visible output)
+        if not judgment.strip():
+            logger.info("Empty judge response, retrying once")
+            judgment = await self._call_judge(prompt)
 
         # Extract categorical judgment
         category, score = self._extract_judgment(judgment)
@@ -141,6 +135,19 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             "llm_judge_qa": score,
             f"llm_judge_qa_{category}": 1.0,  # For category counting
         }
+
+    async def _call_judge(self, prompt: str) -> str:
+        """Call the judge model, handling sync/async transparently."""
+        if hasattr(self.judge_model, "agenerate_single"):
+            return await self.judge_model.agenerate_single(
+                prompt, temperature=0.0, max_tokens=None,
+            )
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.judge_model.generate(prompt, temperature=0.0)
+        )
 
     def _aggregate_results(self, results: list[dict[str, float]]) -> dict[str, float]:
         """Aggregate individual results with category statistics.
