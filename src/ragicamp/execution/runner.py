@@ -114,6 +114,17 @@ def run_metrics_only(
     # Save updated predictions using atomic write
     io.save_predictions(data)
 
+    # Export LLM judge traces if available
+    for metric_obj in metric_objs:
+        if hasattr(metric_obj, "get_traces"):
+            traces = metric_obj.get_traces()
+            if traces:
+                trace_path = output_path / "llm_judge_traces.jsonl"
+                with open(trace_path, "w") as f:
+                    for trace in traces:
+                        f.write(json.dumps(trace, ensure_ascii=False) + "\n")
+                logger.info("Exported %d LLM judge traces to %s", len(traces), trace_path)
+
     # Check if all metrics are done
     missing = set(metrics) - set(state.metrics_computed)
     if missing:

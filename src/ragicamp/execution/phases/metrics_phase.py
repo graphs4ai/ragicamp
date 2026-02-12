@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ragicamp.core.logging import get_logger
 from ragicamp.execution.phases.base import ExecutionContext, PhaseHandler
@@ -91,9 +91,25 @@ class MetricsHandler(PhaseHandler):
             data["metric_timings"] = existing_timings
 
         self._save_predictions(data, predictions_path)
+        self._export_traces(context.metrics, context.output_path)
         logger.info("Computed metrics: %s", list(aggregate_results.keys()))
 
         return state
+
+    @staticmethod
+    def _export_traces(metrics: list[Any], output_path: Path) -> None:
+        """Export LLM judge traces to JSONL if available."""
+        for metric in metrics:
+            if hasattr(metric, "get_traces"):
+                traces = metric.get_traces()
+                if traces:
+                    trace_path = output_path / "llm_judge_traces.jsonl"
+                    with open(trace_path, "w") as f:
+                        for trace in traces:
+                            f.write(json.dumps(trace, ensure_ascii=False) + "\n")
+                    logger.info(
+                        "Exported %d LLM judge traces to %s", len(traces), trace_path
+                    )
 
     def _save_predictions(self, data: dict, path: Path) -> None:
         """Save predictions atomically."""

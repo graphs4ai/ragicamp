@@ -20,8 +20,11 @@ Example:
 import re
 from typing import Any
 
+from ragicamp.core.logging import get_logger
 from ragicamp.metrics.async_base import AsyncAPIMetric
 from ragicamp.models.base import LanguageModel
+
+logger = get_logger(__name__)
 
 
 class LLMJudgeQAMetric(AsyncAPIMetric):
@@ -60,12 +63,28 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         )
         self.judge_model = judge_model
         self.judgment_type = judgment_type
+        self._traces: list[dict[str, Any]] = []
 
         # Define categories
         if judgment_type == "binary":
             self.categories = ["correct", "incorrect"]
         else:  # ternary
             self.categories = ["correct", "partially_correct", "incorrect"]
+
+    async def acompute(
+        self,
+        predictions: list[str],
+        references: list[str],
+        questions: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """Override to clear traces before each computation run."""
+        self._traces.clear()
+        return await super().acompute(predictions, references, questions, **kwargs)
+
+    def get_traces(self) -> list[dict[str, Any]]:
+        """Return collected traces from the last computation."""
+        return list(self._traces)
 
     async def acompute_single(
         self,
@@ -107,6 +126,17 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
         # Extract categorical judgment
         category, score = self._extract_judgment(judgment)
+
+        # Store trace for debugging/export
+        self._traces.append({
+            "question": question,
+            "reference": reference,
+            "prediction": prediction,
+            "prompt": prompt,
+            "response": judgment,
+            "category": category,
+            "score": score,
+        })
 
         return {
             "llm_judge_qa": score,
@@ -176,7 +206,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             f"Q: {question}\n"
             f"Valid: {ref_str}\n"
             f"Pred: {prediction}\n\n"
-            f"JUDGMENT: [{categories}]\nReason:"
+            f"Reply with {categories} as your first word, then a brief reason."
         )
 
     def _extract_judgment(self, judgment_text: str) -> tuple:
