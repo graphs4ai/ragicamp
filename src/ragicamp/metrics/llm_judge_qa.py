@@ -201,16 +201,27 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             "line: CORRECT, PARTIALLY_CORRECT, or INCORRECT. Nothing else on the first line."
         )
 
+    @staticmethod
+    def _sanitize(text: str, max_len: int = 200) -> str:
+        """Strip injection markers and truncate to the actual answer."""
+        # Cut at common injection patterns from model outputs
+        for marker in ("---", "END", "Note:", "I'll", "I will", "\n\n"):
+            idx = text.find(marker)
+            if idx > 0:
+                text = text[:idx]
+        return text.strip()[:max_len]
+
     def _create_judgment_prompt(
         self, prediction: str, reference: str | list[str], **_kwargs: Any
     ) -> str:
-        """Create the user message with just the data to judge."""
+        """Create the user message with sanitized data in XML tags."""
         if isinstance(reference, list):
             ref_str = " | ".join(reference)
         else:
             ref_str = reference
 
-        return f"Valid: {ref_str}\nPred: {prediction}"
+        pred_clean = self._sanitize(prediction)
+        return f"<valid>{ref_str}</valid>\n<pred>{pred_clean}</pred>"
 
     def _extract_judgment(self, judgment_text: str) -> tuple:
         """Extract categorical judgment and convert to score.
