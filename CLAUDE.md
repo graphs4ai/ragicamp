@@ -7,7 +7,7 @@ RAGiCamp is a RAG (Retrieval-Augmented Generation) benchmarking framework for ru
 ## Quick Commands
 
 ```bash
-# Tests (~26 test files, no GPU needed)
+# Tests (~36 test files, 182 cases, no GPU needed)
 uv run pytest tests/ -x -q
 
 # Lint & format
@@ -171,7 +171,7 @@ uv run pytest tests/ -x -q
 - **Subprocess execution** — Experiments run in subprocesses for CUDA crash isolation
 - **Atomic JSON writes** — All writes use temp-then-rename (`ExperimentIO._atomic_write()`)
 - **Embedding cache** — Shared SQLite store at `artifacts/cache/ragicamp_cache.db` (override with `RAGICAMP_CACHE_DIR`). Keys: `(model_name, sha256(text)[:32])` → float32 blobs. WAL mode for concurrent reads.
-- **Stale code** — `core/schemas.py` has a duplicate ExperimentSpec; canonical source is `spec/experiment.py`. `core/constants.py` is canonical for AgentType.
-- **Stale docs** — Human docs in `docs/`, `CHEATSHEET.md`, `CONTRIBUTING.md` reference removed agents (BanditRAG, MDPRAG) and outdated file structures. Trust this file and source code over those.
+- **Canonical spec** — `spec/experiment.py` is the single source of truth for ExperimentSpec. `core/constants.py` is canonical for AgentType.
+- **Docs status** — All docs cleaned up (Feb 2026). `docs/IMPROVEMENT_PLAN.md` is deprecated (see FUTURE_WORK.md). `docs/BACKLOG.md` is a completed archive.
 - **Query transforms** — Wired via `batch_transform_embed_and_search()` in `agents/base.py`. Factory creates HyDE/multiquery at `AgentFactory._create_query_transformer()`.
 - **Ruff config** — line-length=100, target=py310

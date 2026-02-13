@@ -317,12 +317,16 @@ make pre-push   # format + lint + test
 
 ## Documentation
 
-- [Metrics Guide](docs/guides/METRICS.md)
-- [Optuna Study Design](docs/OPTUNA_STUDY_DESIGN.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Experiment Configurations](docs/EXPERIMENT_CONFIGURATIONS.md)
-- [Future Work](docs/FUTURE_WORK.md)
-- [Cheatsheet](CHEATSHEET.md)
+| Document | Description |
+|----------|-------------|
+| [Cheatsheet](CHEATSHEET.md) | Quick reference for common tasks |
+| [Future Work](docs/FUTURE_WORK.md) | Roadmap: bugs, performance, research extensions |
+| [Optuna Study Design](docs/OPTUNA_STUDY_DESIGN.md) | Full system architecture and Optuna integration |
+| [Experiment Configurations](docs/EXPERIMENT_CONFIGURATIONS.md) | Experiment design templates and model guide |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [Agent Performance](docs/AGENT_PERFORMANCE_ANALYSIS.md) | Provider ref-counting optimization analysis |
+| [Engineering Audit](docs/BACKLOG.md) | Completed Feb 2026 audit (67/68 fixes) |
+| [Changelog](CHANGELOG.md) | Version history |
 
 ## License
 

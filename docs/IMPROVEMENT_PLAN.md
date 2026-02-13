@@ -1,8 +1,14 @@
 # RAGiCamp Improvement Plan
 
-> **Purpose**: Track framework improvements needed to run the experiments defined in [EXPERIMENT_CONFIGURATIONS.md](./EXPERIMENT_CONFIGURATIONS.md).
+> **DEPRECATED** (2026-02-13): This document is superseded by:
+> - [BACKLOG.md](./BACKLOG.md) — Completed engineering audit (67/68 fixes, Feb 2026)
+> - [FUTURE_WORK.md](./FUTURE_WORK.md) — Comprehensive roadmap (bugs, performance, research)
 >
-> **Last updated**: 2026-01-31
+> Kept for historical reference only. All tasks below are complete.
+>
+> **Original purpose**: Track framework improvements needed to run the experiments defined in [EXPERIMENT_CONFIGURATIONS.md](./EXPERIMENT_CONFIGURATIONS.md).
+>
+> **Last updated**: 2026-01-31 (frozen)
 
 ---
 

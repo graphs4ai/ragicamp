@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.1] - 2026-02-13
+
+### Engineering Audit & Code Review
+
+Comprehensive codebase audit (67/68 issues fixed) plus external code review.
+
+#### Data Integrity (P0) — 8 issues fixed
+- **Fixed** Division-by-zero in embedding normalization (3 locations)
+- **Fixed** CrossEncoderReranker mutating caller's Document objects
+- **Fixed** Non-atomic JSON writes consolidated into `atomic_write_json()` utility
+- **Fixed** BERTScoreMetric OOM retry discarding partial results
+- **Fixed** HuggingFace wrong device for quantized models
+- **Fixed** OpenAI error strings scored as predictions
+- **Fixed** OpenAI hardcoded embedding model name
+- **Fixed** `_stratified_sample` using global random instead of seeded RNG
+
+#### Reliability (P1) — 14 issues fixed
+- **Added** Provider ref-counting for GPU model reuse (eliminates redundant load/unload)
+- **Fixed** SQLite connection leaks in embedding and retrieval caches
+- **Fixed** HyDE/MultiQuery loading model on every call (now ref-counted)
+- **Added** HyDE iteration-0-only guard in IterativeRAG
+- **Fixed** Retrieval cache enabled for transformed queries
+- **Optimized** HybridSearcher RRF fusion (50% fewer object allocations)
+- **Fixed** Checkpoint callback skipping when batch crosses modulo boundary
+- **Fixed** `_tee` thread losing output on subprocess timeout
+
+#### Test Coverage (P2) — 10 gaps filled
+- **Added** IterativeRAGAgent functional tests (11 test cases)
+- **Added** SelfRAGAgent functional tests (9 test cases)
+- **Added** ResilientExecutor, ExperimentState, ExperimentIO, PromptBuilder tests
+- **Added** HybridSearcher functional tests, execution phase tests
+- **Added** Provider ref-counting tests (3 test classes)
+- **Consolidated** mock fixtures into `conftest.py`
+
+#### Interface & Design (P3) — 14 issues fixed
+- **Extracted** shared `apply_reranking()` from 3 agents (~90 lines deduplication)
+- **Removed** stale `core/schemas.py`
+- **Migrated** Pydantic v1 validators to v2 (`@field_validator`, `model_config`)
+- **Converted** MetricFactory from if-elif chains to registry pattern
+- **Renamed** provider-level `Embedder` → `ManagedEmbedder` (disambiguation)
+- **Replaced** 8-level nested loops with `itertools.product` in spec builder
+
+#### Documentation
+- **Rewrote** `docs/FUTURE_WORK.md` — comprehensive roadmap with code review findings
+- **Deprecated** `docs/IMPROVEMENT_PLAN.md` (superseded by BACKLOG + FUTURE_WORK)
+- **Archived** `docs/BACKLOG.md` as completed historical record
+- **Improved** LLM judge prompt injection defense (XML tags, sanitization, retry)
+
+---
+
 ## [0.4.0] - 2026-01-30
 
 ### 🏗️ Architecture Refactoring
