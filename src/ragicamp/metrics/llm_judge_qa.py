@@ -191,24 +191,24 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         """System message that locks the model into judge role."""
         if self.judgment_type == "binary":
             return (
-                "You are a QA judge. Your ONLY job is to compare a prediction "
-                "against valid answers. Reply with EXACTLY one word on the first "
-                "line: CORRECT or INCORRECT. Nothing else on the first line."
+                "You are a QA judge. Check if <pred> contains an answer that "
+                "matches any answer in <valid>. Ignore extra text, focus on "
+                "whether the correct answer appears anywhere in the prediction. "
+                "Reply CORRECT or INCORRECT as your first word."
             )
         return (
-            "You are a QA judge. Your ONLY job is to compare a prediction "
-            "against valid answers. Reply with EXACTLY one word on the first "
-            "line: CORRECT, PARTIALLY_CORRECT, or INCORRECT. Nothing else on the first line."
+            "You are a QA judge. Check if <pred> contains an answer that "
+            "matches any answer in <valid>. Ignore extra text, focus on "
+            "whether the correct answer appears anywhere in the prediction. "
+            "Reply CORRECT, PARTIALLY_CORRECT, or INCORRECT as your first word."
         )
 
     @staticmethod
-    def _sanitize(text: str, max_len: int = 200) -> str:
-        """Strip injection markers and truncate to the actual answer."""
-        # Cut at common injection patterns from model outputs
-        for marker in ("---", "END", "Note:", "I'll", "I will", "\n\n"):
-            idx = text.find(marker)
-            if idx > 0:
-                text = text[:idx]
+    def _sanitize(text: str, max_len: int = 500) -> str:
+        """Strip injection delimiters and truncate."""
+        # Only strip clear injection delimiters; keep content like \n\n
+        # and "Note:" since the model may self-correct after them
+        text = re.sub(r"-{3,}.*", "", text)  # --- END ---, --- etc.
         return text.strip()[:max_len]
 
     def _create_judgment_prompt(
