@@ -138,9 +138,11 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
     async def _call_judge(self, prompt: str) -> str:
         """Call the judge model, handling sync/async transparently."""
+        sys_msg = self._get_system_message()
         if hasattr(self.judge_model, "agenerate_single"):
             return await self.judge_model.agenerate_single(
                 prompt, temperature=0.0, max_tokens=16384,
+                system_message=sys_msg,
             )
         import asyncio
 
@@ -185,70 +187,59 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
 
         return aggregated
 
+    def _get_system_message(self) -> str:
+        """System message that locks the model into judge role."""
+        if self.judgment_type == "binary":
+            return (
+                "You are a QA judge. Your ONLY job is to compare a prediction "
+                "against valid answers. Reply with EXACTLY one word on the first "
+                "line: CORRECT or INCORRECT. Nothing else on the first line."
+            )
+        return (
+            "You are a QA judge. Your ONLY job is to compare a prediction "
+            "against valid answers. Reply with EXACTLY one word on the first "
+            "line: CORRECT, PARTIALLY_CORRECT, or INCORRECT. Nothing else on the first line."
+        )
+
     def _create_judgment_prompt(
         self, prediction: str, reference: str | list[str], **_kwargs: Any
     ) -> str:
-        """Create a compact prompt for semantic equivalence judgment.
-
-        Args:
-            prediction: The predicted answer
-            reference: Valid answer(s) — str or list of acceptable answers
-        """
+        """Create the user message with just the data to judge."""
         if isinstance(reference, list):
             ref_str = " | ".join(reference)
         else:
             ref_str = reference
 
-        if self.judgment_type == "binary":
-            categories = "CORRECT or INCORRECT"
-        else:
-            categories = "CORRECT, PARTIALLY_CORRECT, or INCORRECT"
-
-        return (
-            f"Is the following prediction semantically equivalent "
-            f"to any of the valid answers?\n\n"
-            f"Valid: {ref_str}\n"
-            f"Pred: {prediction}\n\n"
-            f"Reply {categories} then a brief reason."
-        )
+        return f"Valid: {ref_str}\nPred: {prediction}"
 
     def _extract_judgment(self, judgment_text: str) -> tuple:
         """Extract categorical judgment and convert to score.
 
+        Checks the first line first (model is instructed to put judgment there),
+        then falls back to scanning the full text.
+
         Returns:
             Tuple of (category, score) where score is 0.0, 0.5, or 1.0
         """
-        judgment_lower = judgment_text.lower()
+        # Check first line first (most reliable with system message)
+        first_line = judgment_text.strip().split("\n")[0].lower().strip() if judgment_text else ""
 
-        # Look for judgment in text
-        if (
-            "judgment:" in judgment_lower
-            or "correct" in judgment_lower
-            or "incorrect" in judgment_lower
-        ):
-            # Check for categories in order of specificity
+        for text in (first_line, judgment_text.lower()):
+            if not text:
+                continue
+            # Check in order of specificity
             if (
-                "partially_correct" in judgment_lower
-                or "partially correct" in judgment_lower
-                or "partial" in judgment_lower
+                "partially_correct" in text
+                or "partially correct" in text
+                or "partial" in text
             ):
-                # For binary mode, map partially_correct to incorrect (conservative)
                 if self.judgment_type == "binary":
                     return ("incorrect", 0.0)
-                else:
-                    return ("partially_correct", 0.5)
-            elif re.search(r"\bcorrect\b", judgment_lower) and not re.search(
-                r"\bincorrect\b", judgment_lower
-            ):
-                return ("correct", 1.0)
-            elif "incorrect" in judgment_lower:
+                return ("partially_correct", 0.5)
+            if re.search(r"\bincorrect\b", text):
                 return ("incorrect", 0.0)
-
-        # Fallback: look for explicit CORRECT/INCORRECT markers
-        if re.search(r"(?:^|\s)correct(?:\s|$|[:\.])", judgment_lower):
-            return ("correct", 1.0)
-        elif re.search(r"(?:^|\s)incorrect(?:\s|$|[:\.])", judgment_lower):
-            return ("incorrect", 0.0)
+            if re.search(r"\bcorrect\b", text):
+                return ("correct", 1.0)
 
         # Default to incorrect if can't parse (conservative)
         logger.warning("Could not parse judgment (defaulting to incorrect): %.120s", judgment_text)
