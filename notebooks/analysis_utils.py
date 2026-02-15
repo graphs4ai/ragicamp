@@ -1720,5 +1720,234 @@ def plot_interaction_heatmap(df: pd.DataFrame, factor1: str, factor2: str,
     ax.set_title(f'{factor1} × {factor2} Interaction\n(Mean {metric})')
     ax.set_xlabel(factor2)
     ax.set_ylabel(factor1)
-    
+
     return ax
+
+
+# =============================================================================
+# QUESTION-LEVEL DATA LOADING
+# =============================================================================
+
+def load_predictions(exp_dir: Path, include_docs: bool = False) -> Optional[List[Dict]]:
+    """Load predictions from a single experiment directory.
+
+    Args:
+        exp_dir: Path to the experiment directory.
+        include_docs: If True, include ``retrieved_docs`` in each prediction.
+            Defaults to False to reduce memory usage.
+
+    Returns:
+        List of prediction dicts, or None if predictions.json is missing.
+    """
+    pred_file = exp_dir / "predictions.json"
+    if not pred_file.exists():
+        return None
+
+    with open(pred_file) as f:
+        data = json.load(f)
+
+    preds = data.get("predictions", [])
+
+    if not include_docs:
+        for p in preds:
+            p.pop("retrieved_docs", None)
+            p.pop("prompt", None)
+
+    return preds
+
+
+def load_per_item_scores(
+    study_path: Path = None,
+    experiments: List[str] = None,
+    metric: str = PRIMARY_METRIC,
+    include_text: bool = False,
+) -> pd.DataFrame:
+    """Load per-item metric scores across experiments.
+
+    This reads the ``metrics`` dict inside each prediction entry of
+    ``predictions.json``.  It is designed to be memory-efficient: only
+    the requested metric (plus optionally question/answer text) is kept.
+
+    Args:
+        study_path: Root study directory.
+        experiments: List of experiment directory names to load.
+            If None, loads all completed experiments.
+        metric: Which metric to extract (default ``f1``).
+        include_text: If True, include ``question``, ``prediction``,
+            and ``expected`` columns.
+
+    Returns:
+        DataFrame with columns: experiment, idx, {metric}, and optionally
+        question, prediction, expected.  Also includes ``model_short``,
+        ``dataset``, ``exp_type``, ``agent_type`` parsed from the experiment.
+    """
+    if study_path is None:
+        study_path = DEFAULT_STUDY_PATH
+
+    rows = []
+
+    exp_dirs = []
+    if experiments is not None:
+        exp_dirs = [study_path / name for name in experiments]
+    else:
+        if not study_path.exists():
+            return pd.DataFrame()
+        for d in study_path.iterdir():
+            if not d.is_dir() or d.name in SKIP_DIRS:
+                continue
+            if d.name.startswith('.') or d.name.startswith('_'):
+                continue
+            exp_dirs.append(d)
+
+    for exp_dir in exp_dirs:
+        preds = load_predictions(exp_dir, include_docs=False)
+        if preds is None:
+            continue
+
+        config = parse_experiment_name(exp_dir.name)
+        # Enrich from metadata if available
+        meta_file = exp_dir / "metadata.json"
+        if meta_file.exists():
+            with open(meta_file) as f:
+                _enrich_from_metadata(config, json.load(f))
+
+        for p in preds:
+            metrics = p.get("metrics", {})
+            score = metrics.get(metric)
+            if score is None:
+                continue
+
+            row = {
+                "experiment": exp_dir.name,
+                "idx": p.get("idx"),
+                metric: score,
+                "model_short": config.get("model_short", "unknown"),
+                "dataset": config.get("dataset", "unknown"),
+                "exp_type": config.get("exp_type", "unknown"),
+                "agent_type": config.get("agent_type", "unknown"),
+            }
+            if include_text:
+                row["question"] = p.get("question", "")
+                row["prediction"] = p.get("prediction", "")
+                row["expected"] = p.get("expected", [])
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def sample_predictions_with_docs(
+    study_path: Path,
+    experiment_name: str,
+    indices: List[int] = None,
+    n: int = 10,
+) -> List[Dict]:
+    """Load sample predictions *with* retrieved documents for qualitative inspection.
+
+    Args:
+        study_path: Root study directory.
+        experiment_name: Name of the experiment directory.
+        indices: Specific question indices to load.  If None, samples
+            ``n`` random predictions.
+        n: Number of predictions to sample (ignored if ``indices`` given).
+
+    Returns:
+        List of prediction dicts including ``retrieved_docs``.
+    """
+    exp_dir = study_path / experiment_name
+    preds = load_predictions(exp_dir, include_docs=True)
+    if preds is None:
+        return []
+
+    if indices is not None:
+        idx_set = set(indices)
+        return [p for p in preds if p.get("idx") in idx_set]
+
+    if len(preds) <= n:
+        return preds
+
+    rng = np.random.default_rng(42)
+    chosen = rng.choice(len(preds), size=n, replace=False)
+    return [preds[i] for i in sorted(chosen)]
+
+
+def compute_question_difficulty(
+    scores_df: pd.DataFrame,
+    metric: str = PRIMARY_METRIC,
+    threshold: float = 0.5,
+) -> pd.DataFrame:
+    """Compute per-question difficulty from per-item metric scores.
+
+    For each unique ``(idx, question)`` pair across experiments, computes:
+    - ``mean_score``: average metric across all configs
+    - ``pct_correct``: fraction of configs scoring above ``threshold``
+    - ``difficulty``: categorical label (easy / discriminating / hard)
+
+    Args:
+        scores_df: Output of :func:`load_per_item_scores` with
+            ``include_text=True``.
+        metric: Metric column to use.
+        threshold: Score above which a prediction is "correct".
+
+    Returns:
+        DataFrame sorted by ``mean_score`` descending.
+    """
+    scores_df = scores_df.dropna(subset=[metric])
+    scores_df["correct"] = scores_df[metric] >= threshold
+
+    group_cols = ["idx"]
+    if "question" in scores_df.columns:
+        group_cols.append("question")
+    if "dataset" in scores_df.columns:
+        group_cols.append("dataset")
+
+    agg = scores_df.groupby(group_cols).agg(
+        mean_score=(metric, "mean"),
+        std_score=(metric, "std"),
+        pct_correct=("correct", "mean"),
+        n_configs=(metric, "count"),
+    ).reset_index()
+
+    def _label(pct):
+        if pct >= 0.8:
+            return "easy"
+        elif pct <= 0.2:
+            return "hard"
+        else:
+            return "discriminating"
+
+    agg["difficulty"] = agg["pct_correct"].apply(_label)
+    return agg.sort_values("mean_score", ascending=False).reset_index(drop=True)
+
+
+def compute_per_question_rag_delta(
+    scores_df: pd.DataFrame,
+    metric: str = PRIMARY_METRIC,
+) -> pd.DataFrame:
+    """Compute per-question RAG vs Direct delta.
+
+    For each question (idx) and each (model, dataset) group, computes the
+    mean direct score and each RAG config's delta from that baseline.
+
+    Returns:
+        DataFrame with columns: idx, model_short, dataset, direct_mean,
+        rag_score, rag_delta, experiment, agent_type.
+    """
+    direct = scores_df[scores_df["exp_type"] == "direct"]
+    rag = scores_df[scores_df["exp_type"] != "direct"]
+
+    if direct.empty or rag.empty:
+        return pd.DataFrame()
+
+    # Mean direct score per (idx, model, dataset)
+    direct_means = (
+        direct.groupby(["idx", "model_short", "dataset"])[metric]
+        .mean()
+        .reset_index()
+        .rename(columns={metric: "direct_mean"})
+    )
+
+    merged = rag.merge(direct_means, on=["idx", "model_short", "dataset"], how="inner")
+    merged["rag_delta"] = merged[metric] - merged["direct_mean"]
+    merged = merged.rename(columns={metric: "rag_score"})
+
+    return merged
