@@ -55,6 +55,23 @@ MODEL_MAP = {
     'qwen': 'Qwen2.5-3B',
 }
 
+# Model parameter counts (billions)
+MODEL_PARAMS = {
+    'Qwen2.5-1.5B': 1.5, 'Gemma2-2B': 2.0,
+    'Llama-3.2-3B': 3.0, 'Phi-3-mini': 3.8, 'Qwen2.5-3B': 3.0,
+    'Mistral-7B': 7.0, 'Qwen2.5-7B': 7.0, 'Gemma2-9B': 9.0,
+}
+
+# Model size tiers
+MODEL_TIER = {
+    'Qwen2.5-1.5B': 'tiny', 'Gemma2-2B': 'tiny',
+    'Llama-3.2-3B': 'small', 'Phi-3-mini': 'small', 'Qwen2.5-3B': 'small',
+    'Mistral-7B': 'medium', 'Qwen2.5-7B': 'medium', 'Gemma2-9B': 'medium',
+}
+
+# Models with known issues (near-zero F1 across all conditions)
+BROKEN_MODELS = {'Phi-3-mini'}
+
 # Retriever type detection
 RETRIEVER_TYPES = {
     'dense': ['dense_bge', 'dense_gte', 'dense_e5', 'en_bge', 'en_gte', 'en_e5'],
