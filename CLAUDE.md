@@ -7,7 +7,7 @@ RAGiCamp is a RAG (Retrieval-Augmented Generation) benchmarking framework for ru
 ## Quick Commands
 
 ```bash
-# Tests (~36 test files, 182 cases, no GPU needed)
+# Tests (~39 test files, no GPU needed)
 uv run pytest tests/ -x -q
 
 # Lint & format
@@ -50,7 +50,6 @@ src/ragicamp/
 │   ├── constants.py    # AgentType enum, MetricType, Defaults
 │   ├── step_types.py   # Step type constants (GENERATE, BATCH_SEARCH, etc.)
 │   ├── logging.py      # get_logger(), configure_logging()
-│   ├── schemas.py      # STALE — has duplicate ExperimentSpec, do not use
 │   └── exceptions.py   # Custom exceptions
 ├── corpus/             # Corpus loading and chunking
 ├── datasets/           # QA dataset loaders (NQ, TriviaQA, HotpotQA, TechQA, PubMedQA)
@@ -164,7 +163,7 @@ Study logs auto-saved to `{output_dir}/study.log` via `add_file_handler()`.
 uv run pytest tests/ -x -q
 ```
 
-26 test files in `tests/`. No GPU needed. Fixtures in `conftest.py`.
+39 test files in `tests/`. No GPU needed. Fixtures in `conftest.py`.
 
 ## Gotchas & Conventions
 
@@ -172,6 +171,6 @@ uv run pytest tests/ -x -q
 - **Atomic JSON writes** — All writes use temp-then-rename (`ExperimentIO._atomic_write()`)
 - **Embedding cache** — Shared SQLite store at `artifacts/cache/ragicamp_cache.db` (override with `RAGICAMP_CACHE_DIR`). Keys: `(model_name, sha256(text)[:32])` → float32 blobs. WAL mode for concurrent reads.
 - **Canonical spec** — `spec/experiment.py` is the single source of truth for ExperimentSpec. `core/constants.py` is canonical for AgentType.
-- **Docs status** — All docs cleaned up (Feb 2026). `docs/IMPROVEMENT_PLAN.md` is deprecated (see FUTURE_WORK.md). `docs/BACKLOG.md` is a completed archive.
+- **Docs status** — All docs cleaned up (Feb 2026). Deprecated docs (IMPROVEMENT_PLAN.md, BACKLOG.md, EXPERIMENT_CONFIGURATIONS.md) have been deleted. See `docs/THESIS_STUDY.md` for current study status.
 - **Query transforms** — Wired via `batch_transform_embed_and_search()` in `agents/base.py`. Factory creates HyDE/multiquery at `AgentFactory._create_query_transformer()`.
 - **Ruff config** — line-length=100, target=py310

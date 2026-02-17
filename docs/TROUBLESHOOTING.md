@@ -333,9 +333,9 @@ uv run python -c "import ragicamp; print('✓ Works')"
 ## Still Having Issues?
 
 1. Check the documentation:
-   - [Getting Started](GETTING_STARTED.md)
-   - [Usage Guide](USAGE.md)
-   - [Architecture](ARCHITECTURE.md)
+   - [Thesis Study](THESIS_STUDY.md) — Current study overview and design
+   - [Optuna Study Design](OPTUNA_STUDY_DESIGN.md) — How the optimization loop works
+   - [Metrics Guide](guides/METRICS.md) — Evaluation metrics reference
 
 2. Check experiment health:
 ```bash

@@ -82,7 +82,7 @@ Total theoretical: ~200K+ combinations. Target: 1000 TPE trials.
 
 ### Baselines
 
-48 direct LLM experiments (no retrieval): 8 models x 2 prompts (concise, fewshot_3) x 3 datasets.
+42 direct LLM experiments (no retrieval): 7 models x 2 prompts (concise, fewshot_3) x 3 datasets.
 These ran before the TPE phase and completed 100%.
 
 ---
@@ -92,7 +92,7 @@ These ran before the TPE phase and completed 100%.
 ### Overall
 - **Started**: 2026-02-10 17:32
 - **Runtime**: 7 days
-- **Baselines**: 48/48 complete (100%)
+- **Baselines**: 42/42 complete (100%)
 - **TPE trials**: ~603/1000 complete (60%)
 - **Last trial**: #651 (study paused for YAML trim)
 
@@ -196,5 +196,5 @@ Each completed trial is a (state, action, reward) tuple:
 - `docs/OPTUNA_STUDY_DESIGN.md` — Technical details of the TPE optimization loop
 - `docs/AGENT_PERFORMANCE_ANALYSIS.md` — Provider load/unload optimization (ref-counting)
 - `docs/FUTURE_WORK.md` — Engineering roadmap and research extensions
-- `docs/EXPERIMENT_CONFIGURATIONS.md` — Reference experiment templates
+- `docs/PAPER_IDEAS.md` — Intermediary publication ideas from this study
 - `conf/study/smart_retrieval_slm.yaml` — Active study config

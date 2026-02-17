@@ -644,7 +644,9 @@ Improvements to how we measure and compare experiments.
 
 - **Problem**: Current comparison tools show mean/min/max/std but no confidence intervals or
   p-values. We can't tell if a 2% improvement is real or noise.
-- **Fix**: Add bootstrap confidence intervals and paired t-tests to `analysis/comparison.py`.
+- **Status**: **Partially addressed** — `notebooks/nb10_statistical_tests.ipynb` provides paired
+  bootstrap tests, Holm-Bonferroni correction, and LaTeX tables for thesis-ready results.
+  Still needed: integrate into `analysis/comparison.py` for CLI-level access.
 - **Effort**: Medium | **Impact**: High
 
 ### 7.2 RAGAS-Style Pipeline Evaluation

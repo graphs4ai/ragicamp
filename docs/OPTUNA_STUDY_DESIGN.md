@@ -49,11 +49,11 @@ datasets: [nq, triviaqa, hotpotqa]
 metrics: [f1, exact_match, bertscore, bleurt]
 batch_size: 128
 
-models: &slm_models          # 8 models across 3 tiers (tiny/small/medium)
+models: &slm_models          # 7 models across 3 tiers (tiny/small/medium)
   - vllm:Qwen/Qwen2.5-1.5B-Instruct
   - vllm:google/gemma-2-2b-it
   - vllm:meta-llama/Llama-3.2-3B-Instruct
-  # ... (8 total)
+  # ... (7 total — Phi-3-mini removed due to 4096 ctx limit)
 
 direct:                       # Direct LLM baselines (no retrieval)
   enabled: true
@@ -69,15 +69,15 @@ rag:
     n_experiments: 1000       # Target trial count
     optimize_metric: f1       # What to maximize
     seed: 42
-    trial_timeout: 3600       # Kill after 1 hour
+    trial_timeout: 1800       # Kill after 30 min (was 3600; configs needing >30min are degenerate)
     fixed_dims: [dataset, model]   # Explored uniformly, not optimized
     agent_types: [fixed_rag, iterative_rag, self_rag]
     agent_params:
       iterative_rag:
-        max_iterations: [1, 2, 3]
+        max_iterations: [1, 2]  # Dropped 3 (main cause of timeouts)
         stop_on_sufficient: [true]
 
-  retrievers:                 # 6 active retrievers
+  retrievers:                 # 7 active retrievers
     - {type: dense,  name: dense_bge_large_512, ...}
     - {type: dense,  name: dense_bge_m3_512, ...}
     - {type: dense,  name: dense_gte_qwen2_1.5b_512, ...}
@@ -102,7 +102,7 @@ rag:
 ### Theoretical Search Space Size
 
 ```
-8 models × 6 retrievers × 5 top_k × 9 prompts × 3 query_transforms
+7 models × 7 retrievers × 5 top_k × 9 prompts × 3 query_transforms
 × 3 rerankers × 3 datasets × 3 agent_types × ... = ~200,000+ combinations
 ```
 
@@ -140,7 +140,7 @@ Indexes are built once and reused across all experiments. Multiple retrievers ca
 Direct LLM baselines (no retrieval) run as a fixed grid:
 
 ```
-8 models × 2 prompts × 3 datasets = 48 baseline experiments
+7 models × 2 prompts × 3 datasets = 42 baseline experiments
 ```
 
 These provide the "no retrieval" reference score. Each runs in a subprocess (see Section 8).
@@ -171,7 +171,7 @@ Extracted from the YAML config:
 
 | Dimension | Values | Count |
 |-----------|--------|-------|
-| `model` | 8 vLLM model specs | 8 |
+| `model` | 7 vLLM model specs | 7 |
 | `retriever` | 7 retriever names | 7 |
 | `top_k` | [3, 5, 10, 15, 20] | 5 |
 | `prompt` | 9 prompt styles | 9 |
@@ -187,7 +187,7 @@ Plus **conditional dimensions** (only suggested when relevant):
 - `alpha`: [0.3, 0.5, 0.7, 0.9] — Dense/sparse blend weight
 
 **Agent-specific** (conditional on `agent_type`):
-- `max_iterations`: [1, 2, 3] (only when `agent_type == iterative_rag`)
+- `max_iterations`: [1, 2] (only when `agent_type == iterative_rag`)
 - `stop_on_sufficient`: [true] (only when `agent_type == iterative_rag`)
 - `retrieval_threshold`: [0.3, 0.5, 0.7] (only when `agent_type == self_rag`)
 - `verify_answer`: [true, false] (only when `agent_type == self_rag`)
@@ -219,12 +219,12 @@ By default, `dataset` and `model` are treated as "benchmark axes" — they're ex
 
 ```
 fixed_dims: [dataset, model]
-→ 3 datasets × 8 models = 24 fixed combinations
-→ 1000 trials / 24 combos ≈ 41 trials per (dataset, model) pair
+→ 3 datasets × 7 models = 21 fixed combinations
+→ 1000 trials / 21 combos ≈ 47 trials per (dataset, model) pair
 ```
 
 Each trial epoch:
-1. Generate all 24 (dataset, model) combinations
+1. Generate all 21 (dataset, model) combinations
 2. Shuffle them randomly
 3. For each combo, create a `PartialFixedSampler` that locks those dims
 4. TPE suggests the remaining dims (retriever, top_k, prompt, qt, reranker, agent_type)
@@ -365,13 +365,13 @@ run_spec_subprocess()
   │                                        │           ├── COMPUTING_METRICS phase
   │                                        │           └── COMPLETE phase
   │                                        │
-  ├── wait(timeout=3600s) ◄────────────   exit(0)  or  exit(1)
+  ├── wait(timeout=1800s) ◄────────────   exit(0)  or  exit(1)
   └── return "ran" or "failed"
 ```
 
 ### Timeout Handling
 
-If the subprocess doesn't complete within `trial_timeout` seconds (default 3600 = 1 hour), the parent kills it and the Optuna trial is pruned.
+If the subprocess doesn't complete within `trial_timeout` seconds (default 1800 = 30 min), the parent kills it and the Optuna trial is pruned.
 
 ---
 

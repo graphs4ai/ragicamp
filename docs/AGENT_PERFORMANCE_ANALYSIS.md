@@ -57,7 +57,7 @@ Python loops (seconds, not minutes):
 | Cache `execute()` vs `executemany()` | `cache/*.py` | Low | Only affects cache-miss writes |
 | Query transform result merging | `agents/base.py:299-313` | Low | Per-query dedup+sort, small data |
 
-These are tracked in `docs/BACKLOG.md` items 2.4d–2.4f.
+These were tracked in the engineering backlog (now resolved and archived).
 
 ## Solution: Three-Part Optimization
 
