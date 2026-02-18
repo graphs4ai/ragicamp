@@ -166,7 +166,7 @@ def main():
 
         # Summary
         statuses = {}
-        for exp_name, result in results.items():
+        for _exp_name, result in results.items():
             status = result.get("status", "unknown")
             statuses[status] = statuses.get(status, 0) + 1
 

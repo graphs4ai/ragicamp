@@ -1,5 +1,6 @@
 """Tests for GPUProfile dataclass and GPU detection."""
 
+from dataclasses import FrozenInstanceError
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -75,7 +76,7 @@ class TestGPUProfileFrozenDataclass:
         profile = GPUProfile(
             tier="high", gpu_mem_gb=200.0, max_num_seqs=512, max_num_batched_tokens=32768
         )
-        with pytest.raises(Exception):
+        with pytest.raises(FrozenInstanceError):
             profile.tier = "low"
 
     def test_hashable_and_equal(self):

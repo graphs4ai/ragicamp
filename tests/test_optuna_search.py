@@ -909,7 +909,7 @@ class TestStratifiedSearch:
         rng = random.Random(42)
         schedule: list[dict] = []
         while len(schedule) < remaining:
-            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            epoch = [dict(zip(fixed_dims, combo, strict=True)) for combo in fixed_combos]
             rng.shuffle(epoch)
             schedule.extend(epoch)
         schedule = schedule[:remaining]
@@ -944,7 +944,7 @@ class TestStratifiedSearch:
         rng = random.Random(42)
         schedule: list[dict] = []
         while len(schedule) < remaining:
-            epoch = [dict(zip(fixed_dims, combo)) for combo in fixed_combos]
+            epoch = [dict(zip(fixed_dims, combo, strict=True)) for combo in fixed_combos]
             rng.shuffle(epoch)
             schedule.extend(epoch)
         schedule = schedule[:remaining]
