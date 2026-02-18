@@ -78,7 +78,7 @@ def load_embeddings_from_temp(emb_path: Path, num_batches: int, embedding_dim: i
     offset = 0
 
     with open(emb_path, "rb") as f:
-        for batch_num, expected_size in enumerate(batch_sizes, 1):
+        for batch_num, _expected_size in enumerate(batch_sizes, 1):
             emb = np.load(f)
             embeddings[offset : offset + len(emb)] = emb
             offset += len(emb)

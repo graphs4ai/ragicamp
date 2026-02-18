@@ -7,7 +7,7 @@ RAGiCamp is a RAG (Retrieval-Augmented Generation) benchmarking framework for ru
 ## Quick Commands
 
 ```bash
-# Tests (~36 test files, no GPU needed)
+# Tests (~39 test files, no GPU needed)
 uv run pytest tests/ -x -q
 
 # Lint & format
@@ -24,6 +24,10 @@ make index-full       # All standard indexes
 # Quick experiment
 make run-baseline-simple     # 10-question test
 make run-baseline-full       # Full 100+ question baseline
+
+# Add metrics to existing study (no re-generation)
+uv run ragicamp compute-metrics outputs/study -m answer_in_context,context_recall
+uv run ragicamp compute-metrics outputs/study -m llm_judge_qa --judge-model gpt-4o-mini
 
 # Analysis
 make compare DIR=outputs/simple
@@ -163,7 +167,7 @@ Study logs auto-saved to `{output_dir}/study.log` via `add_file_handler()`.
 uv run pytest tests/ -x -q
 ```
 
-36 test files in `tests/`. No GPU needed. Fixtures in `conftest.py`.
+39 test files in `tests/`. No GPU needed. Fixtures in `conftest.py`.
 
 ## Gotchas & Conventions
 

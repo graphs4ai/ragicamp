@@ -110,7 +110,9 @@ Prediction: "Plants use sunlight to make energy"
 
 ---
 
-### 5. **Faithfulness (NEW!)** 🎯 RAG-Specific
+### 5. **Faithfulness** 🎯 RAG-Specific
+> **Note:** Faithfulness is fully wired in the metrics pipeline — contexts are automatically extracted from `retrieved_docs` in predictions.json.
+
 **What it measures**: Whether the answer is grounded in retrieved documents
 
 **Strengths:**
@@ -154,7 +156,9 @@ FaithfulnessMetric(
 
 ---
 
-### 6. **Hallucination Detection (NEW!)** 🎯 RAG-Specific
+### 6. **Hallucination Detection** 🎯 RAG-Specific
+> **Note:** Hallucination detection is fully wired in the metrics pipeline — contexts are automatically extracted from `retrieved_docs` in predictions.json.
+
 **What it measures**: Inverse of faithfulness - detects unsupported claims
 
 **Strengths:**
@@ -207,7 +211,74 @@ HallucinationMetric(
 
 ---
 
-### 7. **LLM-as-a-Judge** 💰 Expensive
+### 7. **Answer In Context** ⚡ Fast, RAG-Specific
+**What it measures**: Binary check — does the gold answer appear in retrieved context?
+
+**Strengths:**
+- No model required (pure text matching)
+- Fast, deterministic
+- Cheap proxy for retrieval quality
+
+**Weaknesses:**
+- Binary (no partial credit)
+- Sensitive to answer normalization
+- Doesn't verify semantic match
+
+**When to use:**
+- Quick retrieval quality diagnostic
+- Debugging retrieval failures
+- Comparing retrieval strategies
+
+**Example:**
+```python
+Question: "When did WWII end?"
+Retrieved Context: "The war ended in 1945."
+Gold Answer: "1945" → answer_in_context = 1.0 ✅
+Gold Answer: "September 2, 1945" → answer_in_context = 0.0 ❌ (exact phrase not found)
+```
+
+**Config:**
+```python
+AnswerInContextMetric(min_answer_len=2)  # Skip trivially short answers
+```
+
+---
+
+### 8. **Context Recall** ⚡ Fast, RAG-Specific
+**What it measures**: Fraction of reference answer sentences found in retrieved context
+
+**Strengths:**
+- Graded signal (not just binary)
+- No model required
+- Word-overlap fallback for paraphrases
+
+**Weaknesses:**
+- Sentence-level granularity may miss fine-grained info
+- Word overlap threshold is configurable but heuristic
+
+**When to use:**
+- Graded retrieval quality assessment
+- Diagnosing partial retrieval success
+- Works best with longer reference answers
+
+**Example:**
+```python
+Reference: "The war ended in 1945. It was devastating."
+Context: "The war ended in 1945."
+→ context_recall = 0.5 (1/2 sentences found)
+```
+
+**Config:**
+```python
+ContextRecallMetric(
+    min_sentence_words=3,    # Skip trivial fragments
+    overlap_threshold=0.8,   # Word-overlap fallback threshold
+)
+```
+
+---
+
+### 9. **LLM-as-a-Judge** 💰 Expensive
 **What it measures**: Categorical judgment by GPT-4 (correct/partial/incorrect)
 
 **Strengths:**
@@ -235,13 +306,15 @@ HallucinationMetric(
 
 ## 🎯 Recommended Metric Combinations
 
-### For RAG Systems (NEW!) 🔥 
+### For RAG Systems 🔥
 
 ```python
 metrics = [
     ExactMatchMetric(),           # Correctness
     F1Metric(),                   # Partial credit
     BERTScoreMetric(),            # Semantic similarity
+    AnswerInContextMetric(),      # Retrieval proxy (fast)
+    ContextRecallMetric(),        # Graded retrieval quality (fast)
     FaithfulnessMetric(           # Groundedness
         method="nli"
     ),
@@ -253,9 +326,11 @@ metrics = [
 
 **Why this combination:**
 - EM/F1/BERTScore: Measure correctness
+- AnswerInContext: Quick check if retrieval found the answer
+- ContextRecall: Graded retrieval quality diagnostic
 - Faithfulness: Verify answers use retrieved context
 - Hallucination: Catch unsupported claims
-- **Complete RAG evaluation**: Correctness + Groundedness
+- **Complete RAG evaluation**: Correctness + Retrieval Quality + Groundedness
 
 **Use for:**
 - Comparing retrieval strategies
@@ -323,6 +398,68 @@ metrics = [
 
 ---
 
+## 🔧 Adding Metrics to an Existing Study
+
+After running a study, you can compute additional metrics without re-running generation. The `compute-metrics` command iterates all experiments in a study directory, checks which ones are missing the requested metrics, and appends scores to each experiment's `predictions.json` (per-item) and `results.json` (aggregate).
+
+### Usage
+
+```bash
+# Add new metrics to all experiments in a study
+uv run ragicamp compute-metrics outputs/your_study -m answer_in_context,context_recall
+
+# Preview which experiments need metrics (no computation)
+uv run ragicamp compute-metrics outputs/your_study -m answer_in_context,context_recall --dry-run
+
+# Force recompute even if metric already exists
+uv run ragicamp compute-metrics outputs/your_study -m faithfulness --force
+
+# Add LLM judge (requires API key)
+uv run ragicamp compute-metrics outputs/your_study -m llm_judge_qa \
+    --judge-model gpt-4o-mini
+
+# Single experiment only
+uv run ragicamp metrics outputs/your_study/exp_name -m answer_in_context,context_recall
+```
+
+### How it works
+
+1. Scans all experiment directories under the study output
+2. For each experiment, checks `state.json` to see which metrics are already computed
+3. Skips experiments that already have all requested metrics (unless `--force`)
+4. Loads `predictions.json`, extracts `retrieved_docs` as contexts
+5. Calls `compute_metrics_batched()` with only the missing metrics
+6. Appends per-item scores to each prediction and merges aggregate scores into `results.json`
+
+### Context-aware metrics
+
+Metrics that evaluate retrieval quality (`faithfulness`, `hallucination`, `answer_in_context`, `context_recall`) automatically extract context from the `retrieved_docs` field in predictions. For `direct_llm` experiments (no retrieval), contexts are empty and these metrics return 0.0.
+
+### Typical workflow
+
+```bash
+# 1. Run study with fast metrics only
+#    (study YAML has: metrics: [f1, exact_match])
+uv run ragicamp run conf/study/my_study.yaml
+
+# 2. Add retrieval quality metrics (no GPU needed, fast)
+uv run ragicamp compute-metrics outputs/my_study -m answer_in_context,context_recall
+
+# 3. Add NLI-based metrics (needs GPU for deberta model)
+uv run ragicamp compute-metrics outputs/my_study -m faithfulness,hallucination
+
+# 4. Add LLM judge (needs API key, costs money)
+uv run ragicamp compute-metrics outputs/my_study -m llm_judge_qa \
+    --judge-model gpt-4o-mini
+
+# 5. Add expensive model-based metrics
+uv run ragicamp compute-metrics outputs/my_study -m bertscore,bleurt
+```
+
+Each step appends to the existing results — no data is lost or overwritten.
+
+---
+
 ## 📈 Additional Metrics to Consider
 
 ### 6. **ROUGE-L** (Not yet implemented)
@@ -376,7 +513,7 @@ metrics = [EM]
 | Yes/No | EM, **LLM Judge** |
 | Numerical | EM with normalization |
 | Lists | F1, custom list metrics |
-| **RAG outputs** | **EM/F1 + Faithfulness + Hallucination** |
+| **RAG outputs** | **EM/F1 + AnswerInContext + ContextRecall + Faithfulness + Hallucination** |
 
 ### 3. Understand Trade-offs
 

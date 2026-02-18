@@ -406,21 +406,21 @@ class TestExperimentSpecCompleteness:
     """Ensure all config fields survive serialisation round-trip."""
 
     def _make_full_spec(self, **overrides) -> ExperimentSpec:
-        defaults = dict(
-            name="test_full",
-            exp_type="rag",
-            model="vllm:test/model",
-            dataset="nq",
-            prompt="concise",
-            retriever="dense_test",
-            top_k=5,
-            fetch_k=20,
-            query_transform="hyde",
-            reranker="bge",
-            reranker_model="BAAI/bge-reranker-large",
-            agent_type="iterative_rag",
-            agent_params=(("max_iterations", 2),),
-        )
+        defaults = {
+            "name": "test_full",
+            "exp_type": "rag",
+            "model": "vllm:test/model",
+            "dataset": "nq",
+            "prompt": "concise",
+            "retriever": "dense_test",
+            "top_k": 5,
+            "fetch_k": 20,
+            "query_transform": "hyde",
+            "reranker": "bge",
+            "reranker_model": "BAAI/bge-reranker-large",
+            "agent_type": "iterative_rag",
+            "agent_params": (("max_iterations", 2),),
+        }
         defaults.update(overrides)
         return ExperimentSpec(**defaults)
 

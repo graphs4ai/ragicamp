@@ -96,7 +96,7 @@ def run_metrics_only(
     references = [p["expected"] for p in preds]
     questions = [p["question"] for p in preds]
 
-    # Extract retrieved contexts for context-aware metrics (faithfulness, hallucination)
+    # Extract retrieved contexts for context-aware metrics
     contexts = _extract_contexts(preds)
 
     # Load state to track computed metrics

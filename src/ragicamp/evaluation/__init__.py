@@ -65,7 +65,12 @@ def compute_metrics_from_file(
     for metric in metrics:
         try:
             logger.debug("Computing %s...", metric.name)
-            is_context_aware = metric.name in ("faithfulness", "hallucination")
+            is_context_aware = metric.name in (
+                "faithfulness",
+                "hallucination",
+                "answer_in_context",
+                "context_recall",
+            )
             if metric.name in ("llm_judge", "llm_judge_qa"):
                 result = metric.compute_with_details(
                     predictions=predictions, references=references, questions=questions

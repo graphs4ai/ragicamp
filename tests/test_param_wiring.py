@@ -398,7 +398,7 @@ class TestRunnerMetadataCompleteness:
                 json.dump(predictions_data, f)
 
             # Run metrics only with spec provided
-            result = run_metrics_only(
+            run_metrics_only(
                 exp_name=spec.name,
                 output_path=exp_out,
                 metrics=["f1"],
@@ -502,7 +502,6 @@ class TestBatchSizePropagation:
 
         # Patch Experiment.__init__ to capture the _batch_size argument
         captured = {}
-        original_init = Experiment.__init__
 
         def spy_init(self, *args, **kwargs):
             captured["_batch_size"] = kwargs.get("_batch_size")

@@ -173,7 +173,6 @@ def main():
         # Process batches for this shard
         t_start = time.time()
         batch_num = 0
-        shard_chunks = []
 
         with open(emb_path, "rb") as f:
             while batch_num < end_batch:

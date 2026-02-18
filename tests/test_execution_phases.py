@@ -216,7 +216,7 @@ class TestGenerationHandlerExecute:
         context = ExecutionContext(output_path=tmp_path, agent=agent)
 
         handler = GenerationHandler()
-        new_state = handler.execute(spec, state, context)
+        handler.execute(spec, state, context)
 
         # Agent should NOT have been called
         assert len(agent.received_queries) == 0
@@ -347,7 +347,7 @@ class TestMetricsHandlerExecute:
         )
 
         handler = MetricsHandler()
-        new_state = handler.execute(_make_spec(), state, context)
+        handler.execute(_make_spec(), state, context)
 
         # Verify compute_metrics_batched was called with correct args
         mock_compute.assert_called_once()

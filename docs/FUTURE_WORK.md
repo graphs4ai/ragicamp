@@ -260,6 +260,8 @@ High-impact, low-effort improvements (1-2 weeks total).
 
 ### 3.1 Retrieval Quality Metrics (P0 priority)
 
+**Status: PARTIALLY DONE** — `AnswerInContextMetric` (answer-in-retrieved-text proxy) implemented. MRR/NDCG/Recall@k deferred (require ground-truth passage annotations).
+
 **Problem**: We only evaluate final answer quality, not retrieval quality. When experiments
 fail, we can't tell if the issue is bad retrieval or bad generation.
 
@@ -342,6 +344,8 @@ def reorder_passages_for_attention(passages: list[Document]) -> list[Document]:
 **Effort**: Low | **Impact**: Medium
 
 ### 3.3 Context Recall Metric
+
+**Status: DONE** — Implemented as `ContextRecallMetric` in `metrics/context_recall.py` and `AnswerInContextMetric` in `metrics/answer_in_context.py`. Both are wired through the pipeline.
 
 Check if gold answer text is present in retrieved context (no LLM needed):
 
@@ -650,6 +654,8 @@ Improvements to how we measure and compare experiments.
 - **Effort**: Medium | **Impact**: High
 
 ### 7.2 RAGAS-Style Pipeline Evaluation
+
+**Status: PARTIALLY DONE** — Faithfulness, Hallucination, ContextRecall, and AnswerInContext metrics implemented and wired. Context is now extracted from `retrieved_docs` in predictions. Answer Relevance and Context Precision deferred.
 
 Evaluate the full RAG pipeline, not just final answers:
 

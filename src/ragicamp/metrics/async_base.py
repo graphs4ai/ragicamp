@@ -152,10 +152,13 @@ class AsyncAPIMetric(Metric):
                     except Exception as e:
                         is_retryable = "429" in str(e) or "5" == str(e)[:1]
                         if is_retryable and attempt < self.MAX_RETRIES:
-                            delay = self.RETRY_BASE_DELAY * (2 ** attempt) + random.random()
+                            delay = self.RETRY_BASE_DELAY * (2**attempt) + random.random()
                             logger.info(
                                 "Item %d: 429/5xx, retry %d/%d in %.1fs",
-                                idx, attempt + 1, self.MAX_RETRIES, delay,
+                                idx,
+                                attempt + 1,
+                                self.MAX_RETRIES,
+                                delay,
                             )
                             await asyncio.sleep(delay)
                             continue
@@ -183,6 +186,7 @@ class AsyncAPIMetric(Metric):
 
         # Store per-item results for detailed analysis
         self._last_results = results
+        self._last_per_item = [r.get(self.name, 0.0) for r in results]
 
         # Aggregate results
         return self._aggregate_results(results)

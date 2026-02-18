@@ -279,7 +279,7 @@ class MockMetric(Metric):
         # Simple exact match calculation
         matches = sum(
             1
-            for pred, refs in zip(predictions, references)
+            for pred, refs in zip(predictions, references, strict=False)
             if pred.lower().strip() in [r.lower().strip() for r in refs]
         )
         score = matches / len(predictions) if predictions else 0.0

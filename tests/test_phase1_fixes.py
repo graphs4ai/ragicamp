@@ -82,7 +82,7 @@ class TestRerankerDocumentCopy:
 
         # This is the exact pattern from CrossEncoderReranker.rerank
         scored_docs = [copy.copy(doc) for doc in docs]
-        for doc, score in zip(scored_docs, scores):
+        for doc, score in zip(scored_docs, scores, strict=True):
             doc.score = float(score)
         scored_docs.sort(key=lambda d: d.score, reverse=True)
 
@@ -104,7 +104,7 @@ class TestRerankerDocumentCopy:
 
         # This is the exact pattern from CrossEncoderReranker.batch_rerank
         copied_docs = [[copy.copy(doc) for doc in docs] for docs in docs_list]
-        for (q_idx, d_idx), score in zip(pair_indices, scores):
+        for (q_idx, d_idx), score in zip(pair_indices, scores, strict=True):
             copied_docs[q_idx][d_idx].score = float(score)
 
         # Originals unchanged
