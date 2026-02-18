@@ -119,7 +119,7 @@ class TestContextMetricsNonExpanded:
 
 class TestEmptyContextsGraceful:
     def test_direct_llm_no_contexts(self):
-        """When contexts=None (direct_llm), context metrics return 0.0 gracefully."""
+        """When contexts=None (direct_llm), context metrics are skipped gracefully."""
         metric = AnswerInContextMetric()
         agg, per_item, computed, failed, timings = compute_metrics_batched(
             metrics=[metric],
@@ -127,8 +127,8 @@ class TestEmptyContextsGraceful:
             references=["answer"],
             contexts=None,
         )
-        assert agg["answer_in_context"] == 0.0
-        assert "answer_in_context" in computed
+        assert "answer_in_context" not in agg
+        assert "answer_in_context" in failed
 
     def test_empty_context_lists(self):
         """When all context lists are empty, metrics handle gracefully."""
@@ -232,8 +232,8 @@ class TestMetricsHandlerContextExtraction:
         ]
 
     @patch("ragicamp.metrics.compute_metrics_batched")
-    def test_no_retrieved_docs_gives_empty_contexts(self, mock_compute, tmp_path):
-        """Predictions without retrieved_docs key produce empty context lists."""
+    def test_no_retrieved_docs_gives_none_contexts(self, mock_compute, tmp_path):
+        """Predictions without retrieved_docs key produce contexts=None."""
         from datetime import datetime
 
         from ragicamp.execution.phases.base import ExecutionContext
@@ -273,7 +273,7 @@ class TestMetricsHandlerContextExtraction:
         handler.execute(spec, state, ctx)
 
         call_kwargs = mock_compute.call_args[1]
-        assert call_kwargs["contexts"] == [[]]
+        assert call_kwargs["contexts"] is None
 
 
 # ---------------------------------------------------------------------------

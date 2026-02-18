@@ -219,6 +219,14 @@ def compute_metrics_batched(
             elif is_context_metric:
                 # Context metrics handle multi-reference internally and need
                 # the original (non-expanded) data with contexts.
+                if contexts is None:
+                    logger.warning(
+                        "%s requires retrieved contexts but none found in predictions "
+                        "(no retrieved_docs). Skipping.",
+                        metric.name,
+                    )
+                    failed.append(metric.name)
+                    continue
                 metric_result = metric.compute_with_details(
                     predictions=predictions,
                     references=references,
