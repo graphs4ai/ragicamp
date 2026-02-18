@@ -26,6 +26,8 @@ _METRIC_REGISTRY: dict[str, tuple[str, str]] = {
     "llm_judge_qa": ("ragicamp.metrics.llm_judge_qa", "LLMJudgeQAMetric"),
     "faithfulness": ("ragicamp.metrics.faithfulness", "FaithfulnessMetric"),
     "hallucination": ("ragicamp.metrics.hallucination", "HallucinationMetric"),
+    "answer_in_context": ("ragicamp.metrics.answer_in_context", "AnswerInContextMetric"),
+    "context_recall": ("ragicamp.metrics.context_recall", "ContextRecallMetric"),
 }
 
 # Metrics that require a judge_model to be provided.

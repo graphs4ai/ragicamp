@@ -36,20 +36,15 @@ class MetricType(str, Enum):
     BERTSCORE = "bertscore"
     BLEURT = "bleurt"
 
-    # RAG-specific (Ragas)
+    # Context-aware RAG metrics
     FAITHFULNESS = "faithfulness"
-    ANSWER_RELEVANCY = "answer_relevancy"
-    CONTEXT_PRECISION = "context_precision"
+    HALLUCINATION = "hallucination"
     CONTEXT_RECALL = "context_recall"
-    ANSWER_SIMILARITY = "answer_similarity"
-    ANSWER_CORRECTNESS = "answer_correctness"
+    ANSWER_IN_CONTEXT = "answer_in_context"
 
     # LLM-based
     LLM_JUDGE = "llm_judge"
     LLM_JUDGE_QA = "llm_judge_qa"
-
-    # Legacy (can be deprecated)
-    HALLUCINATION = "hallucination"
 
     @classmethod
     def standard_metrics(cls) -> list["MetricType"]:
@@ -62,15 +57,13 @@ class MetricType(str, Enum):
         return [cls.BERTSCORE, cls.BLEURT]
 
     @classmethod
-    def ragas_metrics(cls) -> list["MetricType"]:
-        """Ragas-powered RAG metrics."""
+    def context_metrics(cls) -> list["MetricType"]:
+        """Metrics that require retrieved context."""
         return [
             cls.FAITHFULNESS,
-            cls.ANSWER_RELEVANCY,
-            cls.CONTEXT_PRECISION,
+            cls.HALLUCINATION,
             cls.CONTEXT_RECALL,
-            cls.ANSWER_SIMILARITY,
-            cls.ANSWER_CORRECTNESS,
+            cls.ANSWER_IN_CONTEXT,
         ]
 
     @classmethod
@@ -81,9 +74,7 @@ class MetricType(str, Enum):
     @classmethod
     def requires_context(cls, metric_type: str) -> bool:
         """Check if metric requires retrieved context."""
-        context_metrics = {m.value for m in cls.ragas_metrics()}
-        context_metrics.add(cls.HALLUCINATION.value)
-        return metric_type in context_metrics
+        return metric_type in {m.value for m in cls.context_metrics()}
 
 
 # === Reranker Model Registry ===

@@ -121,15 +121,17 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         category, score = self._extract_judgment(judgment)
 
         # Store trace for debugging/export
-        self._traces.append({
-            "question": question,
-            "reference": reference,
-            "prediction": prediction,
-            "prompt": prompt,
-            "response": judgment,
-            "category": category,
-            "score": score,
-        })
+        self._traces.append(
+            {
+                "question": question,
+                "reference": reference,
+                "prediction": prediction,
+                "prompt": prompt,
+                "response": judgment,
+                "category": category,
+                "score": score,
+            }
+        )
 
         return {
             "llm_judge_qa": score,
@@ -141,7 +143,9 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
         sys_msg = self._get_system_message()
         if hasattr(self.judge_model, "agenerate_single"):
             return await self.judge_model.agenerate_single(
-                prompt, temperature=0.0, max_tokens=16384,
+                prompt,
+                temperature=0.0,
+                max_tokens=16384,
                 system_message=sys_msg,
             )
         import asyncio
@@ -239,11 +243,7 @@ class LLMJudgeQAMetric(AsyncAPIMetric):
             if not text:
                 continue
             # Check in order of specificity
-            if (
-                "partially_correct" in text
-                or "partially correct" in text
-                or "partial" in text
-            ):
+            if "partially_correct" in text or "partially correct" in text or "partial" in text:
                 if self.judgment_type == "binary":
                     return ("incorrect", 0.0)
                 return ("partially_correct", 0.5)

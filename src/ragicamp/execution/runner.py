@@ -78,6 +78,12 @@ def run_metrics_only(
     references = [p["expected"] for p in preds]
     questions = [p["question"] for p in preds]
 
+    # Extract retrieved contexts for context-aware metrics
+    contexts = [
+        [d.get("content", "") for d in p.get("retrieved_docs", []) if d.get("content")]
+        for p in preds
+    ]
+
     # Load state to track computed metrics
     state = detect_state(output_path, metrics)
 
@@ -97,6 +103,7 @@ def run_metrics_only(
         predictions=predictions,
         references=references,
         questions=questions,
+        contexts=contexts,
         already_computed=already_computed,
         on_metric_complete=on_metric_complete,
     )

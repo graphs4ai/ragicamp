@@ -118,7 +118,10 @@ class SparseIndex:
 
         logger.info("Tokenizing %d documents for BM25...", len(texts))
         corpus_tokens = bm25s.tokenize(
-            texts, stopwords=None, stemmer=None, show_progress=show_progress,
+            texts,
+            stopwords=None,
+            stemmer=None,
+            show_progress=show_progress,
         )
         logger.info("Tokenization complete, vocab size: %d", len(corpus_tokens.vocab))
 
@@ -163,9 +166,7 @@ class SparseIndex:
             return []
         return self._batch_search_bm25([query], top_k)[0]
 
-    def _batch_search_bm25(
-        self, queries: list[str], top_k: int
-    ) -> list[list[tuple[int, float]]]:
+    def _batch_search_bm25(self, queries: list[str], top_k: int) -> list[list[tuple[int, float]]]:
         """Vectorized batch BM25 search using bm25s.retrieve()."""
         import bm25s
 
@@ -173,7 +174,10 @@ class SparseIndex:
             return [[] for _ in queries]
 
         query_tokens = bm25s.tokenize(
-            queries, stopwords=None, stemmer=None, show_progress=False,
+            queries,
+            stopwords=None,
+            stemmer=None,
+            show_progress=False,
         )
         results_array, scores_array = self._bm25.retrieve(query_tokens, k=top_k)
 
