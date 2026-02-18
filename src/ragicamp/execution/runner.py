@@ -29,6 +29,24 @@ from ragicamp.spec import ExperimentSpec
 logger = get_logger(__name__)
 
 
+def _extract_contexts(preds: list[dict]) -> list[list[str]] | None:
+    """Extract retrieved contexts from predictions for context-aware metrics.
+
+    Returns None if no predictions contain retrieved_docs (e.g., direct_llm experiments).
+    """
+    contexts: list[list[str]] = []
+    has_any = False
+    for p in preds:
+        docs = p.get("retrieved_docs", [])
+        ctx = [doc["content"] for doc in docs if "content" in doc]
+        if ctx:
+            has_any = True
+        contexts.append(ctx)
+    if not has_any:
+        return None
+    return contexts
+
+
 # =============================================================================
 # Phase-Aware Runners
 # =============================================================================
@@ -78,6 +96,9 @@ def run_metrics_only(
     references = [p["expected"] for p in preds]
     questions = [p["question"] for p in preds]
 
+    # Extract retrieved contexts for context-aware metrics (faithfulness, hallucination)
+    contexts = _extract_contexts(preds)
+
     # Load state to track computed metrics
     state = detect_state(output_path, metrics)
 
@@ -97,6 +118,7 @@ def run_metrics_only(
         predictions=predictions,
         references=references,
         questions=questions,
+        contexts=contexts,
         already_computed=already_computed,
         on_metric_complete=on_metric_complete,
     )

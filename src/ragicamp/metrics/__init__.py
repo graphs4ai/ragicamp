@@ -88,11 +88,17 @@ def _has_multi_references(references: list[Any]) -> bool:
     return any(isinstance(ref, list) for ref in references)
 
 
+def _is_context_aware_metric(metric: Metric) -> bool:
+    """Check if a metric requires retrieved contexts (e.g., faithfulness, hallucination)."""
+    return metric.name in ("faithfulness", "hallucination")
+
+
 def compute_metrics_batched(
     metrics: list[Metric],
     predictions: list[str],
     references: list[Any],
     questions: list[str] | None = None,
+    contexts: list[list[str]] | None = None,
     already_computed: list[str] | None = None,
     on_metric_complete: Callable | None = None,
 ) -> tuple[dict[str, float], dict[str, list[float]], list[str], list[str], dict[str, float]]:
@@ -111,6 +117,8 @@ def compute_metrics_batched(
         predictions: List of model predictions
         references: List of reference answers (can be str or List[str] per item)
         questions: Optional list of questions (needed for llm_judge)
+        contexts: Optional list of context doc lists per prediction (needed for
+                  faithfulness/hallucination)
         already_computed: List of metric names already computed (to skip)
         on_metric_complete: Callback(metric_name) called after each metric
 
@@ -147,6 +155,8 @@ def compute_metrics_batched(
         references = [r for r, v in zip(references, valid_mask, strict=True) if v]
         if questions is not None:
             questions = [q for q, v in zip(questions, valid_mask, strict=True) if v]
+        if contexts is not None:
+            contexts = [c for c, v in zip(contexts, valid_mask, strict=True) if v]
 
     if not predictions:
         logger.warning("No valid predictions to score after filtering errors")
@@ -157,8 +167,8 @@ def compute_metrics_batched(
 
     if has_multi:
         # Expand for multi-reference evaluation (used by non-LLM metrics)
-        expanded_preds, expanded_refs, _, pred_indices, _ = (
-            _expand_for_multi_reference(predictions, references, questions)
+        expanded_preds, expanded_refs, _, pred_indices, _ = _expand_for_multi_reference(
+            predictions, references, questions
         )
         logger.info(
             "Multi-reference detected: %d predictions -> %d pairs",
@@ -185,6 +195,7 @@ def compute_metrics_batched(
             # directly from the return value, avoiding the stateful
             # _last_per_item side-channel (4.13 fix).
             is_llm_judge = metric.name in ("llm_judge", "llm_judge_qa")
+            is_context_aware = _is_context_aware_metric(metric)
 
             if is_llm_judge:
                 if questions is None:
@@ -199,6 +210,23 @@ def compute_metrics_batched(
                     references=references,
                     questions=questions,
                 )
+            elif is_context_aware:
+                # Context-aware metrics (faithfulness, hallucination) use
+                # retrieved contexts, not references. Use original
+                # (non-expanded) predictions since contexts map 1:1.
+                if contexts is None:
+                    logger.warning(
+                        "%s requires retrieved contexts but none found in predictions "
+                        "(no retrieved_docs). Skipping — scores would be meaningless.",
+                        metric.name,
+                    )
+                    failed.append(metric.name)
+                    continue
+                metric_result = metric.compute_with_details(
+                    predictions=predictions,
+                    references=references,
+                    contexts=contexts,
+                )
             else:
                 metric_result = metric.compute_with_details(
                     predictions=expanded_preds, references=expanded_refs
@@ -207,8 +235,8 @@ def compute_metrics_batched(
             scores = {metric_result.name: metric_result.aggregate}
             expanded_per_item = metric_result.per_item
 
-            # Aggregate if multi-reference (not needed for LLM judge)
-            if has_multi and expanded_per_item and not is_llm_judge:
+            # Aggregate if multi-reference (not needed for LLM judge or context-aware)
+            if has_multi and expanded_per_item and not is_llm_judge and not is_context_aware:
                 aggregated_per_item = _aggregate_multi_reference_scores(
                     expanded_per_item, pred_indices, len(predictions)
                 )

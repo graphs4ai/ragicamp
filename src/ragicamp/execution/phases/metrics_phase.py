@@ -52,6 +52,9 @@ class MetricsHandler(PhaseHandler):
         references = [p["expected"] for p in preds]
         questions = [p["question"] for p in preds]
 
+        # Extract retrieved contexts for context-aware metrics
+        contexts = self._extract_contexts(preds)
+
         # Callback to save state after each metric
         def on_metric_complete(metric_name: str) -> None:
             if metric_name not in state.metrics_computed:
@@ -65,6 +68,7 @@ class MetricsHandler(PhaseHandler):
                 predictions=predictions,
                 references=references,
                 questions=questions,
+                contexts=contexts,
                 already_computed=state.metrics_computed,
                 on_metric_complete=on_metric_complete,
             )
@@ -97,6 +101,24 @@ class MetricsHandler(PhaseHandler):
         return state
 
     @staticmethod
+    def _extract_contexts(preds: list[dict]) -> list[list[str]] | None:
+        """Extract retrieved contexts from predictions for context-aware metrics.
+
+        Returns None if no predictions contain retrieved_docs.
+        """
+        contexts: list[list[str]] = []
+        has_any = False
+        for p in preds:
+            docs = p.get("retrieved_docs", [])
+            ctx = [doc["content"] for doc in docs if "content" in doc]
+            if ctx:
+                has_any = True
+            contexts.append(ctx)
+        if not has_any:
+            return None
+        return contexts
+
+    @staticmethod
     def _export_traces(metrics: list[Any], output_path: Path) -> None:
         """Export LLM judge traces to JSONL if available."""
         for metric in metrics:
@@ -107,9 +129,7 @@ class MetricsHandler(PhaseHandler):
                     with open(trace_path, "w") as f:
                         for trace in traces:
                             f.write(json.dumps(trace, ensure_ascii=False) + "\n")
-                    logger.info(
-                        "Exported %d LLM judge traces to %s", len(traces), trace_path
-                    )
+                    logger.info("Exported %d LLM judge traces to %s", len(traces), trace_path)
 
     def _save_predictions(self, data: dict, path: Path) -> None:
         """Save predictions atomically."""

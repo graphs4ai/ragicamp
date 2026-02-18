@@ -45,6 +45,19 @@ def compute_metrics_from_file(
     questions = [p["question"] for p in preds]
     references = [p.get("expected", "") for p in preds]
 
+    # Extract retrieved contexts for context-aware metrics
+    contexts: list[list[str]] | None = None
+    _has_any_ctx = False
+    _ctx_list: list[list[str]] = []
+    for p in preds:
+        docs = p.get("retrieved_docs", [])
+        ctx = [doc["content"] for doc in docs if "content" in doc]
+        if ctx:
+            _has_any_ctx = True
+        _ctx_list.append(ctx)
+    if _has_any_ctx:
+        contexts = _ctx_list
+
     # Compute metrics
     aggregate_results: dict[str, float] = {}
     per_item_results: dict[str, list[float]] = {}
@@ -52,9 +65,21 @@ def compute_metrics_from_file(
     for metric in metrics:
         try:
             logger.debug("Computing %s...", metric.name)
+            is_context_aware = metric.name in ("faithfulness", "hallucination")
             if metric.name in ("llm_judge", "llm_judge_qa"):
                 result = metric.compute_with_details(
                     predictions=predictions, references=references, questions=questions
+                )
+            elif is_context_aware:
+                if contexts is None:
+                    logger.warning(
+                        "%s requires retrieved contexts but none found in predictions "
+                        "(no retrieved_docs). Skipping.",
+                        metric.name,
+                    )
+                    continue
+                result = metric.compute_with_details(
+                    predictions=predictions, references=references, contexts=contexts
                 )
             else:
                 result = metric.compute_with_details(predictions=predictions, references=references)
