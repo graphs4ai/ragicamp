@@ -398,6 +398,68 @@ metrics = [
 
 ---
 
+## 🔧 Adding Metrics to an Existing Study
+
+After running a study, you can compute additional metrics without re-running generation. The `compute-metrics` command iterates all experiments in a study directory, checks which ones are missing the requested metrics, and appends scores to each experiment's `predictions.json` (per-item) and `results.json` (aggregate).
+
+### Usage
+
+```bash
+# Add new metrics to all experiments in a study
+uv run ragicamp compute-metrics outputs/your_study -m answer_in_context,context_recall
+
+# Preview which experiments need metrics (no computation)
+uv run ragicamp compute-metrics outputs/your_study -m answer_in_context,context_recall --dry-run
+
+# Force recompute even if metric already exists
+uv run ragicamp compute-metrics outputs/your_study -m faithfulness --force
+
+# Add LLM judge (requires API key)
+uv run ragicamp compute-metrics outputs/your_study -m llm_judge_qa \
+    --judge-model gpt-4o-mini
+
+# Single experiment only
+uv run ragicamp metrics outputs/your_study/exp_name -m answer_in_context,context_recall
+```
+
+### How it works
+
+1. Scans all experiment directories under the study output
+2. For each experiment, checks `state.json` to see which metrics are already computed
+3. Skips experiments that already have all requested metrics (unless `--force`)
+4. Loads `predictions.json`, extracts `retrieved_docs` as contexts
+5. Calls `compute_metrics_batched()` with only the missing metrics
+6. Appends per-item scores to each prediction and merges aggregate scores into `results.json`
+
+### Context-aware metrics
+
+Metrics that evaluate retrieval quality (`faithfulness`, `hallucination`, `answer_in_context`, `context_recall`) automatically extract context from the `retrieved_docs` field in predictions. For `direct_llm` experiments (no retrieval), contexts are empty and these metrics return 0.0.
+
+### Typical workflow
+
+```bash
+# 1. Run study with fast metrics only
+#    (study YAML has: metrics: [f1, exact_match])
+uv run ragicamp run conf/study/my_study.yaml
+
+# 2. Add retrieval quality metrics (no GPU needed, fast)
+uv run ragicamp compute-metrics outputs/my_study -m answer_in_context,context_recall
+
+# 3. Add NLI-based metrics (needs GPU for deberta model)
+uv run ragicamp compute-metrics outputs/my_study -m faithfulness,hallucination
+
+# 4. Add LLM judge (needs API key, costs money)
+uv run ragicamp compute-metrics outputs/my_study -m llm_judge_qa \
+    --judge-model gpt-4o-mini
+
+# 5. Add expensive model-based metrics
+uv run ragicamp compute-metrics outputs/my_study -m bertscore,bleurt
+```
+
+Each step appends to the existing results — no data is lost or overwritten.
+
+---
+
 ## 📈 Additional Metrics to Consider
 
 ### 6. **ROUGE-L** (Not yet implemented)

@@ -25,6 +25,10 @@ make index-full       # All standard indexes
 make run-baseline-simple     # 10-question test
 make run-baseline-full       # Full 100+ question baseline
 
+# Add metrics to existing study (no re-generation)
+uv run ragicamp compute-metrics outputs/study -m answer_in_context,context_recall
+uv run ragicamp compute-metrics outputs/study -m llm_judge_qa --judge-model gpt-4o-mini
+
 # Analysis
 make compare DIR=outputs/simple
 make evaluate DIR=outputs/simple METRICS=bertscore,bleurt
