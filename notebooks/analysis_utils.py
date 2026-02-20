@@ -30,8 +30,23 @@ warnings.filterwarnings('ignore')
 DEFAULT_STUDY_PATH = Path("../outputs/smart_retrieval_slm")
 
 # Metrics to analyze
-METRICS = ['f1', 'exact_match', 'bertscore', 'bleurt', 'llm_judge']
+METRICS = [
+    'f1', 'exact_match',
+    'bertscore', 'bertscore_f1', 'bertscore_precision', 'bertscore_recall',
+    'bleurt', 'llm_judge',
+    'faithfulness', 'hallucination', 'answer_in_context', 'context_recall',
+]
 PRIMARY_METRIC = 'f1'
+
+# Metric groupings for multi-metric analysis
+CORRECTNESS_METRICS = ['f1', 'exact_match']
+SEMANTIC_METRICS = ['bertscore_f1', 'bleurt']
+CONTEXT_METRICS = ['answer_in_context', 'context_recall']
+GROUNDEDNESS_METRICS = ['faithfulness', 'hallucination']
+
+# All metrics suitable for multi-metric comparison (common, interpretable 0-1 scale)
+MULTI_METRIC_SET = ['f1', 'exact_match', 'bertscore_f1', 'faithfulness',
+                    'answer_in_context', 'context_recall']
 
 # Model name mappings
 # Keys are substrings that appear in experiment names after normalization:
@@ -1565,6 +1580,70 @@ def identify_bottlenecks(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict
         bottleneck_results[factor] = variance_explained
     
     return dict(sorted(bottleneck_results.items(), key=lambda x: x[1], reverse=True))
+
+
+# =============================================================================
+# MULTI-METRIC ANALYSIS
+# =============================================================================
+
+def multi_metric_bottlenecks(
+    df: pd.DataFrame,
+    metrics: List[str] = None,
+) -> pd.DataFrame:
+    """Run variance decomposition across multiple metrics.
+
+    Returns a DataFrame with factors as rows and metrics as columns,
+    values are % variance explained.  Useful for side-by-side comparison
+    of which components matter for different quality dimensions.
+    """
+    if metrics is None:
+        metrics = [m for m in MULTI_METRIC_SET if m in df.columns and df[m].notna().sum() >= 10]
+
+    results = {}
+    for m in metrics:
+        bn = identify_bottlenecks(df, m)
+        if bn:
+            results[m] = bn
+
+    if not results:
+        return pd.DataFrame()
+
+    return pd.DataFrame(results).fillna(0).sort_values(
+        results.get(PRIMARY_METRIC, list(results.keys())[0]).keys().__iter__().__next__(),
+        ascending=False,
+    ) if results else pd.DataFrame()
+
+
+def multi_metric_bottlenecks_df(
+    df: pd.DataFrame,
+    metrics: List[str] = None,
+) -> pd.DataFrame:
+    """Run variance decomposition across multiple metrics.
+
+    Returns a tidy DataFrame: columns [factor, metric, variance_pct].
+    """
+    if metrics is None:
+        metrics = [m for m in MULTI_METRIC_SET if m in df.columns and df[m].notna().sum() >= 10]
+
+    rows = []
+    for m in metrics:
+        bn = identify_bottlenecks(df, m)
+        for factor, pct in bn.items():
+            rows.append({'factor': factor, 'metric': m, 'variance_pct': pct})
+
+    return pd.DataFrame(rows)
+
+
+def metric_correlation_matrix(
+    df: pd.DataFrame,
+    metrics: List[str] = None,
+    method: str = 'spearman',
+) -> pd.DataFrame:
+    """Compute pairwise correlation matrix for available metrics."""
+    if metrics is None:
+        metrics = [m for m in MULTI_METRIC_SET if m in df.columns and df[m].notna().sum() >= 10]
+
+    return df[metrics].dropna().corr(method=method)
 
 
 # =============================================================================
