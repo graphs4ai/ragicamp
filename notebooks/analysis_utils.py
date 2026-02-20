@@ -1245,48 +1245,82 @@ def print_search_space_summary(df: pd.DataFrame) -> None:
 # =============================================================================
 
 def weighted_mean_with_ci(
-    df: pd.DataFrame, 
-    group_col: str, 
+    df: pd.DataFrame,
+    group_col: str,
     metric: str = PRIMARY_METRIC,
     weight_by: str = None,
     confidence: float = 0.95,
     n_bootstrap: int = 1000,
+    stratify_by: str = 'dataset',
 ) -> pd.DataFrame:
     """
     Compute weighted mean with bootstrap confidence intervals.
+
+    When *stratify_by* is set and present in *df*, the mean for each group is
+    computed **within** each stratum first, then averaged across strata.  This
+    prevents datasets with different difficulty levels from confounding the
+    group comparison.  Bootstrap CIs are also stratified.
     """
     if metric not in df.columns:
         return pd.DataFrame()
-    
+
+    use_strata = stratify_by and stratify_by in df.columns and df[stratify_by].nunique() > 1
+
     results = []
-    
+
     for group_val, group_df in df.groupby(group_col):
         values = group_df[metric].dropna().values
         if len(values) == 0:
             continue
-        
-        if weight_by and weight_by in group_df.columns:
-            weight_counts = group_df[weight_by].value_counts()
-            weights = group_df[weight_by].map(lambda x: 1.0 / weight_counts.get(x, 1))
-            weights = weights / weights.sum()
-            weighted_mean = (group_df[metric] * weights).sum()
+
+        if use_strata:
+            # Compute mean within each stratum, then average across strata
+            stratum_means = group_df.groupby(stratify_by)[metric].mean()
+            point_est = stratum_means.mean()
+
+            # Stratified bootstrap
+            if len(stratum_means) >= 2 and len(values) >= 3:
+                strata_groups = {
+                    k: v[metric].dropna().values
+                    for k, v in group_df.groupby(stratify_by)
+                }
+                bootstrap_means = []
+                for _ in range(n_bootstrap):
+                    boot_stratum = []
+                    for vals in strata_groups.values():
+                        if len(vals) == 0:
+                            continue
+                        sample = np.random.choice(vals, size=len(vals), replace=True)
+                        boot_stratum.append(np.mean(sample))
+                    bootstrap_means.append(np.mean(boot_stratum))
+                alpha = (1 - confidence) / 2
+                ci_low = np.percentile(bootstrap_means, alpha * 100)
+                ci_high = np.percentile(bootstrap_means, (1 - alpha) * 100)
+            else:
+                ci_low = ci_high = point_est
         else:
-            weighted_mean = np.mean(values)
-        
-        if len(values) >= 3:
-            bootstrap_means = []
-            for _ in range(n_bootstrap):
-                sample = np.random.choice(values, size=len(values), replace=True)
-                bootstrap_means.append(np.mean(sample))
-            alpha = (1 - confidence) / 2
-            ci_low = np.percentile(bootstrap_means, alpha * 100)
-            ci_high = np.percentile(bootstrap_means, (1 - alpha) * 100)
-        else:
-            ci_low = ci_high = weighted_mean
-        
+            if weight_by and weight_by in group_df.columns:
+                weight_counts = group_df[weight_by].value_counts()
+                weights = group_df[weight_by].map(lambda x: 1.0 / weight_counts.get(x, 1))
+                weights = weights / weights.sum()
+                point_est = (group_df[metric] * weights).sum()
+            else:
+                point_est = np.mean(values)
+
+            if len(values) >= 3:
+                bootstrap_means = []
+                for _ in range(n_bootstrap):
+                    sample = np.random.choice(values, size=len(values), replace=True)
+                    bootstrap_means.append(np.mean(sample))
+                alpha = (1 - confidence) / 2
+                ci_low = np.percentile(bootstrap_means, alpha * 100)
+                ci_high = np.percentile(bootstrap_means, (1 - alpha) * 100)
+            else:
+                ci_low = ci_high = point_est
+
         results.append({
             group_col: group_val,
-            'mean': weighted_mean,
+            'mean': point_est,
             'std': np.std(values) if len(values) > 1 else 0,
             'ci_low': ci_low,
             'ci_high': ci_high,
@@ -1294,7 +1328,7 @@ def weighted_mean_with_ci(
             'min': np.min(values),
             'max': np.max(values),
         })
-    
+
     return pd.DataFrame(results).sort_values('mean', ascending=False).reset_index(drop=True)
 
 
@@ -1519,30 +1553,47 @@ def compare_best_rag_vs_direct(df: pd.DataFrame, metric: str = PRIMARY_METRIC,
     return pd.DataFrame(results)
 
 
-def identify_rag_success_factors(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict:
+def identify_rag_success_factors(
+    df: pd.DataFrame, metric: str = PRIMARY_METRIC, stratify_by: str = 'dataset',
+) -> dict:
     """
     Identify which factors predict RAG success (helping vs hurting).
+
+    When *stratify_by* is set, aggregates within each stratum first and then
+    averages across strata so that dataset difficulty doesn't confound results.
     """
     benefit_analysis = analyze_rag_benefit_distribution(df, metric)
     if not benefit_analysis:
         return {}
-    
+
     rag_df = benefit_analysis['rag_df']
-    
+
     factors = ['retriever_type', 'embedding_model', 'reranker', 'prompt', 'query_transform', 'top_k']
     available_factors = [f for f in factors if f in rag_df.columns]
-    
+
+    use_strata = stratify_by and stratify_by in rag_df.columns and rag_df[stratify_by].nunique() > 1
+
     success_factors = {}
     for factor in available_factors:
-        factor_success = rag_df.groupby(factor).agg({
-            'rag_helps': 'mean',
-            'rag_benefit': ['mean', 'std'],
-            'rag_benefit_pct': 'mean'
-        }).round(3)
-        factor_success.columns = ['pct_helps', 'mean_benefit', 'std_benefit', 'mean_benefit_pct']
+        if use_strata:
+            # Aggregate within each (factor, stratum), then average across strata
+            per_stratum = rag_df.groupby([factor, stratify_by]).agg({
+                'rag_helps': 'mean',
+                'rag_benefit': ['mean', 'std'],
+                'rag_benefit_pct': 'mean',
+            })
+            per_stratum.columns = ['pct_helps', 'mean_benefit', 'std_benefit', 'mean_benefit_pct']
+            factor_success = per_stratum.groupby(level=factor).mean().round(3)
+        else:
+            factor_success = rag_df.groupby(factor).agg({
+                'rag_helps': 'mean',
+                'rag_benefit': ['mean', 'std'],
+                'rag_benefit_pct': 'mean',
+            }).round(3)
+            factor_success.columns = ['pct_helps', 'mean_benefit', 'std_benefit', 'mean_benefit_pct']
         factor_success = factor_success.sort_values('pct_helps', ascending=False)
         success_factors[factor] = factor_success
-    
+
     return success_factors
 
 
@@ -1550,35 +1601,72 @@ def identify_rag_success_factors(df: pd.DataFrame, metric: str = PRIMARY_METRIC)
 # BOTTLENECK ANALYSIS
 # =============================================================================
 
-def identify_bottlenecks(df: pd.DataFrame, metric: str = PRIMARY_METRIC) -> dict:
+def identify_bottlenecks(
+    df: pd.DataFrame, metric: str = PRIMARY_METRIC, stratify_by: str = 'dataset',
+) -> dict:
     """
     Identify which RAG components contribute most to performance variance.
+
+    When *stratify_by* is set and the column exists with >1 value, the variance
+    decomposition is performed **within** each stratum and then averaged.  This
+    removes confounding from datasets of different difficulty levels.
     """
     rag_df = df[df['exp_type'] == 'rag']
-    
-    factors = ['model_short', 'retriever_type', 'embedding_model', 'reranker', 
+
+    factors = ['model_short', 'retriever_type', 'embedding_model', 'reranker',
                'prompt', 'query_transform', 'top_k']
-    
-    bottleneck_results = {}
-    total_var = rag_df[metric].var()
-    
-    if total_var == 0:
-        return {}
-    
-    for factor in factors:
-        if factor not in rag_df.columns or rag_df[factor].nunique() <= 1:
-            continue
-        
-        group_means = rag_df.groupby(factor)[metric].mean()
-        overall_mean = rag_df[metric].mean()
-        
-        between_group_var = np.sum(
-            (group_means - overall_mean)**2 * rag_df.groupby(factor).size() / len(rag_df)
-        )
-        
-        variance_explained = (between_group_var / total_var) * 100
-        bottleneck_results[factor] = variance_explained
-    
+
+    use_strata = stratify_by and stratify_by in rag_df.columns and rag_df[stratify_by].nunique() > 1
+
+    if use_strata:
+        strata = rag_df[stratify_by].unique()
+        per_stratum_results = []
+        for stratum_val in strata:
+            sdf = rag_df[rag_df[stratify_by] == stratum_val]
+            total_var = sdf[metric].var()
+            if total_var == 0 or len(sdf) < 3:
+                continue
+            stratum_dict = {}
+            for factor in factors:
+                if factor not in sdf.columns or sdf[factor].nunique() <= 1:
+                    continue
+                group_means = sdf.groupby(factor)[metric].mean()
+                overall_mean = sdf[metric].mean()
+                between_group_var = np.sum(
+                    (group_means - overall_mean) ** 2
+                    * sdf.groupby(factor).size() / len(sdf)
+                )
+                stratum_dict[factor] = (between_group_var / total_var) * 100
+            per_stratum_results.append(stratum_dict)
+
+        if not per_stratum_results:
+            return {}
+
+        # Average variance-explained across strata
+        all_factors = set()
+        for d in per_stratum_results:
+            all_factors.update(d.keys())
+        bottleneck_results = {}
+        for f in all_factors:
+            vals = [d[f] for d in per_stratum_results if f in d]
+            bottleneck_results[f] = np.mean(vals)
+    else:
+        total_var = rag_df[metric].var()
+        if total_var == 0:
+            return {}
+
+        bottleneck_results = {}
+        for factor in factors:
+            if factor not in rag_df.columns or rag_df[factor].nunique() <= 1:
+                continue
+            group_means = rag_df.groupby(factor)[metric].mean()
+            overall_mean = rag_df[metric].mean()
+            between_group_var = np.sum(
+                (group_means - overall_mean) ** 2
+                * rag_df.groupby(factor).size() / len(rag_df)
+            )
+            bottleneck_results[factor] = (between_group_var / total_var) * 100
+
     return dict(sorted(bottleneck_results.items(), key=lambda x: x[1], reverse=True))
 
 
@@ -1650,54 +1738,113 @@ def metric_correlation_matrix(
 # INTERACTION ANALYSIS
 # =============================================================================
 
-def analyze_interactions(df: pd.DataFrame, factor1: str, factor2: str, 
-                         metric: str = PRIMARY_METRIC) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+def analyze_interactions(
+    df: pd.DataFrame, factor1: str, factor2: str,
+    metric: str = PRIMARY_METRIC, stratify_by: str = 'dataset',
+) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
     """
     Analyze interaction effects between two RAG components.
+
+    When *stratify_by* is set, computes the interaction heatmap within each
+    stratum and then averages across strata to control for dataset difficulty.
     """
     rag_df = df[df['exp_type'] == 'rag'].copy()
-    
+
     if factor1 not in rag_df.columns or factor2 not in rag_df.columns:
         return None
-    
-    interaction = rag_df.groupby([factor1, factor2])[metric].agg(['mean', 'std', 'count']).reset_index()
-    interaction.columns = [factor1, factor2, 'mean', 'std', 'count']
-    
+
+    use_strata = stratify_by and stratify_by in rag_df.columns and rag_df[stratify_by].nunique() > 1
+
+    if use_strata:
+        # Compute mean within each (factor1, factor2, stratum), then average
+        per_stratum = rag_df.groupby([factor1, factor2, stratify_by])[metric].agg(
+            ['mean', 'std', 'count']
+        ).reset_index()
+        interaction = per_stratum.groupby([factor1, factor2]).agg(
+            mean=('mean', 'mean'),
+            std=('std', 'mean'),
+            count=('count', 'sum'),
+        ).reset_index()
+    else:
+        interaction = rag_df.groupby([factor1, factor2])[metric].agg(
+            ['mean', 'std', 'count']
+        ).reset_index()
+        interaction.columns = [factor1, factor2, 'mean', 'std', 'count']
+
     pivot = interaction.pivot(index=factor1, columns=factor2, values='mean')
-    
+
     return pivot, interaction
 
 
-def find_synergistic_combinations(df: pd.DataFrame, factor1: str, factor2: str,
-                                   metric: str = PRIMARY_METRIC) -> List[dict]:
+def find_synergistic_combinations(
+    df: pd.DataFrame, factor1: str, factor2: str,
+    metric: str = PRIMARY_METRIC, stratify_by: str = 'dataset',
+) -> List[dict]:
     """
     Identify synergistic and redundant component combinations.
+
+    When *stratify_by* is set, interaction effects are computed within each
+    stratum and averaged, preventing dataset difficulty from biasing the
+    synergy/redundancy classification.
     """
     rag_df = df[df['exp_type'] == 'rag'].copy()
-    
+
     if factor1 not in rag_df.columns or factor2 not in rag_df.columns:
         return []
-    
-    overall_mean = rag_df[metric].mean()
-    f1_means = rag_df.groupby(factor1)[metric].mean()
-    f2_means = rag_df.groupby(factor2)[metric].mean()
-    combo_means = rag_df.groupby([factor1, factor2])[metric].mean()
-    
-    results = []
-    for (v1, v2), actual in combo_means.items():
-        expected = overall_mean + (f1_means[v1] - overall_mean) + (f2_means[v2] - overall_mean)
-        interaction_effect = actual - expected
-        
-        results.append({
-            factor1: v1,
-            factor2: v2,
-            'actual': actual,
-            'expected': expected,
-            'interaction_effect': interaction_effect,
-            'synergy': 'Synergistic' if interaction_effect > 0.01 else 
-                       'Redundant' if interaction_effect < -0.01 else 'Neutral'
-        })
-    
+
+    use_strata = stratify_by and stratify_by in rag_df.columns and rag_df[stratify_by].nunique() > 1
+
+    if use_strata:
+        strata = rag_df[stratify_by].unique()
+        # Accumulate interaction effects per combo across strata
+        combo_effects: Dict[Tuple, List[dict]] = defaultdict(list)
+        for stratum_val in strata:
+            sdf = rag_df[rag_df[stratify_by] == stratum_val]
+            if len(sdf) < 3:
+                continue
+            s_overall = sdf[metric].mean()
+            s_f1 = sdf.groupby(factor1)[metric].mean()
+            s_f2 = sdf.groupby(factor2)[metric].mean()
+            s_combo = sdf.groupby([factor1, factor2])[metric].mean()
+            for (v1, v2), actual in s_combo.items():
+                if v1 not in s_f1.index or v2 not in s_f2.index:
+                    continue
+                expected = s_overall + (s_f1[v1] - s_overall) + (s_f2[v2] - s_overall)
+                combo_effects[(v1, v2)].append({
+                    'actual': actual, 'expected': expected,
+                    'interaction_effect': actual - expected,
+                })
+
+        results = []
+        for (v1, v2), effects in combo_effects.items():
+            avg_actual = np.mean([e['actual'] for e in effects])
+            avg_expected = np.mean([e['expected'] for e in effects])
+            avg_ie = np.mean([e['interaction_effect'] for e in effects])
+            results.append({
+                factor1: v1, factor2: v2,
+                'actual': avg_actual, 'expected': avg_expected,
+                'interaction_effect': avg_ie,
+                'synergy': 'Synergistic' if avg_ie > 0.01 else
+                           'Redundant' if avg_ie < -0.01 else 'Neutral',
+            })
+    else:
+        overall_mean = rag_df[metric].mean()
+        f1_means = rag_df.groupby(factor1)[metric].mean()
+        f2_means = rag_df.groupby(factor2)[metric].mean()
+        combo_means = rag_df.groupby([factor1, factor2])[metric].mean()
+
+        results = []
+        for (v1, v2), actual in combo_means.items():
+            expected = overall_mean + (f1_means[v1] - overall_mean) + (f2_means[v2] - overall_mean)
+            interaction_effect = actual - expected
+            results.append({
+                factor1: v1, factor2: v2,
+                'actual': actual, 'expected': expected,
+                'interaction_effect': interaction_effect,
+                'synergy': 'Synergistic' if interaction_effect > 0.01 else
+                           'Redundant' if interaction_effect < -0.01 else 'Neutral',
+            })
+
     return sorted(results, key=lambda x: x['interaction_effect'], reverse=True)
 
 
