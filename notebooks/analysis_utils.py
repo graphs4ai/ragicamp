@@ -107,6 +107,11 @@ DATASET_ALIASES = {
     'natural_questions': 'nq',
 }
 
+# Per-dataset styling — consistent colours/markers/labels across all notebooks
+DATASET_COLORS = {'nq': '#1f77b4', 'triviaqa': '#ff7f0e', 'hotpotqa': '#2ca02c'}
+DATASET_MARKERS = {'nq': 'o', 'triviaqa': 's', 'hotpotqa': '^'}
+DATASET_LABELS = {'nq': 'Natural Questions', 'triviaqa': 'TriviaQA', 'hotpotqa': 'HotpotQA'}
+
 # Directories to skip when scanning experiment outputs
 SKIP_DIRS = {
     '_archived_fake_reranked', '_tainted', '_collisions', '_incomplete',
@@ -596,11 +601,15 @@ def parse_experiment_name(name: str) -> Dict[str, Any]:
             config['model_short'] = 'Phi-3-mini'
 
         if name.startswith('iterative_'):
-            config['retriever_type'] = 'iterative'
+            # iterative_rag is an *agent strategy*, not a retriever type.
+            # Detect the underlying retriever from the name; leave None if unknown
+            # so that metadata.json can override it.
+            config['retriever_type'] = _retriever_type_from_name(name)
             iter_match = re.search(r'(\d+)iter', name)
             config['query_transform'] = f"iterative_{iter_match.group(1)}" if iter_match else 'iterative'
         elif name.startswith('selfrag_'):
-            config['retriever_type'] = 'self_rag'
+            # self_rag is an *agent strategy*, not a retriever type.
+            config['retriever_type'] = _retriever_type_from_name(name)
             config['query_transform'] = 'self_rag'
         elif name.startswith('premium_'):
             config['retriever_type'] = 'hybrid'
@@ -1332,6 +1341,39 @@ def weighted_mean_with_ci(
     return pd.DataFrame(results).sort_values('mean', ascending=False).reset_index(drop=True)
 
 
+def normalize_within_dataset(
+    df: pd.DataFrame,
+    metric: str,
+    method: str = 'zscore',
+    dataset_col: str = 'dataset',
+) -> pd.Series:
+    """Normalise a metric within each dataset to remove difficulty confounding.
+
+    Args:
+        df: DataFrame with per-experiment rows.
+        metric: Column name to normalise.
+        method: ``'zscore'`` (mean=0, std=1) or ``'minmax'`` (0–1 range).
+        dataset_col: Column identifying the dataset stratum.
+
+    Returns:
+        A Series aligned to *df*'s index with the normalised values.
+    """
+    result = pd.Series(np.nan, index=df.index, dtype=float)
+    for _ds, grp in df.groupby(dataset_col):
+        vals = grp[metric]
+        if method == 'zscore':
+            std = vals.std()
+            normed = (vals - vals.mean()) / std if std > 0 else vals * 0.0
+        elif method == 'minmax':
+            vmin, vmax = vals.min(), vals.max()
+            span = vmax - vmin
+            normed = (vals - vmin) / span if span > 0 else vals * 0.0
+        else:
+            raise ValueError(f"Unknown method: {method!r}")
+        result.loc[grp.index] = normed
+    return result
+
+
 def effect_size(baseline_values: np.ndarray, treatment_values: np.ndarray) -> Tuple[float, float, str]:
     """
     Compute Cohen's d effect size and interpret it.
@@ -1948,6 +1990,56 @@ def plot_interaction_heatmap(df: pd.DataFrame, factor1: str, factor2: str,
     ax.set_ylabel(factor1)
 
     return ax
+
+
+def facet_by_dataset(
+    df: pd.DataFrame,
+    plot_fn,
+    figsize_per_panel: Tuple[float, float] = (6, 5),
+    sharey: bool = True,
+    suptitle: str = None,
+    dataset_col: str = 'dataset',
+):
+    """Create a 1×N subplot grid with one panel per dataset.
+
+    Args:
+        df: DataFrame containing a *dataset_col* column.
+        plot_fn: Callable ``(ax, dataset_df, dataset_name, **kwargs) -> None``.
+        figsize_per_panel: ``(width, height)`` per subplot panel.
+        sharey: Whether to share the y-axis across panels.
+        suptitle: Optional super-title above all panels.
+        dataset_col: Column identifying dataset strata.
+
+    Returns:
+        ``(fig, axes)`` — the matplotlib Figure and array of Axes.
+    """
+    datasets = sorted(df[dataset_col].dropna().unique())
+    n = len(datasets)
+    if n == 0:
+        fig, ax = plt.subplots(figsize=figsize_per_panel)
+        return fig, [ax]
+
+    fig, axes = plt.subplots(
+        1, n,
+        figsize=(figsize_per_panel[0] * n, figsize_per_panel[1]),
+        sharey=sharey,
+    )
+    if n == 1:
+        axes = [axes]
+    else:
+        axes = list(axes)
+
+    for ax, ds in zip(axes, datasets):
+        ds_df = df[df[dataset_col] == ds]
+        label = DATASET_LABELS.get(ds, ds)
+        plot_fn(ax, ds_df, ds)
+        ax.set_title(label)
+
+    if suptitle:
+        fig.suptitle(suptitle, y=1.02, fontsize=14)
+
+    fig.tight_layout()
+    return fig, axes
 
 
 # =============================================================================
