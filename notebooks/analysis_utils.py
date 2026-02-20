@@ -1494,10 +1494,10 @@ def compare_best_rag_vs_direct(df: pd.DataFrame, metric: str = PRIMARY_METRIC,
             if not isinstance(group_vals, tuple):
                 group_vals = (group_vals,)
             
-            direct_mask = pd.Series([True] * len(direct_df))
+            direct_mask = pd.Series(True, index=direct_df.index)
             for col, val in zip(group_cols, group_vals):
                 direct_mask &= (direct_df[col] == val)
-            
+
             direct_group = direct_df[direct_mask]
             if len(direct_group) == 0:
                 continue
